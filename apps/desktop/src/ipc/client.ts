@@ -3,6 +3,8 @@ import { listen } from '@tauri-apps/api/event';
 import type {
   ConnectionDraft,
   ConnectionProfile,
+  MetaNode,
+  MetadataRequest,
   PasswordChange,
   ServerInfo,
   SessionStatus,
@@ -38,6 +40,8 @@ export interface Backend {
   sessionsList(): Promise<SessionStatus[]>;
   /** Subscribes to session lifecycle events; resolves to an unsubscribe function. */
   onConnectionStatus(cb: (e: StatusEvent) => void): Promise<() => void>;
+  /** One level of the explorer tree for a connected data source. */
+  metadataChildren(id: string, request: MetadataRequest): Promise<MetaNode[]>;
 }
 
 const tauriBackend: Backend = {
@@ -58,6 +62,7 @@ const tauriBackend: Backend = {
   connectionDisconnect: (id) => invoke<null>('connection_disconnect', { id }),
   sessionsList: () => invoke<SessionStatus[]>('sessions_list'),
   onConnectionStatus: (cb) => listen<StatusEvent>('connection-status', (e) => cb(e.payload)),
+  metadataChildren: (id, request) => invoke<MetaNode[]>('metadata_children', { id, request }),
 };
 
 export function isTauri(): boolean {

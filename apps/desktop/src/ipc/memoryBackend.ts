@@ -93,6 +93,7 @@ export function createMemoryBackend(): Backend {
     connectionDisconnect: async () => null,
     sessionsList: async () => [],
     onConnectionStatus: async () => () => {},
+    metadataChildren: () => fail('not_connected', 'This data source is not connected.'),
     connectionDelete: async (id) => {
       if (!find(id)) return fail('not_found', 'data source not found');
       connections = connections.filter((c) => c.id !== id);

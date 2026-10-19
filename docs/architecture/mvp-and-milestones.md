@@ -68,8 +68,18 @@ files" applies from M3.1.
     test only (hard to provoke reliably). Session registry emits `connection-status` events;
     the UI shows status dots, Connect/Disconnect, a password prompt, and copyable error details.
   - Not yet: custom CA / client certificates (REQ-CONN-08), SSH tunnels (REQ-CONN-07).
-- **M2.3 Metadata tree**: lazy schema → kind → object → children; refresh; filter.
+- **M2.3 Metadata tree** ✅: lazy schema → kind → object → children; refresh; filter.
   - **AC**: 1,000-table schema expands in < 1 s after the first load; refresh picks up a new table.
+  - Done: engine-neutral `MetadataRequest`/`MetaNode` (each node carries the request for its
+    children); PostgreSQL catalog queries for schemas, Tables/Views/Materialized views (counts),
+    objects, columns (type, default, pk, not null) and indexes (definition, primary/unique), all
+    parameterized. Measured: 1,000 tables load in ~25 ms from the disposable server; the UI renders
+    the 1,000-row level well under the 1 s budget in jsdom (an upper bound for WebKit). Refresh
+    (Ctrl+F5) keeps expansion and reloads visible levels; filter searches loaded nodes and reveals
+    their ancestors; a lost or closed session clears that source's tree. Keyboard: ↑/↓/Home/End,
+    → expand/enter, ← collapse/parent, Enter, Shift+F10.
+  - Not yet: keys/foreign keys, routines, sequences, DDL view (Phase 4), tree virtualization (not
+    needed at 1,000 rows; revisit with the WebKitGTK budget test in Phase 3).
 
 ### Phase 3 — SQL execution
 

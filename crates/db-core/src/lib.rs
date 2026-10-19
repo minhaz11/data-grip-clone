@@ -1,11 +1,16 @@
 //! Engine-neutral adapter contract (ADR-0002). The UI and app layer only see these types; each
 //! engine crate (`quarry-db-postgres`, later MySQL/SQLite) implements [`DatabaseAdapter`].
 
+mod metadata;
+
 use std::fmt;
+use std::sync::Arc;
 use std::time::Duration;
 
 use quarry_secrets::SecretString;
 use serde::Serialize;
+
+pub use metadata::{MetaKind, MetaNode, MetadataRequest, ObjectType};
 
 /// TLS policy, with libpq semantics: `Prefer`/`Require` encrypt without verifying the certificate;
 /// `VerifyCa` checks the chain; `VerifyFull` also checks the host name.
@@ -118,14 +123,39 @@ pub trait DatabaseAdapter: Send + Sync {
         &self,
         params: &ConnectParams,
         on_close: OnClose,
-    ) -> Result<Box<dyn Session>, ConnectError>;
+    ) -> Result<Arc<dyn Session>, ConnectError>;
 }
 
+/// A failure while using an open session (as opposed to [`ConnectError`] while opening one).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DbError {
+    pub message: String,
+    pub detail: Option<String>,
+    pub hint: Option<String>,
+    pub sqlstate: Option<String>,
+    /// The session is gone (server closed it, network dropped); reconnecting is the remedy.
+    pub connection_lost: bool,
+}
+
+impl fmt::Display for DbError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for DbError {}
+
+/// An open connection. Shared (`Arc`) so metadata and, later, query execution can run without
+/// holding the session registry lock.
 #[async_trait::async_trait]
 pub trait Session: Send + Sync {
     fn info(&self) -> &ServerInfo;
     fn is_closed(&self) -> bool;
-    async fn close(self: Box<Self>);
+    /// Children of one tree level. Every query is app-authored and parameterized.
+    async fn metadata(&self, request: &MetadataRequest) -> Result<Vec<MetaNode>, DbError>;
+    /// Ends the session; waits for in-flight calls to finish first. Idempotent.
+    async fn close(&self);
 }
 
 #[cfg(test)]

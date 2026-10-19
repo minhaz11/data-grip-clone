@@ -1,6 +1,7 @@
 //! PostgreSQL adapter (ADR-0002): tokio-postgres over rustls.
 
 mod errors;
+mod metadata;
 mod tls;
 
 use std::net::SocketAddr;
@@ -9,9 +10,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use quarry_db_core::{
-    ConnectError, ConnectErrorKind, ConnectParams, DatabaseAdapter, OnClose, ServerInfo, Session,
-    TlsMode,
+    ConnectError, ConnectErrorKind, ConnectParams, DatabaseAdapter, DbError, MetaNode,
+    MetadataRequest, OnClose, ServerInfo, Session, TlsMode,
 };
+use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tokio_postgres::Client;
 use tokio_postgres::config::SslMode;
@@ -28,7 +30,7 @@ impl DatabaseAdapter for PostgresAdapter {
     async fn test(&self, params: &ConnectParams) -> Result<ServerInfo, ConnectError> {
         let session = open(params, None).await?;
         let info = session.info.clone();
-        Box::new(session).close().await;
+        session.close().await;
         Ok(info)
     }
 
@@ -36,16 +38,28 @@ impl DatabaseAdapter for PostgresAdapter {
         &self,
         params: &ConnectParams,
         on_close: OnClose,
-    ) -> Result<Box<dyn Session>, ConnectError> {
-        Ok(Box::new(open(params, Some(on_close)).await?))
+    ) -> Result<Arc<dyn Session>, ConnectError> {
+        Ok(Arc::new(open(params, Some(on_close)).await?))
     }
 }
 
 pub struct PgSession {
-    client: Client,
+    /// `None` once closed. Calls hold a read guard, so `close` waits for in-flight queries.
+    client: RwLock<Option<Client>>,
     info: ServerInfo,
     closed: Arc<AtomicBool>,
-    task: JoinHandle<()>,
+    task: Mutex<Option<JoinHandle<()>>>,
+}
+
+impl PgSession {
+    async fn with_client<T>(
+        &self,
+        f: impl AsyncFnOnce(&Client) -> Result<T, tokio_postgres::Error>,
+    ) -> Result<T, DbError> {
+        let guard = self.client.read().await;
+        let client = guard.as_ref().ok_or_else(errors::session_closed)?;
+        f(client).await.map_err(|e| errors::db_error(&e))
+    }
 }
 
 #[async_trait::async_trait]
@@ -55,14 +69,26 @@ impl Session for PgSession {
     }
 
     fn is_closed(&self) -> bool {
-        self.closed.load(Ordering::SeqCst) || self.client.is_closed()
+        self.closed.load(Ordering::SeqCst)
+            || self
+                .client
+                .try_read()
+                .is_ok_and(|c| c.as_ref().is_none_or(Client::is_closed))
     }
 
-    async fn close(self: Box<Self>) {
+    async fn metadata(&self, request: &MetadataRequest) -> Result<Vec<MetaNode>, DbError> {
+        self.with_client(async |client| metadata::load(client, request).await)
+            .await
+    }
+
+    async fn close(&self) {
         // Mark first so the connection task reports a deliberate close, not a failure.
         self.closed.store(true, Ordering::SeqCst);
-        drop(self.client);
-        let _ = tokio::time::timeout(Duration::from_secs(2), self.task).await;
+        // Dropping the client makes the connection send Terminate and finish cleanly.
+        drop(self.client.write().await.take());
+        if let Some(task) = self.task.lock().await.take() {
+            let _ = tokio::time::timeout(Duration::from_secs(2), task).await;
+        }
     }
 }
 
@@ -173,9 +199,9 @@ async fn open(
         latency_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
     };
     Ok(PgSession {
-        client,
+        client: RwLock::new(Some(client)),
         info,
         closed,
-        task,
+        task: Mutex::new(Some(task)),
     })
 }

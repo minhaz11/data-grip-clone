@@ -19,6 +19,7 @@
     "allow-connection-test",
     "allow-connection-connect",
     "allow-connection-disconnect",
-    "allow-sessions-list"
+    "allow-sessions-list",
+    "allow-metadata-children"
   ]
 }

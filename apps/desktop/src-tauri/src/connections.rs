@@ -71,7 +71,7 @@ pub async fn connection_delete(
 
 // ---- Connectivity (M2.2) ----
 
-use quarry_db_core::ServerInfo;
+use quarry_db_core::{MetaNode, MetadataRequest, ServerInfo};
 use tauri::AppHandle;
 
 use crate::sessions::{SessionStatus, Sessions};
@@ -123,4 +123,14 @@ pub async fn connection_disconnect(sessions: Live<'_>, id: String) -> Result<(),
 #[tauri::command]
 pub async fn sessions_list(sessions: Live<'_>) -> Result<Vec<SessionStatus>, AppError> {
     Ok(sessions.list().await)
+}
+
+/// One level of the explorer tree for a connected data source.
+#[tauri::command]
+pub async fn metadata_children(
+    sessions: Live<'_>,
+    id: String,
+    request: MetadataRequest,
+) -> Result<Vec<MetaNode>, AppError> {
+    sessions.metadata(&id, &request).await
 }

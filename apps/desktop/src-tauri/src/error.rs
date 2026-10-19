@@ -1,5 +1,5 @@
 use quarry_connections::ConnectionError;
-use quarry_db_core::{ConnectError, ConnectErrorKind};
+use quarry_db_core::{ConnectError, ConnectErrorKind, DbError};
 use quarry_store::StoreError;
 use serde::Serialize;
 
@@ -49,6 +49,26 @@ impl From<ConnectionError> for AppError {
             ConnectionError::Secret(e) => Self::new("credential_store", e.to_string()),
             ConnectionError::Invalid(m) => Self::new("invalid", m),
             ConnectionError::NotFound => Self::new("not_found", err.to_string()),
+        }
+    }
+}
+
+impl From<DbError> for AppError {
+    fn from(e: DbError) -> Self {
+        let message = match &e.detail {
+            Some(d) => format!("{} ({d})", e.message),
+            None => e.message,
+        };
+        Self {
+            kind: if e.connection_lost {
+                "connection_lost"
+            } else {
+                "db"
+            },
+            message,
+            hint: e.hint,
+            sqlstate: e.sqlstate,
+            connect_kind: None,
         }
     }
 }

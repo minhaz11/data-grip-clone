@@ -4,7 +4,7 @@ use std::error::Error as _;
 use std::io;
 use std::time::Duration;
 
-use quarry_db_core::{ConnectError, ConnectErrorKind as Kind, ConnectParams};
+use quarry_db_core::{ConnectError, ConnectErrorKind as Kind, ConnectParams, DbError};
 
 pub fn err(kind: Kind, message: impl Into<String>, hint: impl Into<String>) -> ConnectError {
     ConnectError {
@@ -12,6 +12,38 @@ pub fn err(kind: Kind, message: impl Into<String>, hint: impl Into<String>) -> C
         message: message.into(),
         hint: hint.into(),
         sqlstate: None,
+    }
+}
+
+/// Error from a query on an open session.
+pub fn db_error(e: &tokio_postgres::Error) -> DbError {
+    match e.as_db_error() {
+        Some(db) => DbError {
+            message: db.message().to_owned(),
+            detail: db.detail().map(str::to_owned),
+            hint: db.hint().map(str::to_owned),
+            sqlstate: Some(db.code().code().to_owned()),
+            connection_lost: false,
+        },
+        None => DbError {
+            message: e.to_string(),
+            detail: None,
+            hint: e
+                .is_closed()
+                .then(|| "Reconnect to the data source.".to_owned()),
+            sqlstate: None,
+            connection_lost: e.is_closed(),
+        },
+    }
+}
+
+pub fn session_closed() -> DbError {
+    DbError {
+        message: "The connection is closed.".into(),
+        detail: None,
+        hint: Some("Reconnect to the data source.".into()),
+        sqlstate: None,
+        connection_lost: true,
     }
 }
 

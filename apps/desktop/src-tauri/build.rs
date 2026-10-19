@@ -15,6 +15,7 @@ fn main() {
         "connection_connect",
         "connection_disconnect",
         "sessions_list",
+        "metadata_children",
     ];
     tauri_build::try_build(
         tauri_build::Attributes::new()

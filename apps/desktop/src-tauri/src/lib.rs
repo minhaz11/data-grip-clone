@@ -41,6 +41,7 @@ pub fn run() {
             connections::connection_connect,
             connections::connection_disconnect,
             connections::sessions_list,
+            connections::metadata_children,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Quarry");

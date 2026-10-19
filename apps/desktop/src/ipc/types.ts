@@ -90,3 +90,29 @@ export type StatusEvent =
   | { state: 'connected'; id: string; info: ServerInfo }
   | { state: 'disconnected'; id: string }
   | { state: 'lost'; id: string; reason: string };
+
+// ---- Metadata tree (mirrors quarry_db_core::metadata) ----
+
+export type ObjectType = 'table' | 'view' | 'materialized_view';
+
+/** How to load one tree level; opaque to the UI, which passes it back as given. */
+export type MetadataRequest =
+  | { level: 'schemas' }
+  | { level: 'schemaGroups'; schema: string }
+  | { level: 'objects'; schema: string; types: ObjectType[] }
+  | { level: 'objectGroups'; schema: string; name: string; objectType: ObjectType }
+  | { level: 'columns'; schema: string; table: string }
+  | { level: 'indexes'; schema: string; table: string };
+
+export type MetaKind =
+  'schema' | 'group' | 'table' | 'view' | 'materialized_view' | 'column' | 'index';
+
+export interface MetaNode {
+  key: string;
+  kind: MetaKind;
+  name: string;
+  detail?: string;
+  count?: number;
+  flags?: string[];
+  children?: MetadataRequest;
+}

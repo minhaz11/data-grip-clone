@@ -3,7 +3,9 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
-use quarry_db_core::{ConnectParams, DatabaseAdapter, ServerInfo, Session};
+use quarry_db_core::{
+    ConnectParams, DatabaseAdapter, MetaNode, MetadataRequest, ServerInfo, Session,
+};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
@@ -38,7 +40,7 @@ pub struct SessionStatus {
 
 pub struct Sessions {
     adapter: Arc<dyn DatabaseAdapter>,
-    live: tokio::sync::Mutex<HashMap<String, Box<dyn Session>>>,
+    live: tokio::sync::Mutex<HashMap<String, Arc<dyn Session>>>,
     connecting: Mutex<HashSet<String>>,
 }
 
@@ -83,7 +85,8 @@ impl Sessions {
 
         let session = result?;
         let info = session.info().clone();
-        if let Some(stale) = self.live.lock().await.insert(id.to_owned(), session) {
+        let stale = self.live.lock().await.insert(id.to_owned(), session);
+        if let Some(stale) = stale {
             stale.close().await;
         }
         let _ = app.emit(
@@ -94,6 +97,25 @@ impl Sessions {
             },
         );
         Ok(info)
+    }
+
+    /// The open session for `id`, if any. The registry lock is released before the caller uses it.
+    async fn get(&self, id: &str) -> Result<Arc<dyn Session>, AppError> {
+        self.live
+            .lock()
+            .await
+            .get(id)
+            .filter(|s| !s.is_closed())
+            .cloned()
+            .ok_or_else(|| AppError::new("not_connected", "This data source is not connected."))
+    }
+
+    pub async fn metadata(
+        &self,
+        id: &str,
+        request: &MetadataRequest,
+    ) -> Result<Vec<MetaNode>, AppError> {
+        Ok(self.get(id).await?.metadata(request).await?)
     }
 
     /// Closes a session if one is open. Idempotent.
