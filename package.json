@@ -1,0 +1,23 @@
+{
+  "name": "quarry",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm -w apps/desktop run dev",
+    "tauri": "npm -w apps/desktop run tauri",
+    "build": "npm -w apps/desktop run build",
+    "lint": "npm -w apps/desktop run lint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "npm -w apps/desktop run typecheck",
+    "test": "npm -w apps/desktop run test"
+  },
+  "devDependencies": {
+    "prettier": "3.9.10"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

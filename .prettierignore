@@ -1,0 +1,7 @@
+node_modules
+dist
+target
+coverage
+docs/reverse-engineering/evidence
+apps/desktop/src-tauri/gen
+package-lock.json

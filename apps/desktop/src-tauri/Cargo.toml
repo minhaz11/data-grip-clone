@@ -1,0 +1,23 @@
+[package]
+name = "quarry-desktop"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Quarry desktop shell (Tauri)."
+
+[lib]
+name = "quarry_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.3", features = [] }
+
+[dependencies]
+tauri = { version = "2.12.4", features = [] }
+quarry-store.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
