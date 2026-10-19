@@ -3,8 +3,11 @@
 
 use std::sync::Arc;
 
+use std::time::Duration;
+
+use quarry_db_core::{ConnectParams, TlsMode};
 use quarry_secrets::{CredentialStore, MemoryStore, SecretError, SecretString};
-use quarry_store::{ConnectionDraft, ConnectionProfile, SaveMode, Store, StoreError};
+use quarry_store::{ConnectionDraft, ConnectionProfile, SaveMode, SslMode, Store, StoreError};
 use serde::Deserialize;
 
 #[derive(Debug, thiserror::Error)]
@@ -145,6 +148,24 @@ impl ConnectionManager {
         self.get_secret(id, p.draft.save_mode)
     }
 
+    /// Password for a connect/test attempt: an explicit one (typed or prompted) wins; otherwise the
+    /// stored secret of `id`, if any. `None` lets the server decide (trust/peer auth, or prompt).
+    pub fn resolve_password(
+        &self,
+        id: Option<&str>,
+        explicit: Option<SecretString>,
+    ) -> Result<Option<SecretString>, ConnectionError> {
+        match (explicit, id) {
+            (Some(p), _) => Ok(Some(p)),
+            (None, Some(id)) => self.password_for_connect(id),
+            (None, None) => Ok(None),
+        }
+    }
+
+    pub fn profile(&self, id: &str) -> Result<ConnectionProfile, ConnectionError> {
+        self.reload(id)
+    }
+
     fn put_secret(
         &self,
         id: &str,
@@ -198,6 +219,32 @@ impl ConnectionManager {
         }
         Ok(p)
     }
+}
+
+/// Driver parameters for a profile. Validates the draft so tests of unsaved drafts get the same
+/// checks as saved profiles.
+pub fn connect_params(
+    draft: ConnectionDraft,
+    password: Option<SecretString>,
+) -> Result<ConnectParams, ConnectionError> {
+    let d = draft.normalized()?;
+    Ok(ConnectParams {
+        host: d.host,
+        port: d.port,
+        database: d.database,
+        username: d.username,
+        password,
+        tls: match d.ssl_mode {
+            SslMode::Disable => TlsMode::Disable,
+            SslMode::Prefer => TlsMode::Prefer,
+            SslMode::Require => TlsMode::Require,
+            SslMode::VerifyCa => TlsMode::VerifyCa,
+            SslMode::VerifyFull => TlsMode::VerifyFull,
+        },
+        connect_timeout: Duration::from_secs(u64::from(d.connect_timeout_secs)),
+        read_only: d.read_only,
+        application_name: "Quarry".into(),
+    })
 }
 
 #[cfg(test)]

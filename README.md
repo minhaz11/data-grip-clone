@@ -29,6 +29,17 @@ npm run format:check && npm run lint && npm run typecheck && npm test
 cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
 ```
 
+## Integration tests (disposable PostgreSQL)
+
+```bash
+scripts/test-pg.sh up                               # quarry-test-pg on 127.0.0.1:55432, TLS on, fresh random password
+cargo test -p quarry-db-postgres -- --ignored
+scripts/test-pg.sh down
+```
+
+The harness refuses any endpoint other than `127.0.0.1:55432`, so it can never touch other
+databases. Credentials and the self-signed certificate live in `target/test-pg/` (gitignored).
+
 ## Layout
 
 | Path                       | Purpose                                                |

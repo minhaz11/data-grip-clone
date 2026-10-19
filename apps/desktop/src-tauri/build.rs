@@ -11,6 +11,10 @@ fn main() {
         "connection_update",
         "connection_duplicate",
         "connection_delete",
+        "connection_test",
+        "connection_connect",
+        "connection_disconnect",
+        "sessions_list",
     ];
     tauri_build::try_build(
         tauri_build::Attributes::new()

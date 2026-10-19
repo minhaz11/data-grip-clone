@@ -1,9 +1,13 @@
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import type {
   ConnectionDraft,
   ConnectionProfile,
   PasswordChange,
+  ServerInfo,
+  SessionStatus,
   Settings,
+  StatusEvent,
   WorkspaceState,
 } from './types';
 import { createMemoryBackend } from './memoryBackend';
@@ -23,6 +27,17 @@ export interface Backend {
   ): Promise<ConnectionProfile>;
   connectionDuplicate(id: string): Promise<ConnectionProfile>;
   connectionDelete(id: string): Promise<null>;
+  /** Tests a possibly unsaved draft; `id` reuses that profile's stored password. */
+  connectionTest(
+    draft: ConnectionDraft,
+    id: string | null,
+    password: string | null,
+  ): Promise<ServerInfo>;
+  connectionConnect(id: string, password: string | null): Promise<ServerInfo>;
+  connectionDisconnect(id: string): Promise<null>;
+  sessionsList(): Promise<SessionStatus[]>;
+  /** Subscribes to session lifecycle events; resolves to an unsubscribe function. */
+  onConnectionStatus(cb: (e: StatusEvent) => void): Promise<() => void>;
 }
 
 const tauriBackend: Backend = {
@@ -37,6 +52,12 @@ const tauriBackend: Backend = {
     invoke<ConnectionProfile>('connection_update', { id, draft, password }),
   connectionDuplicate: (id) => invoke<ConnectionProfile>('connection_duplicate', { id }),
   connectionDelete: (id) => invoke<null>('connection_delete', { id }),
+  connectionTest: (draft, id, password) =>
+    invoke<ServerInfo>('connection_test', { draft, id, password }),
+  connectionConnect: (id, password) => invoke<ServerInfo>('connection_connect', { id, password }),
+  connectionDisconnect: (id) => invoke<null>('connection_disconnect', { id }),
+  sessionsList: () => invoke<SessionStatus[]>('sessions_list'),
+  onConnectionStatus: (cb) => listen<StatusEvent>('connection-status', (e) => cb(e.payload)),
 };
 
 export function isTauri(): boolean {

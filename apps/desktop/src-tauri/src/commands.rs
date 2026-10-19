@@ -14,10 +14,7 @@ where
     let store = Arc::clone(store);
     tauri::async_runtime::spawn_blocking(move || f(&store))
         .await
-        .map_err(|e| AppError {
-            kind: "internal",
-            message: format!("storage task failed: {e}"),
-        })?
+        .map_err(|e| AppError::new("internal", format!("storage task failed: {e}")))?
         .map_err(AppError::from)
 }
 

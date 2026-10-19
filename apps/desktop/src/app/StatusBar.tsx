@@ -1,11 +1,28 @@
 import { useWorkspace } from './workspaceStore';
 import { useConnections } from '../features/connections/connectionsStore';
 import { effectiveColor } from '../features/connections/model';
+import { useSessions, type SessionState } from '../features/connections/sessionsStore';
+
+function sessionText(s: SessionState | undefined): string {
+  switch (s?.state) {
+    case 'connected':
+      return `connected · PostgreSQL ${s.info.serverVersion}`;
+    case 'connecting':
+      return 'connecting…';
+    case 'lost':
+      return 'connection lost';
+    case 'failed':
+      return 'connection failed';
+    default:
+      return 'not connected';
+  }
+}
 
 export function StatusBar({ theme }: { theme: 'light' | 'dark' }) {
   const caret = useWorkspace((s) => s.caret);
   const hasActiveTab = useWorkspace((s) => s.activeTabId !== null);
   const selected = useConnections((s) => s.items.find((c) => c.id === s.selectedId));
+  const session = useSessions((s) => (selected ? s.byId[selected.id] : undefined));
   const color = selected ? effectiveColor(selected) : null;
 
   return (
@@ -24,6 +41,7 @@ export function StatusBar({ theme }: { theme: 'light' | 'dark' }) {
           )}
           {selected.name}
           {selected.readOnly && <span> (read-only)</span>}
+          <span> · {sessionText(session)}</span>
         </span>
       ) : (
         <span>No data source selected</span>

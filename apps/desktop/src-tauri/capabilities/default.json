@@ -15,6 +15,10 @@
     "allow-connection-create",
     "allow-connection-update",
     "allow-connection-duplicate",
-    "allow-connection-delete"
+    "allow-connection-delete",
+    "allow-connection-test",
+    "allow-connection-connect",
+    "allow-connection-disconnect",
+    "allow-sessions-list"
   ]
 }

@@ -46,3 +46,8 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      # Integration tests against a disposable PostgreSQL (127.0.0.1:55432, throwaway credentials).
+      - run: scripts/test-pg.sh up
+      - run: cargo test -p quarry-db-postgres -- --ignored
+      - if: always()
+        run: scripts/test-pg.sh down

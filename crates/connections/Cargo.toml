@@ -9,6 +9,7 @@ description = "Connection manager: profile CRUD with consistent secret handling.
 [dependencies]
 quarry-store.workspace = true
 quarry-secrets.workspace = true
+quarry-db-core.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 uuid = { version = "1.28.0", features = ["v4"] }

@@ -1,10 +1,12 @@
 mod commands;
 mod connections;
 mod error;
+mod sessions;
 
 use std::sync::Arc;
 
 use quarry_connections::ConnectionManager;
+use quarry_db_postgres::PostgresAdapter;
 use quarry_secrets::KeyringStore;
 use quarry_store::Store;
 use tauri::Manager;
@@ -22,6 +24,7 @@ pub fn run() {
                 keyring,
             )));
             app.manage(store);
+            app.manage(Arc::new(sessions::Sessions::new(Arc::new(PostgresAdapter))));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -34,6 +37,10 @@ pub fn run() {
             connections::connection_update,
             connections::connection_duplicate,
             connections::connection_delete,
+            connections::connection_test,
+            connections::connection_connect,
+            connections::connection_disconnect,
+            connections::sessions_list,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Quarry");

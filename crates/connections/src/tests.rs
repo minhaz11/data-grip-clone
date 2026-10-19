@@ -280,3 +280,34 @@ fn password_change_json_shape() {
     let clear: PasswordChange = serde_json::from_str(r#"{"action":"clear"}"#).expect("clear");
     assert!(matches!(clear, PasswordChange::Clear));
 }
+
+#[test]
+fn resolve_password_prefers_explicit_then_stored() {
+    let (m, _, _) = setup();
+    let p = m
+        .create(draft("A", SaveMode::Forever), Some(pw("stored")))
+        .expect("create");
+    let got = |id: Option<&str>, explicit: Option<&str>| {
+        m.resolve_password(id, explicit.map(pw))
+            .expect("resolve")
+            .map(|s| s.expose().to_owned())
+    };
+    assert_eq!(got(Some(&p.id), Some("typed")).as_deref(), Some("typed"));
+    assert_eq!(got(Some(&p.id), None).as_deref(), Some("stored"));
+    assert_eq!(got(None, None), None);
+}
+
+#[test]
+fn connect_params_map_profile_fields() {
+    let mut d = draft("A", SaveMode::Never);
+    d.ssl_mode = SslMode::VerifyFull;
+    d.read_only = true;
+    d.connect_timeout_secs = 7;
+    let p = connect_params(d, None).expect("params");
+    assert_eq!(p.tls, quarry_db_core::TlsMode::VerifyFull);
+    assert!(p.read_only);
+    assert_eq!(p.connect_timeout, std::time::Duration::from_secs(7));
+    let mut bad = draft("A", SaveMode::Never);
+    bad.port = 0;
+    assert!(connect_params(bad, None).is_err());
+}

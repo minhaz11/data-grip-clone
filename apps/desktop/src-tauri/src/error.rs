@@ -1,12 +1,33 @@
 use quarry_connections::ConnectionError;
+use quarry_db_core::{ConnectError, ConnectErrorKind};
 use quarry_store::StoreError;
 use serde::Serialize;
 
 /// The only error shape that crosses IPC. Messages are user-facing and never contain secrets.
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AppError {
     pub kind: &'static str,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sqlstate: Option<String>,
+    /// Set when `kind == "connect"`: which connection failure it was.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connect_kind: Option<ConnectErrorKind>,
+}
+
+impl AppError {
+    pub fn new(kind: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            hint: None,
+            sqlstate: None,
+            connect_kind: None,
+        }
+    }
 }
 
 impl From<StoreError> for AppError {
@@ -17,10 +38,7 @@ impl From<StoreError> for AppError {
             StoreError::NewerSchema { .. } => "incompatible_storage",
             _ => "storage",
         };
-        Self {
-            kind,
-            message: err.to_string(),
-        }
+        Self::new(kind, err.to_string())
     }
 }
 
@@ -28,18 +46,21 @@ impl From<ConnectionError> for AppError {
     fn from(err: ConnectionError) -> Self {
         match err {
             ConnectionError::Store(e) => e.into(),
-            ConnectionError::Secret(e) => Self {
-                kind: "credential_store",
-                message: e.to_string(),
-            },
-            ConnectionError::Invalid(m) => Self {
-                kind: "invalid",
-                message: m,
-            },
-            ConnectionError::NotFound => Self {
-                kind: "not_found",
-                message: err.to_string(),
-            },
+            ConnectionError::Secret(e) => Self::new("credential_store", e.to_string()),
+            ConnectionError::Invalid(m) => Self::new("invalid", m),
+            ConnectionError::NotFound => Self::new("not_found", err.to_string()),
+        }
+    }
+}
+
+impl From<ConnectError> for AppError {
+    fn from(e: ConnectError) -> Self {
+        Self {
+            kind: "connect",
+            message: e.message,
+            hint: Some(e.hint),
+            sqlstate: e.sqlstate,
+            connect_kind: Some(e.kind),
         }
     }
 }

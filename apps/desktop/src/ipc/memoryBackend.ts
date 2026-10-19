@@ -85,6 +85,14 @@ export function createMemoryBackend(): Backend {
       const { id: _id, passwordSaved, createdAt: _c, updatedAt: _u, ...draft } = source;
       return insert({ ...draft, name }, passwordSaved);
     },
+    // A browser cannot open database sockets; say so instead of pretending to connect.
+    connectionTest: () =>
+      fail('unsupported', 'Connecting to databases requires the Quarry desktop app.'),
+    connectionConnect: () =>
+      fail('unsupported', 'Connecting to databases requires the Quarry desktop app.'),
+    connectionDisconnect: async () => null,
+    sessionsList: async () => [],
+    onConnectionStatus: async () => () => {},
     connectionDelete: async (id) => {
       if (!find(id)) return fail('not_found', 'data source not found');
       connections = connections.filter((c) => c.id !== id);

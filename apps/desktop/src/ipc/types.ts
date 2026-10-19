@@ -16,9 +16,24 @@ export interface WorkspaceState {
   activeTabId: string | null;
 }
 
+export type ConnectErrorKind =
+  | 'dns'
+  | 'refused'
+  | 'timeout'
+  | 'auth'
+  | 'password_required'
+  | 'database_missing'
+  | 'tls'
+  | 'server_unavailable'
+  | 'other';
+
+/** Error shape of every rejected backend call. */
 export interface AppError {
   kind: string;
   message: string;
+  hint?: string;
+  sqlstate?: string;
+  connectKind?: ConnectErrorKind;
 }
 
 // ---- Connections (mirrors quarry_store::connections) ----
@@ -53,3 +68,25 @@ export interface ConnectionProfile extends ConnectionDraft {
 
 export type PasswordChange =
   { action: 'keep' } | { action: 'clear' } | { action: 'set'; value: string };
+
+// ---- Connectivity (mirrors quarry_db_core / sessions.rs) ----
+
+export interface ServerInfo {
+  version: string;
+  serverVersion: string;
+  database: string;
+  user: string;
+  tls: boolean;
+  readOnly: boolean;
+  latencyMs: number;
+}
+
+export interface SessionStatus {
+  id: string;
+  info: ServerInfo;
+}
+
+export type StatusEvent =
+  | { state: 'connected'; id: string; info: ServerInfo }
+  | { state: 'disconnected'; id: string }
+  | { state: 'lost'; id: string; reason: string };

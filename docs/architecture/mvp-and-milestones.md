@@ -54,10 +54,20 @@ files" applies from M3.1.
     save-mode change, delete aborts if the keyring refuses). A canary test scans `app.db`/WAL bytes,
     serialized profiles and `Debug` output. There is no logging framework yet; the redacting logger
     arrives with the first log statement.
-- **M2.2 Test connection + lifecycle**: test with timeout; categorized actionable errors (DNS,
-  refused, auth, TLS, timeout, database missing); connect/disconnect; SSL modes.
+- **M2.2 Test connection + lifecycle** ✅: test with timeout; categorized actionable errors; connect/
+  disconnect; SSL modes.
   - **AC**: each error category is reproduced against the disposable container (or a closed port) and
     shown with a hint.
+  - Done: `quarry-db-core` (contract, `ConnectError` kinds with hints) and `quarry-db-postgres`
+    (DNS pre-resolution, overall timeout, libpq-style TLS: prefer/require encrypt without
+    verification, verify-ca checks the chain, verify-full also the host name; read-only via
+    `default_transaction_read_only`). Integration tests (`scripts/test-pg.sh`, 127.0.0.1:55432 only)
+    reproduce: refused, DNS, timeout (TEST-NET-1 blackhole), auth, password required, database
+    missing, TLS (self-signed vs verify-ca/full), plus TLS on/off success, read-only, and
+    deliberate vs server-side session close. `server_unavailable` is covered by a SQLSTATE unit
+    test only (hard to provoke reliably). Session registry emits `connection-status` events;
+    the UI shows status dots, Connect/Disconnect, a password prompt, and copyable error details.
+  - Not yet: custom CA / client certificates (REQ-CONN-08), SSH tunnels (REQ-CONN-07).
 - **M2.3 Metadata tree**: lazy schema → kind → object → children; refresh; filter.
   - **AC**: 1,000-table schema expands in < 1 s after the first load; refresh picks up a new table.
 

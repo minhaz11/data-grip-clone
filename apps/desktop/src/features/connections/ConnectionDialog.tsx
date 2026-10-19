@@ -7,6 +7,10 @@ import type {
   SaveMode,
   SslMode,
 } from '../../ipc/types';
+import { backend } from '../../ipc/client';
+import type { AppError, ServerInfo } from '../../ipc/types';
+import { toAppError } from '../../lib/errors';
+import { ConnectionResult } from './ConnectionResult';
 import { useConnections } from './connectionsStore';
 import { ENVIRONMENTS, NEW_DRAFT, effectiveColor, validateDraft, type DraftErrors } from './model';
 
@@ -50,10 +54,32 @@ export function ConnectionDialog({ profile, onClose }: Props) {
   const [submitted, setSubmitted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: ServerInfo } | { error: AppError } | null>(
+    null,
+  );
 
   const errors: DraftErrors = submitted ? validateDraft(draft) : {};
   const patch = (p: Partial<ConnectionDraft>) => setDraft((d) => ({ ...d, ...p }));
   const marker = effectiveColor(draft);
+
+  /** Tests the form as it is now (saved or not). A typed password wins over the stored one. */
+  async function test() {
+    setSubmitted(true);
+    if (Object.keys(validateDraft(draft)).length > 0) return;
+    setTesting(true);
+    setTestResult(null);
+    const typed = passwordAction === 'set' && password !== '' ? password : null;
+    const reuseStoredFor =
+      profile && passwordAction === 'keep' && draft.saveMode !== 'never' ? profile.id : null;
+    try {
+      setTestResult({ ok: await backend.connectionTest(draft, reuseStoredFor, typed) });
+    } catch (e) {
+      setTestResult({ error: toAppError(e) });
+    } finally {
+      setTesting(false);
+    }
+  }
 
   async function save() {
     setSubmitted(true);
@@ -86,6 +112,14 @@ export function ConnectionDialog({ profile, onClose }: Props) {
       width={560}
       footer={
         <>
+          <button
+            type="button"
+            onClick={test}
+            disabled={testing || busy}
+            className="mr-auto rounded border border-border px-3 py-1 hover:bg-hover disabled:opacity-50"
+          >
+            {testing ? 'Testing…' : 'Test Connection'}
+          </button>
           <button
             type="button"
             onClick={onClose}
@@ -233,9 +267,23 @@ export function ConnectionDialog({ profile, onClose }: Props) {
         <Field label="Password">
           {(id) =>
             draft.saveMode === 'never' ? (
-              <p id={id} className="py-1 text-muted">
-                Not stored. You will be asked for it when connecting.
-              </p>
+              <div>
+                <input
+                  id={id}
+                  type="password"
+                  className={input}
+                  value={password}
+                  autoComplete="off"
+                  placeholder="For Test Connection only"
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setPasswordAction('set');
+                  }}
+                />
+                <p className="mt-0.5 text-[12px] text-muted">
+                  Not stored. You will be asked for it when connecting.
+                </p>
+              </div>
             ) : passwordAction === 'keep' ? (
               <div id={id} className="flex items-center gap-3 py-1">
                 <span className="text-muted">Saved</span>
@@ -341,6 +389,11 @@ export function ConnectionDialog({ profile, onClose }: Props) {
 
         <button type="submit" hidden aria-hidden tabIndex={-1} />
       </form>
+      {testResult && (
+        <div className="mt-3">
+          <ConnectionResult result={testResult} />
+        </div>
+      )}
       {serverError && (
         <p role="alert" className="mt-3 text-danger">
           {serverError}

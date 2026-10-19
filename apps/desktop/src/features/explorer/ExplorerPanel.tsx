@@ -4,9 +4,12 @@ import { useRef, useState } from 'react';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { ContextMenu, type MenuItem } from '../../components/ui/ContextMenu';
 import { IconButton } from '../../components/ui/IconButton';
-import type { ConnectionProfile } from '../../ipc/types';
+import type { AppError, ConnectionProfile } from '../../ipc/types';
 import { shortcutLabel } from '../../lib/keymap';
+import { ConnectionResult } from '../connections/ConnectionResult';
 import { useConnections } from '../connections/connectionsStore';
+import { PasswordPrompt } from '../connections/PasswordPrompt';
+import { useSessions, type SessionState } from '../connections/sessionsStore';
 import { effectiveColor, endpointLabel, ENVIRONMENTS } from '../connections/model';
 
 interface Props {
@@ -27,6 +30,11 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
   );
   const [pendingDelete, setPendingDelete] = useState<ConnectionProfile | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const sessions = useSessions((s) => s.byId);
+  const connect = useSessions((s) => s.connect);
+  const disconnect = useSessions((s) => s.disconnect);
+  const [connectError, setConnectError] = useState<{ name: string; error: AppError } | null>(null);
+  const [passwordFor, setPasswordFor] = useState<ConnectionProfile | null>(null);
   const treeRef = useRef<HTMLUListElement>(null);
 
   const selected = items.find((c) => c.id === selectedId) ?? null;
@@ -40,8 +48,20 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
     }
   }
 
+  async function runConnect(p: ConnectionProfile) {
+    setConnectError(null);
+    const error = await connect(p.id);
+    if (error?.connectKind === 'password_required') setPasswordFor(p);
+    else if (error) setConnectError({ name: p.name, error });
+  }
+
   function menuItems(p: ConnectionProfile): MenuItem[] {
+    const state = sessions[p.id]?.state;
+    const live = state === 'connected' || state === 'connecting';
     return [
+      live
+        ? { label: 'Disconnect', onSelect: () => void disconnect(p.id) }
+        : { label: 'Connect', onSelect: () => void runConnect(p) },
       { label: 'Properties…', shortcut: 'Enter', onSelect: () => onEdit(p) },
       { label: 'Duplicate', shortcut: 'Ctrl+D', onSelect: () => void runDuplicate(p) },
       { label: 'Delete…', shortcut: 'Delete', danger: true, onSelect: () => setPendingDelete(p) },
@@ -86,6 +106,18 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
         </IconButton>
       </header>
 
+      {connectError && (
+        <div className="border-b border-border p-2">
+          <p className="mb-1 flex items-center justify-between text-[11px] text-muted">
+            <span>{connectError.name}</span>
+            <button type="button" className="underline" onClick={() => setConnectError(null)}>
+              Dismiss
+            </button>
+          </p>
+          <ConnectionResult result={{ error: connectError.error }} />
+        </div>
+      )}
+
       {(loadError || actionError) && (
         <p role="alert" className="border-b border-border px-3 py-1.5 text-danger">
           {actionError ?? loadError}
@@ -118,13 +150,14 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
           {items.map((c) => {
             const color = effectiveColor(c);
             const env = ENVIRONMENTS.find((e) => e.value === c.environment);
+            const session = sessions[c.id];
             return (
               <li
                 key={c.id}
                 id={`ds-${c.id}`}
                 role="treeitem"
                 aria-selected={c.id === selectedId}
-                aria-label={`${c.name}${c.readOnly ? ', read-only' : ''}${c.environment !== 'none' ? `, ${env?.label}` : ''}`}
+                aria-label={`${c.name}${c.readOnly ? ', read-only' : ''}${c.environment !== 'none' ? `, ${env?.label}` : ''}${sessionLabel(session)}`}
                 onClick={() => select(c.id)}
                 onDoubleClick={() => onEdit(c)}
                 onContextMenu={(e) => {
@@ -139,7 +172,21 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
                 style={{ borderLeftColor: color ?? 'transparent' }}
                 title={`${c.name} — ${c.username}@${endpointLabel(c)}`}
               >
-                <Database size={14} className="shrink-0 text-accent" aria-hidden />
+                <span className="relative shrink-0">
+                  <Database size={14} className="text-accent" aria-hidden />
+                  {session && (
+                    <span
+                      aria-hidden
+                      title={sessionLabel(session).slice(2)}
+                      className={clsx(
+                        'absolute -right-0.5 -bottom-0.5 h-1.5 w-1.5 rounded-full ring-1 ring-panel',
+                        session.state === 'connected' && 'bg-[#3f9d5a]',
+                        session.state === 'connecting' && 'animate-pulse bg-[#d98a1f]',
+                        (session.state === 'failed' || session.state === 'lost') && 'bg-danger',
+                      )}
+                    />
+                  )}
+                </span>
                 <span className="min-w-0 truncate">{c.name}</span>
                 {c.readOnly && <Lock size={12} className="shrink-0 text-muted" aria-hidden />}
                 {c.environment === 'production' && (
@@ -168,6 +215,7 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
           onClose={() => setMenu(null)}
         />
       )}
+      {passwordFor && <PasswordPrompt profile={passwordFor} onClose={() => setPasswordFor(null)} />}
       {pendingDelete && (
         <ConfirmDialog
           title="Delete Data Source"
@@ -186,4 +234,19 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
       )}
     </section>
   );
+}
+
+function sessionLabel(s: SessionState | undefined): string {
+  switch (s?.state) {
+    case 'connected':
+      return `, connected (PostgreSQL ${s.info.serverVersion})`;
+    case 'connecting':
+      return ', connecting';
+    case 'failed':
+      return ', connection failed';
+    case 'lost':
+      return `, connection lost: ${s.reason}`;
+    default:
+      return '';
+  }
 }

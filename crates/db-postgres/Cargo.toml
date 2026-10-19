@@ -1,0 +1,23 @@
+[package]
+name = "quarry-db-postgres"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "PostgreSQL adapter (tokio-postgres + rustls)."
+
+[dependencies]
+async-trait = "0.1.92"
+quarry-db-core.workspace = true
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls-native-certs = "0.8.5"
+tokio = { version = "1.53.3", features = ["time", "rt", "net", "macros"] }
+tokio-postgres = "0.7.18"
+tokio-postgres-rustls = { version = "0.14.0", features = ["ring"] }
+
+[dev-dependencies]
+quarry-secrets = { path = "../secrets" }
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros"] }
+
+[lints]
+workspace = true

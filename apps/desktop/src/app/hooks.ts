@@ -4,6 +4,7 @@ import { chordOf, commandForChord, type CommandId } from '../lib/keymap';
 import { resolveTheme, useSettings } from './settingsStore';
 import { snapshot, useWorkspace } from './workspaceStore';
 import { useConnections } from '../features/connections/connectionsStore';
+import { useSessions } from '../features/connections/sessionsStore';
 
 /** Global keyboard shortcuts, dispatched through the keymap so bindings stay configurable. */
 export function useKeybindings(handlers: Partial<Record<CommandId, () => void>>) {
@@ -55,11 +56,13 @@ export function useWorkspacePersistence(): { ready: boolean; error: string | nul
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let unsubscribe: (() => void) | undefined;
+    let unlistenStatus: (() => void) | undefined;
 
     (async () => {
       try {
         await useSettings.getState().load();
         await useConnections.getState().load();
+        unlistenStatus = await useSessions.getState().init();
         useWorkspace.getState().hydrate(await backend.workspaceGet());
       } catch (e) {
         useWorkspace.getState().hydrate(null);
@@ -85,6 +88,7 @@ export function useWorkspacePersistence(): { ready: boolean; error: string | nul
       cancelled = true;
       clearTimeout(timer);
       unsubscribe?.();
+      unlistenStatus?.();
     };
   }, []);
 

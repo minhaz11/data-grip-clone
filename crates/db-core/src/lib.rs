@@ -1,0 +1,164 @@
+//! Engine-neutral adapter contract (ADR-0002). The UI and app layer only see these types; each
+//! engine crate (`quarry-db-postgres`, later MySQL/SQLite) implements [`DatabaseAdapter`].
+
+use std::fmt;
+use std::time::Duration;
+
+use quarry_secrets::SecretString;
+use serde::Serialize;
+
+/// TLS policy, with libpq semantics: `Prefer`/`Require` encrypt without verifying the certificate;
+/// `VerifyCa` checks the chain; `VerifyFull` also checks the host name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TlsMode {
+    Disable,
+    Prefer,
+    Require,
+    VerifyCa,
+    VerifyFull,
+}
+
+/// Everything needed to open a connection. `Debug` never prints the password.
+#[derive(Clone)]
+pub struct ConnectParams {
+    pub host: String,
+    pub port: u16,
+    pub database: String,
+    pub username: String,
+    pub password: Option<SecretString>,
+    pub tls: TlsMode,
+    pub connect_timeout: Duration,
+    /// Ask the server to reject writes for this session (defence in depth; ADR-0002).
+    pub read_only: bool,
+    pub application_name: String,
+}
+
+impl fmt::Debug for ConnectParams {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ConnectParams")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("database", &self.database)
+            .field("username", &self.username)
+            .field("password", &self.password.as_ref().map(|_| "***"))
+            .field("tls", &self.tls)
+            .field("connect_timeout", &self.connect_timeout)
+            .field("read_only", &self.read_only)
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerInfo {
+    /// Full version banner, e.g. "PostgreSQL 16.15 on x86_64-pc-linux-musl ...".
+    pub version: String,
+    /// Short version, e.g. "16.15".
+    pub server_version: String,
+    pub database: String,
+    pub user: String,
+    pub tls: bool,
+    pub read_only: bool,
+    /// Wall time to resolve, connect, authenticate and run the probe query.
+    pub latency_ms: u64,
+}
+
+/// Why a connection attempt failed, in terms a user can act on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectErrorKind {
+    /// The host name could not be resolved.
+    Dns,
+    /// Nothing accepted the TCP connection.
+    Refused,
+    /// No answer within the connect timeout.
+    Timeout,
+    /// The server rejected the user name or password.
+    Auth,
+    /// Authentication failed and no password was supplied: the UI should ask for one.
+    PasswordRequired,
+    /// The database does not exist.
+    DatabaseMissing,
+    /// TLS was required but failed (unsupported, untrusted certificate, name mismatch, ...).
+    Tls,
+    /// The server is starting, shutting down, or at its connection limit.
+    ServerUnavailable,
+    /// Anything else (protocol errors, unexpected server responses).
+    Other,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectError {
+    pub kind: ConnectErrorKind,
+    /// What happened, including the server's/driver's own words where useful.
+    pub message: String,
+    /// What the user can do about it.
+    pub hint: String,
+    pub sqlstate: Option<String>,
+}
+
+impl fmt::Display for ConnectError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {}", self.message, self.hint)
+    }
+}
+
+impl std::error::Error for ConnectError {}
+
+/// Called once when a live session ends; `Some(reason)` if it ended unexpectedly.
+pub type OnClose = Box<dyn FnOnce(Option<String>) + Send>;
+
+#[async_trait::async_trait]
+pub trait DatabaseAdapter: Send + Sync {
+    /// Connects, authenticates, runs a probe query and disconnects.
+    async fn test(&self, params: &ConnectParams) -> Result<ServerInfo, ConnectError>;
+    /// Opens a session that stays open until [`Session::close`] or the server drops it.
+    async fn connect(
+        &self,
+        params: &ConnectParams,
+        on_close: OnClose,
+    ) -> Result<Box<dyn Session>, ConnectError>;
+}
+
+#[async_trait::async_trait]
+pub trait Session: Send + Sync {
+    fn info(&self) -> &ServerInfo;
+    fn is_closed(&self) -> bool;
+    async fn close(self: Box<Self>);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn params_debug_redacts_password() {
+        let p = ConnectParams {
+            host: "h".into(),
+            port: 1,
+            database: "d".into(),
+            username: "u".into(),
+            password: Some(SecretString::new("hunter2".into())),
+            tls: TlsMode::Prefer,
+            connect_timeout: Duration::from_secs(1),
+            read_only: false,
+            application_name: "quarry".into(),
+        };
+        let s = format!("{p:?}");
+        assert!(!s.contains("hunter2") && s.contains("***"), "{s}");
+    }
+
+    #[test]
+    fn error_serializes_for_the_ui() {
+        let e = ConnectError {
+            kind: ConnectErrorKind::DatabaseMissing,
+            message: "m".into(),
+            hint: "h".into(),
+            sqlstate: Some("3D000".into()),
+        };
+        let json = serde_json::to_value(&e).expect("encode");
+        assert_eq!(json["kind"], "database_missing");
+        assert_eq!(json["sqlstate"], "3D000");
+    }
+}
