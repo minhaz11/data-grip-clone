@@ -18,6 +18,26 @@ const MIGRATIONS: &[&str] = &[
          value_json TEXT NOT NULL,
          updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
      ) STRICT;",
+    // 2: connection profiles (M2.1). No secret columns, by design (ADR-0003).
+    "CREATE TABLE connections (
+         id                   TEXT PRIMARY KEY NOT NULL,
+         name                 TEXT NOT NULL,
+         engine               TEXT NOT NULL,
+         host                 TEXT NOT NULL,
+         port                 INTEGER NOT NULL,
+         database             TEXT NOT NULL,
+         username             TEXT NOT NULL,
+         ssl_mode             TEXT NOT NULL,
+         connect_timeout_secs INTEGER NOT NULL,
+         read_only            INTEGER NOT NULL,
+         environment          TEXT NOT NULL,
+         color                TEXT,
+         save_mode            TEXT NOT NULL,
+         password_saved       INTEGER NOT NULL DEFAULT 0,
+         created_at           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+         updated_at           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+     ) STRICT;
+     CREATE UNIQUE INDEX connections_name_unique ON connections (name COLLATE NOCASE);",
 ];
 
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;

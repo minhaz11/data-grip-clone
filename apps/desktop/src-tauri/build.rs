@@ -6,6 +6,11 @@ fn main() {
         "settings_set",
         "workspace_get",
         "workspace_set",
+        "connections_list",
+        "connection_create",
+        "connection_update",
+        "connection_duplicate",
+        "connection_delete",
     ];
     tauri_build::try_build(
         tauri_build::Attributes::new()

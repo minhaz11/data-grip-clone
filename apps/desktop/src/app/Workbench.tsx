@@ -4,6 +4,7 @@ import { ExplorerPanel } from '../features/explorer/ExplorerPanel';
 import { EditorArea } from '../features/editor/EditorArea';
 import { BottomPanel } from '../features/results/BottomPanel';
 import { useWorkspace } from './workspaceStore';
+import type { ConnectionProfile } from '../ipc/types';
 
 const MAIN = 'main';
 const CENTER = 'center';
@@ -24,7 +25,12 @@ function useCollapsible(collapsed: boolean, setCollapsed: (c: boolean) => void) 
   return { ref, onResize };
 }
 
-export function Workbench() {
+interface Props {
+  onNewConnection(): void;
+  onEditConnection(profile: ConnectionProfile): void;
+}
+
+export function Workbench({ onNewConnection, onEditConnection }: Props) {
   const layout = useWorkspace((s) => s.layout);
   const setLayout = useWorkspace((s) => s.setLayout);
   const explorer = useCollapsible(
@@ -55,7 +61,7 @@ export function Workbench() {
         panelRef={explorer.ref}
         onResize={explorer.onResize}
       >
-        <ExplorerPanel />
+        <ExplorerPanel onNew={onNewConnection} onEdit={onEditConnection} />
       </Panel>
       <Separator className="w-px" />
       <Panel id="center" minSize="30">

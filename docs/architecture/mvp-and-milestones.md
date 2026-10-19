@@ -46,9 +46,14 @@ files" applies from M3.1.
 
 ### Phase 2 — PostgreSQL connectivity
 
-- **M2.1 Connection profiles**: CRUD, duplicate, environment tag + colour, read-only flag, keyring
-  secrets (save modes persist/session/never).
+- **M2.1 Connection profiles** ✅: CRUD, duplicate (copies the password, per [DOC] 02), environment
+  tag + colour, read-only flag, keyring secrets with save modes Forever / Until restart / Never.
   - **AC**: no secret appears in `app.db`, logs, or any IPC response (test asserts this).
+  - Done: `quarry-secrets` (keyring + memory stores, `SecretString` is not `Serialize`),
+    `quarry-store` migration 2, `quarry-connections` (rollback on keyring failure, secret moves on
+    save-mode change, delete aborts if the keyring refuses). A canary test scans `app.db`/WAL bytes,
+    serialized profiles and `Debug` output. There is no logging framework yet; the redacting logger
+    arrives with the first log statement.
 - **M2.2 Test connection + lifecycle**: test with timeout; categorized actionable errors (DNS,
   refused, auth, TLS, timeout, database missing); connect/disconnect; SSL modes.
   - **AC**: each error category is reproduced against the disposable container (or a closed port) and

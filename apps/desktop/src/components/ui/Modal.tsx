@@ -5,20 +5,24 @@ interface Props {
   onClose(): void;
   children: ReactNode;
   footer?: ReactNode;
+  width?: number;
+  /** Element to focus on open; defaults to the first focusable control. */
+  initialFocus?: string;
 }
 
 /** Accessible modal: focuses itself on open, closes on Escape, restores focus on close, traps Tab. */
-export function Modal({ title, onClose, children, footer }: Props) {
+export function Modal({ title, onClose, children, footer, width = 440, initialFocus }: Props) {
   const titleId = useId();
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const previouslyFocused = document.activeElement as HTMLElement | null;
     const first = ref.current?.querySelector<HTMLElement>(
-      'input, select, button, textarea, [tabindex="0"]',
+      initialFocus ?? 'input, select, button, textarea, [tabindex="0"]',
     );
     (first ?? ref.current)?.focus();
     return () => previouslyFocused?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- focus once on open
   }, []);
 
   function onKeyDown(e: React.KeyboardEvent) {
@@ -54,7 +58,8 @@ export function Modal({ title, onClose, children, footer }: Props) {
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="w-[440px] max-w-[90vw] rounded-md border border-border bg-panel shadow-xl"
+        style={{ width }}
+        className="max-h-[90vh] max-w-[92vw] overflow-auto rounded-md border border-border bg-panel shadow-xl"
         onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={onKeyDown}
       >

@@ -1,5 +1,11 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Settings, WorkspaceState } from './types';
+import type {
+  ConnectionDraft,
+  ConnectionProfile,
+  PasswordChange,
+  Settings,
+  WorkspaceState,
+} from './types';
 import { createMemoryBackend } from './memoryBackend';
 
 /** Every backend call the UI may make. The Tauri capability file allows exactly these commands. */
@@ -8,6 +14,15 @@ export interface Backend {
   settingsSet(settings: Settings): Promise<Settings>;
   workspaceGet(): Promise<WorkspaceState | null>;
   workspaceSet(state: WorkspaceState): Promise<null>;
+  connectionsList(): Promise<ConnectionProfile[]>;
+  connectionCreate(draft: ConnectionDraft, password: string | null): Promise<ConnectionProfile>;
+  connectionUpdate(
+    id: string,
+    draft: ConnectionDraft,
+    password: PasswordChange,
+  ): Promise<ConnectionProfile>;
+  connectionDuplicate(id: string): Promise<ConnectionProfile>;
+  connectionDelete(id: string): Promise<null>;
 }
 
 const tauriBackend: Backend = {
@@ -15,6 +30,13 @@ const tauriBackend: Backend = {
   settingsSet: (settings) => invoke<Settings>('settings_set', { settings }),
   workspaceGet: () => invoke<WorkspaceState | null>('workspace_get'),
   workspaceSet: (state) => invoke<null>('workspace_set', { state }),
+  connectionsList: () => invoke<ConnectionProfile[]>('connections_list'),
+  connectionCreate: (draft, password) =>
+    invoke<ConnectionProfile>('connection_create', { draft, password }),
+  connectionUpdate: (id, draft, password) =>
+    invoke<ConnectionProfile>('connection_update', { id, draft, password }),
+  connectionDuplicate: (id) => invoke<ConnectionProfile>('connection_duplicate', { id }),
+  connectionDelete: (id) => invoke<null>('connection_delete', { id }),
 };
 
 export function isTauri(): boolean {

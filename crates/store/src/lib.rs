@@ -1,6 +1,7 @@
 //! Local application storage (ADR-0004). Only the Rust backend touches this database; the UI goes
 //! through typed commands. Secrets are never stored here (ADR-0003).
 
+pub mod connections;
 mod migrations;
 
 use std::path::Path;
@@ -9,6 +10,7 @@ use std::sync::{Mutex, MutexGuard};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
+pub use connections::{ConnectionDraft, ConnectionProfile, Engine, Environment, SaveMode, SslMode};
 pub use migrations::LATEST_VERSION;
 
 #[derive(Debug, thiserror::Error)]
@@ -26,8 +28,10 @@ pub enum StoreError {
         "app.db was created by a newer version of Quarry (schema {found}, this build supports {supported})"
     )]
     NewerSchema { found: i64, supported: i64 },
-    #[error("invalid value: {0}")]
+    #[error("{0}")]
     Invalid(String),
+    #[error("not found: {0}")]
+    NotFound(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -101,7 +105,7 @@ impl Store {
         })
     }
 
-    fn conn(&self) -> MutexGuard<'_, Connection> {
+    pub(crate) fn conn(&self) -> MutexGuard<'_, Connection> {
         // A panic while holding the lock cannot leave SQLite in a torn state (each call is atomic),
         // so recovering the guard is safe.
         self.conn

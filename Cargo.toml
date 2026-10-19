@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/store", "apps/desktop/src-tauri"]
+members = ["crates/store", "crates/secrets", "crates/connections", "apps/desktop/src-tauri"]
 
 [workspace.package]
 edition = "2024"
@@ -9,6 +9,8 @@ publish = false
 
 [workspace.dependencies]
 quarry-store = { path = "crates/store" }
+quarry-secrets = { path = "crates/secrets" }
+quarry-connections = { path = "crates/connections" }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"

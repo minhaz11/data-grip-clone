@@ -20,3 +20,36 @@ export interface AppError {
   kind: string;
   message: string;
 }
+
+// ---- Connections (mirrors quarry_store::connections) ----
+
+export type Engine = 'postgresql';
+export type SslMode = 'disable' | 'prefer' | 'require' | 'verify-ca' | 'verify-full';
+export type Environment = 'none' | 'development' | 'testing' | 'staging' | 'production';
+export type SaveMode = 'never' | 'untilRestart' | 'forever';
+
+export interface ConnectionDraft {
+  name: string;
+  engine: Engine;
+  host: string;
+  port: number;
+  database: string;
+  username: string;
+  sslMode: SslMode;
+  connectTimeoutSecs: number;
+  readOnly: boolean;
+  environment: Environment;
+  color: string | null;
+  saveMode: SaveMode;
+}
+
+/** A stored profile. There is deliberately no password field: secrets never come back over IPC. */
+export interface ConnectionProfile extends ConnectionDraft {
+  id: string;
+  passwordSaved: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type PasswordChange =
+  { action: 'keep' } | { action: 'clear' } | { action: 'set'; value: string };

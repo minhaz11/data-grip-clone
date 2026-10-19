@@ -5,11 +5,15 @@ import { Workbench } from './Workbench';
 import { useAppliedTheme, useKeybindings, useWorkspacePersistence } from './hooks';
 import { useWorkspace } from './workspaceStore';
 import { SettingsDialog } from '../features/settings/SettingsDialog';
+import { ConnectionDialog } from '../features/connections/ConnectionDialog';
+import type { ConnectionProfile } from '../ipc/types';
 
 export function App() {
   const { ready, error } = useWorkspacePersistence();
   const theme = useAppliedTheme();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // `null` = closed, `'new'` = create, profile = edit.
+  const [connectionDialog, setConnectionDialog] = useState<ConnectionProfile | 'new' | null>(null);
 
   const handlers = useMemo(() => {
     const ws = () => useWorkspace.getState();
@@ -24,6 +28,7 @@ export function App() {
       'view.toggleExplorer': () => ws().setExplorerCollapsed(!ws().explorerCollapsed),
       'view.toggleBottomPanel': () => ws().setBottomCollapsed(!ws().bottomCollapsed),
       'settings.open': () => setSettingsOpen(true),
+      'datasource.new': () => setConnectionDialog('new'),
     };
   }, []);
   useKeybindings(handlers);
@@ -44,9 +49,18 @@ export function App() {
           {error}
         </div>
       )}
-      <Workbench />
+      <Workbench
+        onNewConnection={() => setConnectionDialog('new')}
+        onEditConnection={setConnectionDialog}
+      />
       <StatusBar theme={theme} />
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
+      {connectionDialog && (
+        <ConnectionDialog
+          profile={connectionDialog === 'new' ? undefined : connectionDialog}
+          onClose={() => setConnectionDialog(null)}
+        />
+      )}
     </div>
   );
 }

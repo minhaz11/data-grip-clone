@@ -3,6 +3,7 @@ import { backend } from '../ipc/client';
 import { chordOf, commandForChord, type CommandId } from '../lib/keymap';
 import { resolveTheme, useSettings } from './settingsStore';
 import { snapshot, useWorkspace } from './workspaceStore';
+import { useConnections } from '../features/connections/connectionsStore';
 
 /** Global keyboard shortcuts, dispatched through the keymap so bindings stay configurable. */
 export function useKeybindings(handlers: Partial<Record<CommandId, () => void>>) {
@@ -58,6 +59,7 @@ export function useWorkspacePersistence(): { ready: boolean; error: string | nul
     (async () => {
       try {
         await useSettings.getState().load();
+        await useConnections.getState().load();
         useWorkspace.getState().hydrate(await backend.workspaceGet());
       } catch (e) {
         useWorkspace.getState().hydrate(null);

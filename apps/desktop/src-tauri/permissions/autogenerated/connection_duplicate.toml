@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-connection-duplicate"
+description = "Enables the connection_duplicate command without any pre-configured scope."
+commands.allow = ["connection_duplicate"]
+
+[[permission]]
+identifier = "deny-connection-duplicate"
+description = "Denies the connection_duplicate command without any pre-configured scope."
+commands.deny = ["connection_duplicate"]

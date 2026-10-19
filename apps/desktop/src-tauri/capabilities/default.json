@@ -10,6 +10,11 @@
     "allow-settings-get",
     "allow-settings-set",
     "allow-workspace-get",
-    "allow-workspace-set"
+    "allow-workspace-set",
+    "allow-connections-list",
+    "allow-connection-create",
+    "allow-connection-update",
+    "allow-connection-duplicate",
+    "allow-connection-delete"
   ]
 }
