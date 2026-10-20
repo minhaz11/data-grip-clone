@@ -178,6 +178,26 @@ async fn walks_schema_tables_views_columns_and_indexes() {
         Some("btree (note)")
     );
 
+    let relations = s.metadata(&Req::Relations).await.expect("relations");
+    let mine: Vec<(&str, &str, MetaKind)> = relations
+        .iter()
+        .filter(|n| n.detail.as_deref() == Some("it_walk"))
+        .map(|n| (n.key.as_str(), n.name.as_str(), n.kind))
+        .collect();
+    assert_eq!(
+        mine,
+        [
+            ("it_walk.accounts", "accounts", MetaKind::Table),
+            (
+                "it_walk.mv_accounts",
+                "mv_accounts",
+                MetaKind::MaterializedView
+            ),
+            ("it_walk.odd \"name\"", "odd \"name\"", MetaKind::Table),
+            ("it_walk.v_accounts", "v_accounts", MetaKind::View),
+        ]
+    );
+
     s.close().await;
     db.batch_execute("DROP SCHEMA it_walk CASCADE")
         .await

@@ -5,6 +5,7 @@ import { resolveTheme, useSettings } from './settingsStore';
 import { snapshot, useWorkspace } from './workspaceStore';
 import { useConnections } from '../features/connections/connectionsStore';
 import { useSessions } from '../features/connections/sessionsStore';
+import { resetCatalog } from '../features/editor/catalog';
 
 /** Global keyboard shortcuts, dispatched through the keymap so bindings stay configurable. */
 export function useKeybindings(handlers: Partial<Record<CommandId, () => void>>) {
@@ -63,16 +64,32 @@ export function useWorkspacePersistence(): { ready: boolean; error: string | nul
         await useSettings.getState().load();
         await useConnections.getState().load();
         unlistenStatus = await useSessions.getState().init();
-        useWorkspace.getState().hydrate(await backend.workspaceGet());
+        // Completion catalogs are only valid for the session they were read from.
+        const unsubscribeCatalog = useSessions.subscribe((s, prev) => {
+          for (const id of Object.keys(prev.byId)) {
+            if (prev.byId[id]?.state === 'connected' && s.byId[id]?.state !== 'connected')
+              resetCatalog(id);
+          }
+        });
+        const unlisten = unlistenStatus;
+        unlistenStatus = () => {
+          unlisten();
+          unsubscribeCatalog();
+        };
+        await useWorkspace.getState().hydrate(await backend.workspaceGet());
       } catch (e) {
-        useWorkspace.getState().hydrate(null);
+        await useWorkspace.getState().hydrate(null);
         if (!cancelled)
           setState((s) => ({ ...s, error: `Could not restore workspace: ${String(e)}` }));
       }
       if (cancelled) return;
       setState((s) => ({ ...s, ready: true }));
-      unsubscribe = useWorkspace.subscribe((ws, prev) => {
-        if (ws.caret !== prev.caret && ws.tabs === prev.tabs && ws.layout === prev.layout) return;
+      let lastSaved = JSON.stringify(snapshot(useWorkspace.getState()));
+      unsubscribe = useWorkspace.subscribe((ws) => {
+        // Text edits and caret moves change the store but not the persisted snapshot.
+        const next = JSON.stringify(snapshot(ws));
+        if (next === lastSaved) return;
+        lastSaved = next;
         clearTimeout(timer);
         timer = setTimeout(() => {
           backend
@@ -84,7 +101,15 @@ export function useWorkspacePersistence(): { ready: boolean; error: string | nul
       });
     })();
 
+    // Unsaved console text is written when the window is hidden or closed.
+    const flush = () => void useWorkspace.getState().flushAll();
+    const onVisibility = () => document.visibilityState === 'hidden' && flush();
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', onVisibility);
+
     return () => {
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', onVisibility);
       cancelled = true;
       clearTimeout(timer);
       unsubscribe?.();

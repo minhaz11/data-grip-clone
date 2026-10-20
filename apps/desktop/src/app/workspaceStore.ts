@@ -1,10 +1,14 @@
 import { create } from 'zustand';
-import type { WorkspaceState } from '../ipc/types';
+import { backend } from '../ipc/client';
+import type { ConsoleTabState, WorkspaceState } from '../ipc/types';
+import { toAppError } from '../lib/errors';
 
-export interface ConsoleTab {
-  id: string;
-  title: string;
+export type SaveState = 'saved' | 'pending' | 'saving' | 'error';
+
+export interface ConsoleTab extends ConsoleTabState {
   text: string;
+  save: SaveState;
+  saveError?: string;
 }
 
 interface WorkspaceStore {
@@ -15,95 +19,197 @@ interface WorkspaceStore {
   layout: Record<string, Record<string, number>>;
   caret: { line: number; column: number } | null;
   hydrated: boolean;
+  /** Problems met while restoring (missing console files, migration failures). */
+  notices: string[];
 
-  hydrate(state: WorkspaceState | null): void;
-  newConsole(): string;
-  closeTab(id: string): void;
+  hydrate(state: WorkspaceState | null): Promise<void>;
+  newConsole(sourceId?: string | null): Promise<string>;
+  closeTab(id: string): Promise<void>;
   activate(id: string): void;
   cycleTab(delta: 1 | -1): void;
   updateText(id: string, text: string): void;
+  setSource(id: string, sourceId: string | null): void;
+  /** Writes every unsaved console now (tab close, app hide). */
+  flushAll(): Promise<void>;
   setCaret(caret: { line: number; column: number } | null): void;
   setLayout(groupId: string, layout: Record<string, number>): void;
   setExplorerCollapsed(collapsed: boolean): void;
   setBottomCollapsed(collapsed: boolean): void;
+  dismissNotices(): void;
 }
+
+export const AUTOSAVE_MS = 400;
 
 let idCounter = 0;
 function newId(): string {
   idCounter += 1;
-  return `console-${Date.now().toString(36)}-${idCounter}`;
+  return `tab-${Date.now().toString(36)}-${idCounter}`;
 }
 
-/** Picks the lowest free "console", "console_1", ... title, the same scheme used for console files. */
-export function nextConsoleTitle(existing: string[]): string {
-  if (!existing.includes('console')) return 'console';
-  for (let i = 1; ; i++) if (!existing.includes(`console_${i}`)) return `console_${i}`;
+const timers = new Map<string, ReturnType<typeof setTimeout>>();
+// Hydration may be requested twice (React StrictMode); legacy migration must run only once.
+let hydration: Promise<void> | null = null;
+
+/** Test hook: allow a fresh hydration. */
+export function resetHydrationForTests() {
+  hydration = null;
 }
 
-export const useWorkspace = create<WorkspaceStore>((set, get) => ({
-  tabs: [],
-  activeTabId: null,
-  explorerCollapsed: false,
-  bottomCollapsed: false,
-  layout: {},
-  caret: null,
-  hydrated: false,
+export const useWorkspace = create<WorkspaceStore>((set, get) => {
+  const patchTab = (id: string, patch: Partial<ConsoleTab>) =>
+    set((s) => ({ tabs: s.tabs.map((t) => (t.id === id ? { ...t, ...patch } : t)) }));
 
-  hydrate(state) {
+  async function saveNow(id: string) {
+    clearTimeout(timers.get(id));
+    timers.delete(id);
+    const tab = get().tabs.find((t) => t.id === id);
+    if (!tab || tab.save === 'saved') return;
+    const text = tab.text;
+    patchTab(id, { save: 'saving' });
+    try {
+      await backend.consoleWrite(tab.console, text);
+      // Edited again while writing? Stay pending; the newer text has its own timer.
+      const now = get().tabs.find((t) => t.id === id);
+      if (now)
+        patchTab(
+          id,
+          now.text === text ? { save: 'saved', saveError: undefined } : { save: 'pending' },
+        );
+    } catch (e) {
+      patchTab(id, { save: 'error', saveError: toAppError(e).message });
+    }
+  }
+
+  async function restore(state: WorkspaceState | null) {
     if (!state) return set({ hydrated: true });
-    const activeTabId = state.tabs.some((t) => t.id === state.activeTabId)
+    const tabs: ConsoleTab[] = [];
+    const notices: string[] = [];
+    for (const t of state.tabs) {
+      try {
+        if ('console' in t) {
+          tabs.push({ ...t, text: await backend.consoleRead(t.console), save: 'saved' });
+        } else {
+          // Legacy inline text: move it into a console file so nothing typed before is lost.
+          const name = await backend.consoleCreate(t.title);
+          await backend.consoleWrite(name, t.text);
+          tabs.push({ id: t.id, console: name, sourceId: null, text: t.text, save: 'saved' });
+        }
+      } catch (e) {
+        const label = 'console' in t ? t.console : t.title;
+        notices.push(`Could not reopen console "${label}": ${toAppError(e).message}`);
+      }
+    }
+    const activeTabId = tabs.some((t) => t.id === state.activeTabId)
       ? state.activeTabId
-      : (state.tabs[0]?.id ?? null);
+      : (tabs[0]?.id ?? null);
     set({
-      tabs: state.tabs,
+      tabs,
       activeTabId,
+      notices,
       explorerCollapsed: state.panels.explorerCollapsed,
       bottomCollapsed: state.panels.bottomCollapsed,
       layout: state.layout,
       hydrated: true,
     });
-  },
-  newConsole() {
-    const id = newId();
-    const title = nextConsoleTitle(get().tabs.map((t) => t.title));
-    set((s) => ({ tabs: [...s.tabs, { id, title, text: '' }], activeTabId: id, caret: null }));
-    return id;
-  },
-  closeTab(id) {
-    set((s) => {
-      const index = s.tabs.findIndex((t) => t.id === id);
-      if (index < 0) return s;
-      const tabs = s.tabs.filter((t) => t.id !== id);
-      let activeTabId = s.activeTabId;
-      if (activeTabId === id) activeTabId = (tabs[index] ?? tabs[index - 1])?.id ?? null;
-      return { tabs, activeTabId, caret: activeTabId === s.activeTabId ? s.caret : null };
-    });
-  },
-  activate(id) {
-    if (get().activeTabId !== id && get().tabs.some((t) => t.id === id))
-      set({ activeTabId: id, caret: null });
-  },
-  cycleTab(delta) {
-    const { tabs, activeTabId } = get();
-    if (tabs.length === 0) return;
-    const index = tabs.findIndex((t) => t.id === activeTabId);
-    const next = tabs[(index + delta + tabs.length) % tabs.length];
-    if (next && next.id !== activeTabId) set({ activeTabId: next.id, caret: null });
-  },
-  updateText(id, text) {
-    set((s) => ({ tabs: s.tabs.map((t) => (t.id === id ? { ...t, text } : t)) }));
-  },
-  setCaret: (caret) => set({ caret }),
-  setLayout: (groupId, layout) => set((s) => ({ layout: { ...s.layout, [groupId]: layout } })),
-  setExplorerCollapsed: (explorerCollapsed) => set({ explorerCollapsed }),
-  setBottomCollapsed: (bottomCollapsed) => set({ bottomCollapsed }),
-}));
+  }
 
-export function snapshot(s: WorkspaceStore): WorkspaceState {
+  return {
+    tabs: [],
+    activeTabId: null,
+    explorerCollapsed: false,
+    bottomCollapsed: false,
+    layout: {},
+    caret: null,
+    hydrated: false,
+    notices: [],
+
+    hydrate(state) {
+      hydration ??= restore(state);
+      return hydration;
+    },
+
+    async newConsole(sourceId = null) {
+      const name = await backend.consoleCreate(null);
+      const id = newId();
+      set((s) => ({
+        tabs: [...s.tabs, { id, console: name, sourceId, text: '', save: 'saved' }],
+        activeTabId: id,
+        caret: null,
+      }));
+      return id;
+    },
+
+    async closeTab(id) {
+      await saveNow(id);
+      set((s) => {
+        const index = s.tabs.findIndex((t) => t.id === id);
+        if (index < 0) return s;
+        const tabs = s.tabs.filter((t) => t.id !== id);
+        let activeTabId = s.activeTabId;
+        if (activeTabId === id) activeTabId = (tabs[index] ?? tabs[index - 1])?.id ?? null;
+        return { tabs, activeTabId, caret: activeTabId === s.activeTabId ? s.caret : null };
+      });
+    },
+
+    activate(id) {
+      if (get().activeTabId !== id && get().tabs.some((t) => t.id === id))
+        set({ activeTabId: id, caret: null });
+    },
+
+    cycleTab(delta) {
+      const { tabs, activeTabId } = get();
+      if (tabs.length === 0) return;
+      const index = tabs.findIndex((t) => t.id === activeTabId);
+      const next = tabs[(index + delta + tabs.length) % tabs.length];
+      if (next && next.id !== activeTabId) set({ activeTabId: next.id, caret: null });
+    },
+
+    updateText(id, text) {
+      const tab = get().tabs.find((t) => t.id === id);
+      if (!tab || tab.text === text) return;
+      patchTab(id, { text, save: 'pending' });
+      clearTimeout(timers.get(id));
+      timers.set(
+        id,
+        setTimeout(() => void saveNow(id), AUTOSAVE_MS),
+      );
+    },
+
+    setSource: (id, sourceId) => patchTab(id, { sourceId }),
+
+    async flushAll() {
+      await Promise.all(
+        get()
+          .tabs.filter((t) => t.save !== 'saved')
+          .map((t) => saveNow(t.id)),
+      );
+    },
+
+    setCaret: (caret) => set({ caret }),
+    setLayout: (groupId, layout) => set((s) => ({ layout: { ...s.layout, [groupId]: layout } })),
+    setExplorerCollapsed: (explorerCollapsed) => set({ explorerCollapsed }),
+    setBottomCollapsed: (bottomCollapsed) => set({ bottomCollapsed }),
+    dismissNotices: () => set({ notices: [] }),
+  };
+});
+
+/** Picks the lowest free "console", "console_1", ... title (mirrors the backend's naming). */
+export function nextConsoleTitle(existing: string[]): string {
+  if (!existing.includes('console')) return 'console';
+  for (let i = 1; ; i++) if (!existing.includes(`console_${i}`)) return `console_${i}`;
+}
+
+/** What is persisted: tab identity and binding, never console text (that lives in files). */
+export function snapshot(
+  s: Pick<
+    WorkspaceStore,
+    'layout' | 'explorerCollapsed' | 'bottomCollapsed' | 'tabs' | 'activeTabId'
+  >,
+): WorkspaceState {
   return {
     layout: s.layout,
     panels: { explorerCollapsed: s.explorerCollapsed, bottomCollapsed: s.bottomCollapsed },
-    tabs: s.tabs,
+    tabs: s.tabs.map(({ id, console, sourceId }) => ({ id, console, sourceId })),
     activeTabId: s.activeTabId,
   };
 }

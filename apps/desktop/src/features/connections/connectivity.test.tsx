@@ -43,7 +43,7 @@ describe('connectivity UI', () => {
     const user = userEvent.setup();
     const test = vi.spyOn(backend, 'connectionTest').mockResolvedValue(INFO);
     render(<App />);
-    await screen.findByRole('toolbar');
+    await screen.findByRole('toolbar', { name: 'Main toolbar' });
     await user.keyboard('{Alt>}{Insert}{/Alt}');
     const dialog = screen.getByRole('dialog');
     await user.type(within(dialog).getByLabelText('Name'), 'Scratch');
@@ -77,7 +77,7 @@ describe('connectivity UI', () => {
       sqlstate: '3D000',
     });
     render(<App />);
-    await screen.findByRole('toolbar');
+    await screen.findByRole('toolbar', { name: 'Main toolbar' });
     await user.keyboard('{Alt>}{Insert}{/Alt}');
     const dialog = screen.getByRole('dialog');
     await user.type(within(dialog).getByLabelText('Name'), 'X');

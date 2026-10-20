@@ -12,7 +12,7 @@ async function clearAll() {
 
 async function openNewDialog(user: ReturnType<typeof userEvent.setup>) {
   render(<App />);
-  await screen.findByRole('toolbar');
+  await screen.findByRole('toolbar', { name: 'Main toolbar' });
   await user.keyboard('{Alt>}{Insert}{/Alt}');
   return screen.getByRole('dialog', { name: 'New PostgreSQL Data Source' });
 }

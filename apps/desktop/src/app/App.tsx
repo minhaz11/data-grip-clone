@@ -5,6 +5,8 @@ import { Workbench } from './Workbench';
 import { useAppliedTheme, useKeybindings, useWorkspacePersistence } from './hooks';
 import { useWorkspace } from './workspaceStore';
 import { SettingsDialog } from '../features/settings/SettingsDialog';
+import { useConnections } from '../features/connections/connectionsStore';
+import { activeEditor } from '../features/editor/editorHandle';
 import { ConnectionDialog } from '../features/connections/ConnectionDialog';
 import type { ConnectionProfile } from '../ipc/types';
 
@@ -12,16 +14,18 @@ export function App() {
   const { ready, error } = useWorkspacePersistence();
   const theme = useAppliedTheme();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const notices = useWorkspace((s) => s.notices);
+  const dismissNotices = useWorkspace((s) => s.dismissNotices);
   // `null` = closed, `'new'` = create, profile = edit.
   const [connectionDialog, setConnectionDialog] = useState<ConnectionProfile | 'new' | null>(null);
 
   const handlers = useMemo(() => {
     const ws = () => useWorkspace.getState();
     return {
-      'console.new': () => ws().newConsole(),
+      'console.new': () => void ws().newConsole(useConnections.getState().selectedId),
       'tab.close': () => {
         const id = ws().activeTabId;
-        if (id) ws().closeTab(id);
+        if (id) void ws().closeTab(id);
       },
       'tab.next': () => ws().cycleTab(1),
       'tab.previous': () => ws().cycleTab(-1),
@@ -29,6 +33,7 @@ export function App() {
       'view.toggleBottomPanel': () => ws().setBottomCollapsed(!ws().bottomCollapsed),
       'settings.open': () => setSettingsOpen(true),
       'datasource.new': () => setConnectionDialog('new'),
+      'editor.format': () => activeEditor()?.format(),
     };
   }, []);
   useKeybindings(handlers);
@@ -49,7 +54,19 @@ export function App() {
           {error}
         </div>
       )}
+      {notices.length > 0 && (
+        <div
+          role="alert"
+          className="flex items-start gap-2 border-b border-border bg-panel-2 px-3 py-1 text-danger"
+        >
+          <span className="flex-1">{notices.join(' ')}</span>
+          <button type="button" className="text-muted underline" onClick={dismissNotices}>
+            Dismiss
+          </button>
+        </div>
+      )}
       <Workbench
+        theme={theme}
         onNewConnection={() => setConnectionDialog('new')}
         onEditConnection={setConnectionDialog}
       />

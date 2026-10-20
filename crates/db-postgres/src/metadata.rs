@@ -43,6 +43,14 @@ const COLUMNS: &str = "
     WHERE n.nspname = $1 AND c.relname = $2
     ORDER BY a.attnum";
 
+const RELATIONS: &str = "
+    SELECT n.nspname, c.relname, c.relkind::text
+    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') AND NOT c.relispartition
+      AND n.nspname <> 'information_schema' AND n.nspname !~ '^pg_'
+      AND has_schema_privilege(n.oid, 'USAGE')
+    ORDER BY n.nspname, c.relname";
+
 const INDEXES: &str = "
     SELECT i.relname, pg_get_indexdef(x.indexrelid), x.indisunique, x.indisprimary
     FROM pg_index x
@@ -176,6 +184,23 @@ pub async fn load(client: &Client, req: &Req) -> Result<Vec<MetaNode>, tokio_pos
                     .detail(Some(detail))
                     .flag(r.get(4), "pk")
                     .flag(r.get(2), "not null")
+            })
+            .collect(),
+
+        Req::Relations => client
+            .query(RELATIONS, &[])
+            .await?
+            .iter()
+            .map(|r| {
+                let schema: String = r.get(0);
+                let name: String = r.get(1);
+                let relkind: String = r.get(2);
+                let kind = match relkind.as_str() {
+                    "v" => MetaKind::View,
+                    "m" => MetaKind::MaterializedView,
+                    _ => MetaKind::Table,
+                };
+                MetaNode::new(format!("{schema}.{name}"), kind, name).detail(Some(schema))
             })
             .collect(),
 

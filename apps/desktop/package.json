@@ -17,9 +17,11 @@
     "@tauri-apps/api": "2.12.4",
     "clsx": "2.1.1",
     "lucide-react": "1.59.0",
+    "monaco-editor": "^0.57.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "react-resizable-panels": "4.14.6",
+    "sql-formatter": "^15.9.0",
     "zustand": "5.0.15"
   },
   "devDependencies": {

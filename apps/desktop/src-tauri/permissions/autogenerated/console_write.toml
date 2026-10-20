@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-console-write"
+description = "Enables the console_write command without any pre-configured scope."
+commands.allow = ["console_write"]
+
+[[permission]]
+identifier = "deny-console-write"
+description = "Denies the console_write command without any pre-configured scope."
+commands.deny = ["console_write"]

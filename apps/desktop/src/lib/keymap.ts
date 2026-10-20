@@ -6,7 +6,8 @@ export type CommandId =
   | 'view.toggleExplorer'
   | 'view.toggleBottomPanel'
   | 'settings.open'
-  | 'datasource.new';
+  | 'datasource.new'
+  | 'editor.format';
 
 /** Default bindings. Phase 5 makes these user-configurable; keep ids stable. */
 export const DEFAULT_KEYMAP: Record<CommandId, string[]> = {
@@ -18,6 +19,7 @@ export const DEFAULT_KEYMAP: Record<CommandId, string[]> = {
   'view.toggleBottomPanel': ['Alt+4'],
   'settings.open': ['Ctrl+Alt+S'],
   'datasource.new': ['Alt+Insert'],
+  'editor.format': ['Ctrl+Alt+L'],
 };
 
 const KEY_ALIASES: Record<string, string> = {

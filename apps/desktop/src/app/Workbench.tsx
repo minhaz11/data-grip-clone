@@ -26,11 +26,12 @@ function useCollapsible(collapsed: boolean, setCollapsed: (c: boolean) => void) 
 }
 
 interface Props {
+  theme: 'light' | 'dark';
   onNewConnection(): void;
   onEditConnection(profile: ConnectionProfile): void;
 }
 
-export function Workbench({ onNewConnection, onEditConnection }: Props) {
+export function Workbench({ theme, onNewConnection, onEditConnection }: Props) {
   const layout = useWorkspace((s) => s.layout);
   const setLayout = useWorkspace((s) => s.setLayout);
   const explorer = useCollapsible(
@@ -72,7 +73,7 @@ export function Workbench({ onNewConnection, onEditConnection }: Props) {
           onLayoutChanged={saveLayout(CENTER)}
         >
           <Panel id="editor" minSize="20">
-            <EditorArea />
+            <EditorArea theme={theme} />
           </Panel>
           <Separator className="h-px" />
           <Panel

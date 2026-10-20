@@ -44,6 +44,9 @@ pub enum MetadataRequest {
         schema: String,
         table: String,
     },
+    /// Every table and view the user can see, flat, for completion. Nodes carry the schema in
+    /// `detail` and `key = "schema.name"`.
+    Relations,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

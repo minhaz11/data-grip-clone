@@ -40,10 +40,6 @@ listed tests run green in CI.
 - **M1.3 Settings + theme**: `store` crate with migrations; settings commands; light/dark/system theme.
   - **AC**: the theme persists; migration tests pass on an empty DB and an upgraded DB.
 
-**Interim deviation (remove in M3.1):** until consoles are file-backed, open console text is kept in
-the `workspace_state` JSON (capped at 8 MB) so it survives restarts. ADR-0004's "consoles are `.sql`
-files" applies from M3.1.
-
 ### Phase 2 — PostgreSQL connectivity
 
 - **M2.1 Connection profiles** ✅: CRUD, duplicate (copies the password, per [DOC] 02), environment
@@ -83,8 +79,24 @@ files" applies from M3.1.
 
 ### Phase 3 — SQL execution
 
-- **M3.1 Editor**: Monaco tabs/consoles backed by files; PostgreSQL highlighting; format; completion
-  for keywords, schemas, tables, and columns.
+- **M3.1 Editor** ✅: Monaco tabs/consoles backed by files; PostgreSQL highlighting; format;
+  completion for keywords, schemas, tables, and columns.
+  - Done: Monaco 0.57 bundled locally (generated entry with only editor features plus the pgsql
+    tokenizer; lazy 4 MB chunk; local worker). One model per tab keeps undo and view state.
+    Consoles are `.sql` files under `<app_data>/consoles/`, addressed by validated names
+    (`quarry-workspace`: create-new, atomic writes, 16 MB cap), with 400 ms autosave and a flush on
+    close or hide. Pre-M3.1 inline text is migrated into files once (StrictMode-safe). Each
+    console is bound to a data source (toolbar picker; tab shows its colour).
+  - Format with Ctrl+Alt+L or the toolbar (sql-formatter, PostgreSQL dialect, keeps keyword
+    case, undoable, parse errors shown inline).
+  - Completion: a lexer-aware statement splitter (quotes, E-strings, dollar quotes, nested
+    comments) finds the current statement. The context detects relations / `alias.` /
+    `schema.`, and aliases resolve to tables. The catalog is one `Relations` query per source,
+    plus columns per table on demand, cached until the session changes. It never connects by
+    itself: without a live session, keywords only. Identifiers are quoted only when needed.
+  - Found while verifying: Tauri `freezePrototype` breaks Monaco at load; disabled, with the
+    trade-off recorded in `docs/security/dependency-advisories.md`. The lazy editor sits behind
+    an error boundary with Retry.
 - **M3.2 Execution**: Rust splitter (dollar quotes, comments, strings); current/selection/script;
   job events; timing; cancel; error position → editor marker.
   - **AC**: `SELECT pg_sleep(30)` cancels within 1 s, and the UI stays responsive throughout.

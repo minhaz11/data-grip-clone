@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { caretPosition } from './PlainSqlEditor';
+import { caretPosition } from './TextareaSqlEditor';
 
 describe('caretPosition', () => {
   it('reports 1-based line and column', () => {

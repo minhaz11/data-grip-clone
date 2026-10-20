@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-console-create"
+description = "Enables the console_create command without any pre-configured scope."
+commands.allow = ["console_create"]
+
+[[permission]]
+identifier = "deny-console-create"
+description = "Denies the console_create command without any pre-configured scope."
+commands.deny = ["console_create"]

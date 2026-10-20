@@ -20,6 +20,10 @@
     "allow-connection-connect",
     "allow-connection-disconnect",
     "allow-sessions-list",
-    "allow-metadata-children"
+    "allow-metadata-children",
+    "allow-console-list",
+    "allow-console-create",
+    "allow-console-read",
+    "allow-console-write"
   ]
 }

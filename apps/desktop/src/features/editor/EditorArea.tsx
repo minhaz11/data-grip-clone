@@ -1,15 +1,22 @@
 import clsx from 'clsx';
-import { X } from 'lucide-react';
-import { useWorkspace } from '../../app/workspaceStore';
+import { AlignLeft, X } from 'lucide-react';
+import { useCallback, useState } from 'react';
+import { useSettings } from '../../app/settingsStore';
+import { useWorkspace, type ConsoleTab } from '../../app/workspaceStore';
 import { shortcutLabel } from '../../lib/keymap';
-import { PlainSqlEditor } from './PlainSqlEditor';
+import { useConnections } from '../connections/connectionsStore';
+import { effectiveColor } from '../connections/model';
+import { activeEditor } from './editorHandle';
+import { SqlEditor } from './SqlEditor';
 
-export function EditorArea() {
+export function EditorArea({ theme }: { theme: 'light' | 'dark' }) {
   const tabs = useWorkspace((s) => s.tabs);
   const activeTabId = useWorkspace((s) => s.activeTabId);
   const activate = useWorkspace((s) => s.activate);
   const closeTab = useWorkspace((s) => s.closeTab);
   const newConsole = useWorkspace((s) => s.newConsole);
+  const sources = useConnections((s) => s.items);
+  const selectedSourceId = useConnections((s) => s.selectedId);
   const active = tabs.find((t) => t.id === activeTabId);
 
   if (tabs.length === 0) {
@@ -21,7 +28,7 @@ export function EditorArea() {
         <p>No open consoles.</p>
         <button
           type="button"
-          onClick={() => newConsole()}
+          onClick={() => void newConsole(selectedSourceId)}
           className="rounded border border-border px-3 py-1 text-fg hover:bg-hover"
         >
           New console <span className="text-muted">({shortcutLabel('console.new')})</span>
@@ -39,6 +46,8 @@ export function EditorArea() {
       >
         {tabs.map((tab) => {
           const selected = tab.id === activeTabId;
+          const source = sources.find((s) => s.id === tab.sourceId);
+          const color = source ? effectiveColor(source) : null;
           return (
             <div
               key={tab.id}
@@ -49,7 +58,8 @@ export function EditorArea() {
                   ? 'bg-bg text-fg shadow-[inset_0_-2px_0_var(--q-accent)]'
                   : 'text-muted hover:bg-hover',
               )}
-              onAuxClick={(e) => e.button === 1 && closeTab(tab.id)}
+              style={color ? { borderTop: `2px solid ${color}` } : undefined}
+              onAuxClick={(e) => e.button === 1 && void closeTab(tab.id)}
             >
               <button
                 type="button"
@@ -59,15 +69,32 @@ export function EditorArea() {
                 aria-controls="editor-tabpanel"
                 tabIndex={selected ? 0 : -1}
                 onClick={() => activate(tab.id)}
+                title={[
+                  `${tab.console}.sql`,
+                  source && `Data source: ${source.name}`,
+                  tab.saveError,
+                ]
+                  .filter(Boolean)
+                  .join('\n')}
                 className="h-full pl-3 pr-1 font-mono text-[12px]"
               >
-                {tab.title}.sql
+                {tab.console}.sql
+                {tab.save === 'error' && (
+                  <span className="ml-1 text-danger" aria-label="save failed">
+                    !
+                  </span>
+                )}
+                {(tab.save === 'pending' || tab.save === 'saving') && (
+                  <span className="ml-1" aria-label="unsaved changes">
+                    •
+                  </span>
+                )}
               </button>
               <button
                 type="button"
-                aria-label={`Close ${tab.title}`}
+                aria-label={`Close ${tab.console}`}
                 title={`Close (${shortcutLabel('tab.close')})`}
-                onClick={() => closeTab(tab.id)}
+                onClick={() => void closeTab(tab.id)}
                 className="mr-1 rounded p-0.5 opacity-60 hover:bg-hover hover:opacity-100"
               >
                 <X size={12} aria-hidden />
@@ -76,21 +103,89 @@ export function EditorArea() {
           );
         })}
       </div>
-      {active && (
-        <div
-          role="tabpanel"
-          id="editor-tabpanel"
-          aria-labelledby={`tab-${active.id}`}
-          className="min-h-0 flex-1"
-        >
-          <PlainSqlEditor
-            key={active.id}
-            tabId={active.id}
-            text={active.text}
-            label={`${active.title} SQL`}
-          />
-        </div>
-      )}
+      {active && <ConsolePane key={active.id} tab={active} theme={theme} />}
     </section>
+  );
+}
+
+function ConsolePane({ tab, theme }: { tab: ConsoleTab; theme: 'light' | 'dark' }) {
+  const fontSize = useSettings((s) => s.settings.editorFontSize);
+  const updateText = useWorkspace((s) => s.updateText);
+  const setSource = useWorkspace((s) => s.setSource);
+  const setCaret = useWorkspace((s) => s.setCaret);
+  const sources = useConnections((s) => s.items);
+  const [formatError, setFormatError] = useState<string | null>(null);
+
+  const onChange = useCallback(
+    (text: string) => {
+      setFormatError(null);
+      updateText(tab.id, text);
+    },
+    [tab.id, updateText],
+  );
+
+  return (
+    <div
+      role="tabpanel"
+      id="editor-tabpanel"
+      aria-labelledby={`tab-${tab.id}`}
+      className="flex min-h-0 flex-1 flex-col"
+    >
+      <div
+        role="toolbar"
+        aria-label="Console toolbar"
+        className="flex h-8 shrink-0 items-center gap-2 border-b border-border px-2 text-[12px]"
+      >
+        <label className="flex items-center gap-1.5">
+          <span className="text-muted">Data source</span>
+          <select
+            value={tab.sourceId ?? ''}
+            onChange={(e) => setSource(tab.id, e.target.value || null)}
+            className="max-w-48 rounded border border-border bg-bg px-1.5 py-0.5"
+          >
+            <option value="">None</option>
+            {sources.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          onClick={() => activeEditor()?.format()}
+          title={`Format (${shortcutLabel('editor.format')})`}
+          className="flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-hover"
+        >
+          <AlignLeft size={13} aria-hidden /> Format
+        </button>
+        {formatError && (
+          <span role="alert" className="min-w-0 truncate text-danger" title={formatError}>
+            {formatError}
+          </span>
+        )}
+        <span className="ml-auto text-muted" aria-live="polite">
+          {tab.save === 'error' ? (
+            <span className="text-danger">Not saved: {tab.saveError}</span>
+          ) : tab.save === 'saved' ? (
+            'Saved'
+          ) : (
+            'Saving…'
+          )}
+        </span>
+      </div>
+      <div className="min-h-0 flex-1">
+        <SqlEditor
+          tabId={tab.id}
+          name={tab.console}
+          value={tab.text}
+          fontSize={fontSize}
+          theme={theme}
+          onChange={onChange}
+          onCaret={setCaret}
+          onFormatError={setFormatError}
+        />
+      </div>
+    </div>
   );
 }

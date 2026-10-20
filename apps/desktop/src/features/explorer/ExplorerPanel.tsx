@@ -9,6 +9,7 @@ import { ConnectionResult } from '../connections/ConnectionResult';
 import { useConnections } from '../connections/connectionsStore';
 import { PasswordPrompt } from '../connections/PasswordPrompt';
 import { useSessions } from '../connections/sessionsStore';
+import { resetCatalog } from '../editor/catalog';
 import { useMetadata } from './metadataStore';
 import { TreeRow } from './TreeRow';
 import { flattenTree, type Row } from './treeModel';
@@ -119,6 +120,7 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
     if (row.type === 'status') return;
     if (row.type === 'source' && sessions[row.profile.id]?.state !== 'connected') return;
     refresh(row.key);
+    resetCatalog(row.profile.id); // completion re-reads the catalog too
   }
 
   function menuItems(row: Row): MenuItem[] {

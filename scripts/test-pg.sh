@@ -4,7 +4,8 @@
 #   scripts/test-pg.sh seed   (re)create a small sample schema "shop" for manual browsing
 #   scripts/test-pg.sh down   remove the container
 #   scripts/test-pg.sh env    print the env vars the integration tests read
-# Credentials and the self-signed certificate are generated fresh under target/test-pg/ (gitignored).
+# The throwaway password (kept across restarts) and a fresh self-signed certificate live under
+# target/test-pg/ (gitignored).
 set -euo pipefail
 
 NAME=quarry-test-pg
@@ -17,7 +18,9 @@ up() {
   docker rm -f "$NAME" >/dev/null 2>&1 || true
   mkdir -p "$DIR"
   umask 077
-  openssl rand -hex 16 > "$DIR/password"
+  # Keep the throwaway password across restarts so saved test profiles keep working;
+  # delete target/test-pg/ to rotate it.
+  [ -s "$DIR/password" ] || openssl rand -hex 16 > "$DIR/password"
   openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj "/CN=localhost" \
     -keyout "$DIR/server.key" -out "$DIR/server.crt" >/dev/null 2>&1
   # The image entrypoint runs as root first, so it can install the key with postgres ownership.

@@ -3074,6 +3074,7 @@ dependencies = [
  "quarry-db-postgres",
  "quarry-secrets",
  "quarry-store",
+ "quarry-workspace",
  "serde",
  "serde_json",
  "tauri",
@@ -3099,6 +3100,14 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "quarry-workspace"
+version = "0.1.0"
+dependencies = [
  "tempfile",
  "thiserror 2.0.21",
 ]

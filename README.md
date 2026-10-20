@@ -32,7 +32,8 @@ cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings
 ## Integration tests (disposable PostgreSQL)
 
 ```bash
-scripts/test-pg.sh up                               # quarry-test-pg on 127.0.0.1:55432, TLS on, fresh random password
+scripts/test-pg.sh up                               # quarry-test-pg on 127.0.0.1:55432, TLS on, throwaway password
+scripts/test-pg.sh seed                             # optional: sample "shop" schema for manual browsing
 cargo test -p quarry-db-postgres -- --ignored
 scripts/test-pg.sh down
 ```

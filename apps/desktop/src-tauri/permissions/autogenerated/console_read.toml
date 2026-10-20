@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-console-read"
+description = "Enables the console_read command without any pre-configured scope."
+commands.allow = ["console_read"]
+
+[[permission]]
+identifier = "deny-console-read"
+description = "Denies the console_read command without any pre-configured scope."
+commands.deny = ["console_read"]

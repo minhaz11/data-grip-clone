@@ -1,10 +1,25 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { nextConsoleTitle, snapshot, useWorkspace } from './workspaceStore';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { backend } from '../ipc/client';
+import {
+  AUTOSAVE_MS,
+  nextConsoleTitle,
+  resetHydrationForTests,
+  snapshot,
+  useWorkspace,
+} from './workspaceStore';
 
 const initial = useWorkspace.getState();
+const ws = () => useWorkspace.getState();
 
 describe('workspace store', () => {
-  beforeEach(() => useWorkspace.setState(initial, true));
+  beforeEach(() => {
+    useWorkspace.setState(initial, true);
+    resetHydrationForTests();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
 
   it('names consoles with the lowest free suffix', () => {
     expect(nextConsoleTitle([])).toBe('console');
@@ -12,55 +27,97 @@ describe('workspace store', () => {
     expect(nextConsoleTitle(['console', 'console_2'])).toBe('console_1');
   });
 
-  it('activates the right neighbour when closing the active tab', () => {
-    const s = useWorkspace.getState();
-    const a = s.newConsole();
-    const b = s.newConsole();
-    const c = s.newConsole();
-    s.activate(b);
-    s.closeTab(b);
-    expect(useWorkspace.getState().activeTabId).toBe(c);
-    s.closeTab(c);
-    expect(useWorkspace.getState().activeTabId).toBe(a);
-    s.closeTab(a);
-    expect(useWorkspace.getState().activeTabId).toBeNull();
+  it('creates console files bound to a data source and activates neighbours on close', async () => {
+    const a = await ws().newConsole('src-1');
+    const b = await ws().newConsole();
+    const c = await ws().newConsole();
+    expect(ws().tabs.find((t) => t.id === a)).toMatchObject({
+      sourceId: 'src-1',
+      text: '',
+      save: 'saved',
+    });
+    ws().activate(b);
+    await ws().closeTab(b);
+    expect(ws().activeTabId).toBe(c);
+    await ws().closeTab(c);
+    expect(ws().activeTabId).toBe(a);
   });
 
-  it('clears the caret when the active console changes', () => {
-    const s = useWorkspace.getState();
-    const a = s.newConsole();
-    s.setCaret({ line: 2, column: 12 });
-    s.newConsole();
-    expect(useWorkspace.getState().caret).toBeNull();
-    s.setCaret({ line: 1, column: 1 });
-    s.activate(a);
-    expect(useWorkspace.getState().caret).toBeNull();
+  it('autosaves text to the console file after a short pause', async () => {
+    vi.useFakeTimers();
+    const write = vi.spyOn(backend, 'consoleWrite');
+    const id = await ws().newConsole();
+    const name = ws().tabs[0]?.console ?? '';
+
+    ws().updateText(id, 'select 1');
+    ws().updateText(id, 'select 12');
+    expect(ws().tabs[0]?.save).toBe('pending');
+    expect(write).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_MS + 10);
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(write).toHaveBeenCalledWith(name, 'select 12');
+    expect(ws().tabs[0]?.save).toBe('saved');
+    expect(await backend.consoleRead(name)).toBe('select 12');
   });
 
-  it('cycles tabs in both directions with wrap-around', () => {
-    const s = useWorkspace.getState();
-    const a = s.newConsole();
-    const b = s.newConsole();
-    s.cycleTab(1);
-    expect(useWorkspace.getState().activeTabId).toBe(a);
-    s.cycleTab(-1);
-    expect(useWorkspace.getState().activeTabId).toBe(b);
+  it('flushes unsaved text when a tab closes and reports write failures', async () => {
+    const id = await ws().newConsole();
+    const name = ws().tabs[0]?.console ?? '';
+    ws().updateText(id, 'select 2');
+    await ws().closeTab(id);
+    expect(await backend.consoleRead(name)).toBe('select 2');
+
+    const other = await ws().newConsole();
+    vi.spyOn(backend, 'consoleWrite').mockRejectedValueOnce({
+      kind: 'storage',
+      message: 'disk full',
+    });
+    ws().updateText(other, 'x');
+    await ws().flushAll();
+    expect(ws().tabs[0]).toMatchObject({ save: 'error', saveError: 'disk full' });
   });
 
-  it('round-trips through snapshot/hydrate and repairs a dangling active tab', () => {
-    const s = useWorkspace.getState();
-    const a = s.newConsole();
-    s.updateText(a, 'select 1;');
-    s.setLayout('main', { explorer: 30, center: 70 });
-    s.setBottomCollapsed(true);
-    const saved = { ...snapshot(useWorkspace.getState()), activeTabId: 'gone' };
+  it('never persists console text in the workspace snapshot', async () => {
+    const id = await ws().newConsole('src');
+    ws().updateText(id, 'secret-ish query text');
+    const snap = snapshot(ws());
+    expect(snap.tabs).toEqual([{ id, console: ws().tabs[0]?.console, sourceId: 'src' }]);
+    expect(JSON.stringify(snap)).not.toContain('secret-ish');
+  });
 
-    useWorkspace.setState(initial, true);
-    useWorkspace.getState().hydrate(saved);
-    const restored = useWorkspace.getState();
-    expect(restored.tabs).toEqual([{ id: a, title: 'console', text: 'select 1;' }]);
-    expect(restored.activeTabId).toBe(a);
-    expect(restored.layout.main).toEqual({ explorer: 30, center: 70 });
-    expect(restored.bottomCollapsed).toBe(true);
+  it('migrates legacy inline text into console files exactly once', async () => {
+    const create = vi.spyOn(backend, 'consoleCreate');
+    const legacy = {
+      layout: {},
+      panels: { explorerCollapsed: false, bottomCollapsed: true },
+      tabs: [{ id: 'old-1', title: 'legacy_tab', text: 'select 42;' }],
+      activeTabId: 'old-1',
+    };
+    // React StrictMode may request hydration twice; the migration must not duplicate files.
+    await Promise.all([ws().hydrate(legacy), ws().hydrate(legacy)]);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(ws().tabs).toEqual([
+      { id: 'old-1', console: 'legacy_tab', sourceId: null, text: 'select 42;', save: 'saved' },
+    ]);
+    expect(await backend.consoleRead('legacy_tab')).toBe('select 42;');
+    expect(ws().bottomCollapsed).toBe(true);
+  });
+
+  it('restores file-backed tabs and reports missing console files', async () => {
+    const name = await backend.consoleCreate('kept');
+    await backend.consoleWrite(name, 'select 7');
+    await ws().hydrate({
+      layout: {},
+      panels: { explorerCollapsed: false, bottomCollapsed: false },
+      tabs: [
+        { id: 't1', console: 'kept', sourceId: 'src' },
+        { id: 't2', console: 'deleted_elsewhere', sourceId: null },
+      ],
+      activeTabId: 't2',
+    });
+    expect(ws().tabs.map((t) => [t.id, t.text])).toEqual([['t1', 'select 7']]);
+    expect(ws().activeTabId).toBe('t1');
+    expect(ws().notices[0]).toContain('deleted_elsewhere');
   });
 });

@@ -1,6 +1,7 @@
 use quarry_connections::ConnectionError;
 use quarry_db_core::{ConnectError, ConnectErrorKind, DbError};
 use quarry_store::StoreError;
+use quarry_workspace::ConsoleError;
 use serde::Serialize;
 
 /// The only error shape that crosses IPC. Messages are user-facing and never contain secrets.
@@ -50,6 +51,17 @@ impl From<ConnectionError> for AppError {
             ConnectionError::Invalid(m) => Self::new("invalid", m),
             ConnectionError::NotFound => Self::new("not_found", err.to_string()),
         }
+    }
+}
+
+impl From<ConsoleError> for AppError {
+    fn from(e: ConsoleError) -> Self {
+        let kind = match e {
+            ConsoleError::InvalidName(_) | ConsoleError::TooLarge(_) => "invalid",
+            ConsoleError::NotFound(_) => "not_found",
+            ConsoleError::Io(_) => "storage",
+        };
+        Self::new(kind, e.to_string())
     }
 }
 

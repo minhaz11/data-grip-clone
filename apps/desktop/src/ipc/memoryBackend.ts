@@ -16,6 +16,7 @@ export function createMemoryBackend(): Backend {
   let workspace: WorkspaceState | null = null;
   let connections: ConnectionProfile[] = [];
   let seq = 0;
+  const consoles = new Map<string, string>();
 
   const fail = (kind: string, message: string) => Promise.reject({ kind, message });
   const nameTaken = (name: string, exceptId?: string) =>
@@ -94,6 +95,20 @@ export function createMemoryBackend(): Backend {
     sessionsList: async () => [],
     onConnectionStatus: async () => () => {},
     metadataChildren: () => fail('not_connected', 'This data source is not connected.'),
+    consoleList: async () => [...consoles.keys()].sort(),
+    consoleCreate: async (preferred) => {
+      let name = preferred && !consoles.has(preferred) ? preferred : 'console';
+      for (let i = 1; consoles.has(name); i++) name = `console_${i}`;
+      consoles.set(name, '');
+      return name;
+    },
+    consoleRead: async (name) =>
+      consoles.get(name) ?? fail('not_found', `console "${name}" does not exist`),
+    consoleWrite: async (name, text) => {
+      if (!consoles.has(name)) return fail('not_found', `console "${name}" does not exist`);
+      consoles.set(name, text);
+      return null;
+    },
     connectionDelete: async (id) => {
       if (!find(id)) return fail('not_found', 'data source not found');
       connections = connections.filter((c) => c.id !== id);

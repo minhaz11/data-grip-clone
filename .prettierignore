@@ -5,3 +5,4 @@ coverage
 docs/reverse-engineering/evidence
 apps/desktop/src-tauri/gen
 package-lock.json
+apps/desktop/src/features/editor/monaco/entry.ts

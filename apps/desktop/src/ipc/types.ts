@@ -8,11 +8,27 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = { theme: 'system', editorFontSize: 13 };
 
+/** An open console tab as persisted; its text lives in the console's `.sql` file. */
+export interface ConsoleTabState {
+  id: string;
+  /** Console file name (without `.sql`). */
+  console: string;
+  /** Data source the console runs against, if bound. */
+  sourceId: string | null;
+}
+
+/** Pre-M3.1 tabs kept their text inline; migrated into console files on load. */
+export interface LegacyTabState {
+  id: string;
+  title: string;
+  text: string;
+}
+
 /** Persisted workbench state restored on startup. */
 export interface WorkspaceState {
   layout: Record<string, Record<string, number>>;
   panels: { explorerCollapsed: boolean; bottomCollapsed: boolean };
-  tabs: { id: string; title: string; text: string }[];
+  tabs: (ConsoleTabState | LegacyTabState)[];
   activeTabId: string | null;
 }
 
@@ -102,7 +118,8 @@ export type MetadataRequest =
   | { level: 'objects'; schema: string; types: ObjectType[] }
   | { level: 'objectGroups'; schema: string; name: string; objectType: ObjectType }
   | { level: 'columns'; schema: string; table: string }
-  | { level: 'indexes'; schema: string; table: string };
+  | { level: 'indexes'; schema: string; table: string }
+  | { level: 'relations' };
 
 export type MetaKind =
   'schema' | 'group' | 'table' | 'view' | 'materialized_view' | 'column' | 'index';

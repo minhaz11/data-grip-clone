@@ -1,6 +1,9 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
-import { afterEach } from 'vitest';
+import { afterEach, vi } from 'vitest';
+
+// Monaco needs a real browser; tests use the textarea editor with the same props.
+vi.mock('../features/editor/MonacoSqlEditor', () => import('../features/editor/TextareaSqlEditor'));
 
 afterEach(() => cleanup());
 

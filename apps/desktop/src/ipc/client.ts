@@ -42,6 +42,11 @@ export interface Backend {
   onConnectionStatus(cb: (e: StatusEvent) => void): Promise<() => void>;
   /** One level of the explorer tree for a connected data source. */
   metadataChildren(id: string, request: MetadataRequest): Promise<MetaNode[]>;
+  consoleList(): Promise<string[]>;
+  /** Creates an empty console file; returns its name (`preferred` if free and valid). */
+  consoleCreate(preferred: string | null): Promise<string>;
+  consoleRead(name: string): Promise<string>;
+  consoleWrite(name: string, text: string): Promise<null>;
 }
 
 const tauriBackend: Backend = {
@@ -63,6 +68,10 @@ const tauriBackend: Backend = {
   sessionsList: () => invoke<SessionStatus[]>('sessions_list'),
   onConnectionStatus: (cb) => listen<StatusEvent>('connection-status', (e) => cb(e.payload)),
   metadataChildren: (id, request) => invoke<MetaNode[]>('metadata_children', { id, request }),
+  consoleList: () => invoke<string[]>('console_list'),
+  consoleCreate: (preferred) => invoke<string>('console_create', { preferred }),
+  consoleRead: (name) => invoke<string>('console_read', { name }),
+  consoleWrite: (name, text) => invoke<null>('console_write', { name, text }),
 };
 
 export function isTauri(): boolean {

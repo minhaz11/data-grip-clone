@@ -1,5 +1,6 @@
 mod commands;
 mod connections;
+mod consoles;
 mod error;
 mod sessions;
 
@@ -23,6 +24,9 @@ pub fn run() {
                 Arc::clone(&store),
                 keyring,
             )));
+            app.manage(Arc::new(quarry_workspace::Consoles::new(
+                dir.join("consoles"),
+            )));
             app.manage(store);
             app.manage(Arc::new(sessions::Sessions::new(Arc::new(PostgresAdapter))));
             Ok(())
@@ -42,6 +46,10 @@ pub fn run() {
             connections::connection_disconnect,
             connections::sessions_list,
             connections::metadata_children,
+            consoles::console_list,
+            consoles::console_create,
+            consoles::console_read,
+            consoles::console_write,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Quarry");

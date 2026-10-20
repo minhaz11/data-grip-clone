@@ -16,6 +16,10 @@ fn main() {
         "connection_disconnect",
         "sessions_list",
         "metadata_children",
+        "console_list",
+        "console_create",
+        "console_read",
+        "console_write",
     ];
     tauri_build::try_build(
         tauri_build::Attributes::new()
