@@ -1,6 +1,7 @@
 //! Engine-neutral adapter contract (ADR-0002). The UI and app layer only see these types; each
 //! engine crate (`quarry-db-postgres`, later MySQL/SQLite) implements [`DatabaseAdapter`].
 
+mod exec;
 mod metadata;
 
 use std::fmt;
@@ -10,6 +11,7 @@ use std::time::Duration;
 use quarry_secrets::SecretString;
 use serde::Serialize;
 
+pub use exec::{Cell, ColumnInfo, ErrorPosition, ExecOptions, StatementOutcome};
 pub use metadata::{MetaKind, MetaNode, MetadataRequest, ObjectType};
 
 /// TLS policy, with libpq semantics: `Prefer`/`Require` encrypt without verifying the certificate;
@@ -134,8 +136,12 @@ pub struct DbError {
     pub detail: Option<String>,
     pub hint: Option<String>,
     pub sqlstate: Option<String>,
+    /// 1-based character offset into the statement where the server located the problem.
+    pub position: Option<ErrorPosition>,
     /// The session is gone (server closed it, network dropped); reconnecting is the remedy.
     pub connection_lost: bool,
+    /// The statement was cancelled (by the user or a timeout).
+    pub cancelled: bool,
 }
 
 impl fmt::Display for DbError {
@@ -154,6 +160,11 @@ pub trait Session: Send + Sync {
     fn is_closed(&self) -> bool;
     /// Children of one tree level. Every query is app-authored and parameterized.
     async fn metadata(&self, request: &MetadataRequest) -> Result<Vec<MetaNode>, DbError>;
+    /// Runs one statement exactly as given (no parameters, no rewriting).
+    async fn execute(&self, sql: &str, options: &ExecOptions) -> Result<StatementOutcome, DbError>;
+    /// Asks the server to cancel whatever this session is running. Returns once the request is
+    /// delivered; the running `execute` then fails with `cancelled = true`.
+    async fn cancel(&self) -> Result<(), DbError>;
     /// Ends the session; waits for in-flight calls to finish first. Idempotent.
     async fn close(&self);
 }

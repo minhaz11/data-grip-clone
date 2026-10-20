@@ -161,7 +161,47 @@ export default function MonacoSqlEditor({
         callbacks.current.onFormatError(e instanceof Error ? e.message : String(e));
       }
     };
-    setActiveEditor({ format, focus: () => editor.focus() });
+    const model = () => editor.getModel();
+    const toOffset = (p: { lineNumber: number; column: number }) => model()?.getOffsetAt(p) ?? 0;
+    setActiveEditor({
+      format,
+      focus: () => editor.focus(),
+      getText: () => editor.getValue(),
+      getSelection: () => {
+        const s = editor.getSelection();
+        if (!s) return { start: 0, end: 0 };
+        return { start: toOffset(s.getStartPosition()), end: toOffset(s.getEndPosition()) };
+      },
+      getCaret: () => toOffset(editor.getPosition() ?? { lineNumber: 1, column: 1 }),
+      revealOffset: (offset) => {
+        const m = model();
+        if (!m) return;
+        const p = m.getPositionAt(offset);
+        editor.setPosition(p);
+        editor.revealPositionInCenterIfOutsideViewport(p);
+        editor.focus();
+      },
+      markError: (start, end, message) => {
+        const m = model();
+        if (!m) return;
+        const from = m.getPositionAt(start);
+        const to = m.getPositionAt(Math.max(end, start + 1));
+        monaco.editor.setModelMarkers(m, 'quarry-exec', [
+          {
+            severity: monaco.MarkerSeverity.Error,
+            message,
+            startLineNumber: from.lineNumber,
+            startColumn: from.column,
+            endLineNumber: to.lineNumber,
+            endColumn: to.column,
+          },
+        ]);
+      },
+      clearMarkers: () => {
+        const m = model();
+        if (m) monaco.editor.setModelMarkers(m, 'quarry-exec', []);
+      },
+    });
 
     return () => {
       subs.forEach((s) => s.dispose());

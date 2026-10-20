@@ -24,6 +24,8 @@
     "allow-console-list",
     "allow-console-create",
     "allow-console-read",
-    "allow-console-write"
+    "allow-console-write",
+    "allow-query-execute",
+    "allow-query-cancel"
   ]
 }

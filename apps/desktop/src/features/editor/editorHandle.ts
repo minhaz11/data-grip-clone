@@ -2,6 +2,15 @@
 export interface EditorHandle {
   format(): void;
   focus(): void;
+  getText(): string;
+  /** Selection as `[start, end)` offsets into the text; empty when start === end. */
+  getSelection(): { start: number; end: number };
+  getCaret(): number;
+  /** Moves the caret to `offset`, scrolls it into view and focuses the editor. */
+  revealOffset(offset: number): void;
+  /** Underlines `[start, end)` as an error with `message`; replaces any previous marker. */
+  markError(start: number, end: number, message: string): void;
+  clearMarkers(): void;
 }
 
 let active: EditorHandle | null = null;

@@ -97,10 +97,31 @@ listed tests run green in CI.
   - Found while verifying: Tauri `freezePrototype` breaks Monaco at load; disabled, with the
     trade-off recorded in `docs/security/dependency-advisories.md`. The lazy editor sits behind
     an error boundary with Retry.
-- **M3.2 Execution**: Rust splitter (dollar quotes, comments, strings); current/selection/script;
-  job events; timing; cancel; error position → editor marker.
+- **M3.2 Execution** ✅: current/selection/script; job events; timing; cancel; error position →
+  editor marker.
   - **AC**: `SELECT pg_sleep(30)` cancels within 1 s, and the UI stays responsive throughout.
   - **AC**: a syntax error underlines the right token.
+  - Done:
+    - Statements run one at a time over the simple-query protocol. Values arrive as text (exact
+      numeric/int8/timestamps, every type works), with column types from a describe-only
+      prepare. The first 500 rows are kept and the rest counted; long cells are clipped and
+      marked.
+    - Scripts stop at the first error. Cancel is out-of-band (`CancelToken`); SQLSTATE 57014
+      maps to "cancelled".
+    - Jobs stream to the console that started them over a Tauri `Channel`, one job per data
+      source at a time.
+    - The splitter in `lib/sql/statements.ts` picks the selection, current statement, or script.
+      Ctrl+Enter runs, Ctrl+Shift+F10 runs the script, Ctrl+F2 stops.
+    - Error positions become a Monaco marker plus a clickable line:column in Output.
+    - Safety guards run before anything is sent. A statement classifier (CTE writes,
+      `EXPLAIN ANALYZE`, DELETE/UPDATE without WHERE, DROP/TRUNCATE/ALTER … DROP) drives them:
+      read-only sources block writes client-side (and server-side via
+      `default_transaction_read_only`); destructive statements and production writes need
+      confirmation, with Cancel focused. The same path will serve AI-generated SQL.
+    - Integration tests (disposable server): typed exact values, cap and count, affected rows,
+      error positions, cancel < 1 s with the session reusable, read-only rejection.
+  - Not yet: NOTICE messages, per-console sessions, transaction mode controls (REQ-TX-01),
+    query history (Phase 5), statement timeouts as a setting.
 - **M3.3 Grid + export**: virtualized paged grid; multiple result tabs; CSV/JSON export streamed from
   the backend.
   - **AC**: a 1M-row result never sends more than 2 pages over IPC at once; it scrolls smoothly in

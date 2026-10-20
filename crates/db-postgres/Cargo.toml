@@ -8,6 +8,7 @@ description = "PostgreSQL adapter (tokio-postgres + rustls)."
 
 [dependencies]
 async-trait = "0.1.92"
+futures-util = "0.3.34"
 quarry-db-core.workspace = true
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 rustls-native-certs = "0.8.5"

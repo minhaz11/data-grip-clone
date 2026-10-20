@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { AlignLeft, X } from 'lucide-react';
+import { AlignLeft, ListChecks, Play, Square, X } from 'lucide-react';
 import { useCallback, useState } from 'react';
 import { useSettings } from '../../app/settingsStore';
 import { useWorkspace, type ConsoleTab } from '../../app/workspaceStore';
@@ -8,6 +8,8 @@ import { useConnections } from '../connections/connectionsStore';
 import { effectiveColor } from '../connections/model';
 import { activeEditor } from './editorHandle';
 import { SqlEditor } from './SqlEditor';
+import { isRunning, useExec } from '../exec/execStore';
+import { runFromEditor } from '../exec/runQuery';
 
 export function EditorArea({ theme }: { theme: 'light' | 'dark' }) {
   const tabs = useWorkspace((s) => s.tabs);
@@ -115,6 +117,8 @@ function ConsolePane({ tab, theme }: { tab: ConsoleTab; theme: 'light' | 'dark' 
   const setCaret = useWorkspace((s) => s.setCaret);
   const sources = useConnections((s) => s.items);
   const [formatError, setFormatError] = useState<string | null>(null);
+  const running = useExec((s) => isRunning(s.runs[tab.id]));
+  const cancel = useExec((s) => s.cancel);
 
   const onChange = useCallback(
     (text: string) => {
@@ -151,6 +155,34 @@ function ConsolePane({ tab, theme }: { tab: ConsoleTab; theme: 'light' | 'dark' 
             ))}
           </select>
         </label>
+        <button
+          type="button"
+          onClick={() => void runFromEditor('current')}
+          disabled={running}
+          title={`Run statement or selection (${shortcutLabel('query.run')})`}
+          className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[#3f9d5a] hover:bg-hover disabled:opacity-40"
+        >
+          <Play size={13} aria-hidden /> Run
+        </button>
+        <button
+          type="button"
+          onClick={() => void runFromEditor('script')}
+          disabled={running}
+          title={`Run whole console (${shortcutLabel('query.runScript')})`}
+          className="flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-hover disabled:opacity-40"
+        >
+          <ListChecks size={13} aria-hidden /> Run script
+        </button>
+        <button
+          type="button"
+          onClick={() => void cancel(tab.id)}
+          disabled={!running}
+          title={`Stop (${shortcutLabel('query.cancel')})`}
+          className="flex items-center gap-1 rounded px-1.5 py-0.5 text-danger hover:bg-hover disabled:opacity-40"
+        >
+          <Square size={12} aria-hidden /> Stop
+        </button>
+        <span className="mx-1 h-4 w-px bg-border" aria-hidden />
         <button
           type="button"
           onClick={() => activeEditor()?.format()}

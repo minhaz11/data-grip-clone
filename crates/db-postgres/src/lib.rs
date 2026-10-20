@@ -1,6 +1,7 @@
 //! PostgreSQL adapter (ADR-0002): tokio-postgres over rustls.
 
 mod errors;
+mod exec;
 mod metadata;
 mod tls;
 
@@ -10,13 +11,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use quarry_db_core::{
-    ConnectError, ConnectErrorKind, ConnectParams, DatabaseAdapter, DbError, MetaNode,
-    MetadataRequest, OnClose, ServerInfo, Session, TlsMode,
+    ConnectError, ConnectErrorKind, ConnectParams, DatabaseAdapter, DbError, ExecOptions, MetaNode,
+    MetadataRequest, OnClose, ServerInfo, Session, StatementOutcome, TlsMode,
 };
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
-use tokio_postgres::Client;
 use tokio_postgres::config::SslMode;
+use tokio_postgres::{CancelToken, Client};
 use tokio_postgres_rustls::MakeRustlsConnect;
 
 /// Resolved addresses tried per host; libpq also tries every address a name resolves to.
@@ -49,6 +50,9 @@ pub struct PgSession {
     info: ServerInfo,
     closed: Arc<AtomicBool>,
     task: Mutex<Option<JoinHandle<()>>>,
+    /// Out-of-band cancel: opens a short connection with the session's own TLS settings.
+    cancel_token: CancelToken,
+    tls: MakeRustlsConnect,
 }
 
 impl PgSession {
@@ -74,6 +78,18 @@ impl Session for PgSession {
                 .client
                 .try_read()
                 .is_ok_and(|c| c.as_ref().is_none_or(Client::is_closed))
+    }
+
+    async fn execute(&self, sql: &str, options: &ExecOptions) -> Result<StatementOutcome, DbError> {
+        self.with_client(async |client| exec::run(client, sql, options).await)
+            .await
+    }
+
+    async fn cancel(&self) -> Result<(), DbError> {
+        self.cancel_token
+            .cancel_query(self.tls.clone())
+            .await
+            .map_err(|e| errors::db_error(&e))
     }
 
     async fn metadata(&self, request: &MetadataRequest) -> Result<Vec<MetaNode>, DbError> {
@@ -145,11 +161,12 @@ async fn open(
 
     let tls = MakeRustlsConnect::new(tls::client_config(params.tls).map_err(errors::tls_setup)?);
     let remaining = deadline.saturating_sub(started.elapsed());
-    let (client, connection) = match tokio::time::timeout(remaining, config.connect(tls)).await {
-        Err(_) => return Err(errors::timeout(params, deadline)),
-        Ok(Err(e)) => return Err(errors::classify(&e, params, params.password.is_some())),
-        Ok(Ok(pair)) => pair,
-    };
+    let (client, connection) =
+        match tokio::time::timeout(remaining, config.connect(tls.clone())).await {
+            Err(_) => return Err(errors::timeout(params, deadline)),
+            Ok(Err(e)) => return Err(errors::classify(&e, params, params.password.is_some())),
+            Ok(Ok(pair)) => pair,
+        };
 
     let closed = Arc::new(AtomicBool::new(false));
     let task = {
@@ -199,6 +216,8 @@ async fn open(
         latency_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
     };
     Ok(PgSession {
+        cancel_token: client.cancel_token(),
+        tls,
         client: RwLock::new(Some(client)),
         info,
         closed,

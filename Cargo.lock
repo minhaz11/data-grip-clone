@@ -3056,6 +3056,7 @@ name = "quarry-db-postgres"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "futures-util",
  "quarry-db-core",
  "quarry-secrets",
  "rustls",
@@ -3080,6 +3081,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

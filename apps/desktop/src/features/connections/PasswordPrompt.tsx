@@ -8,9 +8,12 @@ import { useSessions } from './sessionsStore';
 export function PasswordPrompt({
   profile,
   onClose,
+  onConnected,
 }: {
   profile: ConnectionProfile;
   onClose(): void;
+  /** Called once the session is open, before `onClose`. */
+  onConnected?(): void;
 }) {
   const connect = useSessions((s) => s.connect);
   const [password, setPassword] = useState('');
@@ -22,7 +25,10 @@ export function PasswordPrompt({
     const err = await connect(profile.id, password);
     setBusy(false);
     if (err) setError(err);
-    else onClose();
+    else {
+      onConnected?.();
+      onClose();
+    }
   }
 
   return (

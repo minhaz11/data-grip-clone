@@ -23,7 +23,13 @@ pub fn db_error(e: &tokio_postgres::Error) -> DbError {
             detail: db.detail().map(str::to_owned),
             hint: db.hint().map(str::to_owned),
             sqlstate: Some(db.code().code().to_owned()),
+            position: match db.position() {
+                Some(tokio_postgres::error::ErrorPosition::Original(p)) => Some(*p),
+                _ => None,
+            },
             connection_lost: false,
+            // query_canceled: user cancel or statement_timeout
+            cancelled: db.code().code() == "57014",
         },
         None => DbError {
             message: e.to_string(),
@@ -32,7 +38,9 @@ pub fn db_error(e: &tokio_postgres::Error) -> DbError {
                 .is_closed()
                 .then(|| "Reconnect to the data source.".to_owned()),
             sqlstate: None,
+            position: None,
             connection_lost: e.is_closed(),
+            cancelled: false,
         },
     }
 }
@@ -43,7 +51,9 @@ pub fn session_closed() -> DbError {
         detail: None,
         hint: Some("Reconnect to the data source.".into()),
         sqlstate: None,
+        position: None,
         connection_lost: true,
+        cancelled: false,
     }
 }
 

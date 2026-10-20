@@ -95,6 +95,8 @@ export function createMemoryBackend(): Backend {
     sessionsList: async () => [],
     onConnectionStatus: async () => () => {},
     metadataChildren: () => fail('not_connected', 'This data source is not connected.'),
+    queryExecute: () => fail('unsupported', 'Running queries requires the Quarry desktop app.'),
+    queryCancel: async () => null,
     consoleList: async () => [...consoles.keys()].sort(),
     consoleCreate: async (preferred) => {
       let name = preferred && !consoles.has(preferred) ? preferred : 'console';

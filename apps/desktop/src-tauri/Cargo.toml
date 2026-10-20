@@ -24,6 +24,7 @@ quarry-workspace.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio = { version = "1.53.3", features = ["sync"] }
+uuid = { version = "1.28.0", features = ["v4"] }
 
 [lints]
 workspace = true

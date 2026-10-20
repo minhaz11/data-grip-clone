@@ -2,6 +2,7 @@ mod commands;
 mod connections;
 mod consoles;
 mod error;
+mod exec;
 mod sessions;
 
 use std::sync::Arc;
@@ -28,6 +29,7 @@ pub fn run() {
                 dir.join("consoles"),
             )));
             app.manage(store);
+            app.manage(Arc::new(exec::Jobs::default()));
             app.manage(Arc::new(sessions::Sessions::new(Arc::new(PostgresAdapter))));
             Ok(())
         })
@@ -50,6 +52,8 @@ pub fn run() {
             consoles::console_create,
             consoles::console_read,
             consoles::console_write,
+            exec::query_execute,
+            exec::query_cancel,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Quarry");

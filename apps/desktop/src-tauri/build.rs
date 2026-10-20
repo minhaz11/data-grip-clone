@@ -20,6 +20,8 @@ fn main() {
         "console_create",
         "console_read",
         "console_write",
+        "query_execute",
+        "query_cancel",
     ];
     tauri_build::try_build(
         tauri_build::Attributes::new()

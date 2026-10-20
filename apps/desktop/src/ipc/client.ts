@@ -1,8 +1,10 @@
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type {
   ConnectionDraft,
   ConnectionProfile,
+  ExecEvent,
+  ExecRequest,
   MetaNode,
   MetadataRequest,
   PasswordChange,
@@ -47,6 +49,9 @@ export interface Backend {
   consoleCreate(preferred: string | null): Promise<string>;
   consoleRead(name: string): Promise<string>;
   consoleWrite(name: string, text: string): Promise<null>;
+  /** Starts a query job; resolves to its id at once. Progress arrives through `onEvent`. */
+  queryExecute(request: ExecRequest, onEvent: (e: ExecEvent) => void): Promise<string>;
+  queryCancel(jobId: string): Promise<null>;
 }
 
 const tauriBackend: Backend = {
@@ -72,6 +77,12 @@ const tauriBackend: Backend = {
   consoleCreate: (preferred) => invoke<string>('console_create', { preferred }),
   consoleRead: (name) => invoke<string>('console_read', { name }),
   consoleWrite: (name, text) => invoke<null>('console_write', { name, text }),
+  queryExecute: (request, onEvent) => {
+    const channel = new Channel<ExecEvent>();
+    channel.onmessage = onEvent;
+    return invoke<string>('query_execute', { request, onEvent: channel });
+  },
+  queryCancel: (jobId) => invoke<null>('query_cancel', { jobId }),
 };
 
 export function isTauri(): boolean {

@@ -7,7 +7,10 @@ export type CommandId =
   | 'view.toggleBottomPanel'
   | 'settings.open'
   | 'datasource.new'
-  | 'editor.format';
+  | 'editor.format'
+  | 'query.run'
+  | 'query.runScript'
+  | 'query.cancel';
 
 /** Default bindings. Phase 5 makes these user-configurable; keep ids stable. */
 export const DEFAULT_KEYMAP: Record<CommandId, string[]> = {
@@ -20,6 +23,9 @@ export const DEFAULT_KEYMAP: Record<CommandId, string[]> = {
   'settings.open': ['Ctrl+Alt+S'],
   'datasource.new': ['Alt+Insert'],
   'editor.format': ['Ctrl+Alt+L'],
+  'query.run': ['Ctrl+Enter'],
+  'query.runScript': ['Ctrl+Shift+F10'],
+  'query.cancel': ['Ctrl+F2'],
 };
 
 const KEY_ALIASES: Record<string, string> = {

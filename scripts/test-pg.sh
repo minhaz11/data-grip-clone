@@ -24,7 +24,7 @@ up() {
   openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj "/CN=localhost" \
     -keyout "$DIR/server.key" -out "$DIR/server.crt" >/dev/null 2>&1
   # The image entrypoint runs as root first, so it can install the key with postgres ownership.
-  docker run -d --rm --name "$NAME" \
+  docker run -d --restart unless-stopped --name "$NAME" \
     -p "127.0.0.1:$PORT:5432" \
     -e POSTGRES_USER=quarry -e POSTGRES_DB=quarry_test \
     -e POSTGRES_PASSWORD="$(cat "$DIR/password")" \

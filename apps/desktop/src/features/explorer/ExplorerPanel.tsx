@@ -7,7 +7,7 @@ import type { AppError, ConnectionProfile } from '../../ipc/types';
 import { shortcutLabel } from '../../lib/keymap';
 import { ConnectionResult } from '../connections/ConnectionResult';
 import { useConnections } from '../connections/connectionsStore';
-import { PasswordPrompt } from '../connections/PasswordPrompt';
+import { askPasswordAndConnect } from '../../app/dialogs';
 import { useSessions } from '../connections/sessionsStore';
 import { resetCatalog } from '../editor/catalog';
 import { useMetadata } from './metadataStore';
@@ -38,7 +38,6 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
   const [pendingDelete, setPendingDelete] = useState<ConnectionProfile | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [connectError, setConnectError] = useState<{ name: string; error: AppError } | null>(null);
-  const [passwordFor, setPasswordFor] = useState<ConnectionProfile | null>(null);
   const treeRef = useRef<HTMLUListElement>(null);
 
   const rows = useMemo(
@@ -88,8 +87,8 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
   async function runConnect(p: ConnectionProfile): Promise<boolean> {
     setConnectError(null);
     const error = await connect(p.id);
-    if (error?.connectKind === 'password_required') setPasswordFor(p);
-    else if (error) setConnectError({ name: p.name, error });
+    if (error?.connectKind === 'password_required') return askPasswordAndConnect(p);
+    if (error) setConnectError({ name: p.name, error });
     return error === null;
   }
 
@@ -303,7 +302,6 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
           onClose={() => setMenu(null)}
         />
       )}
-      {passwordFor && <PasswordPrompt profile={passwordFor} onClose={() => setPasswordFor(null)} />}
       {pendingDelete && (
         <ConfirmDialog
           title="Delete Data Source"

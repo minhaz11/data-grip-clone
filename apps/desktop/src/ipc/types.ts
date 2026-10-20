@@ -133,3 +133,60 @@ export interface MetaNode {
   flags?: string[];
   children?: MetadataRequest;
 }
+
+// ---- Query execution (mirrors src-tauri/src/exec.rs + quarry_db_core::exec) ----
+
+export interface ColumnInfo {
+  name: string;
+  typeName?: string;
+}
+
+/** Text form of a value as the server renders it; `null` is SQL NULL. */
+export type Cell = string | null;
+
+export type StatementOutcome =
+  | { type: 'rows'; columns: ColumnInfo[]; rows: Cell[][]; totalRows: number; truncated: boolean }
+  | { type: 'command'; rowsAffected: number };
+
+export interface StatementError {
+  message: string;
+  detail?: string | null;
+  hint?: string | null;
+  sqlstate?: string | null;
+  /** 1-based character position within the statement. */
+  position?: number | null;
+  cancelled: boolean;
+  connectionLost: boolean;
+}
+
+export interface StatementRequest {
+  sql: string;
+  /** Start of the statement in the console text. */
+  offset: number;
+}
+
+export interface ExecRequest {
+  sourceId: string;
+  statements: StatementRequest[];
+  maxRows?: number;
+}
+
+export type JobStatus = 'completed' | 'failed' | 'cancelled';
+
+export type ExecEvent =
+  | { event: 'statementStarted'; index: number; offset: number }
+  | {
+      event: 'statementDone';
+      index: number;
+      offset: number;
+      elapsedMs: number;
+      outcome: StatementOutcome;
+    }
+  | {
+      event: 'statementFailed';
+      index: number;
+      offset: number;
+      elapsedMs: number;
+      error: StatementError;
+    }
+  | { event: 'finished'; status: JobStatus; executed: number; elapsedMs: number };

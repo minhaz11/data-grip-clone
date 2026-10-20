@@ -41,7 +41,9 @@ describe('App workbench', () => {
     expect(JSON.stringify(save.mock.lastCall)).not.toContain('select 1;');
 
     await user.keyboard('{Control>}w{/Control}');
-    expect(within(screen.getByRole('tablist')).getAllByRole('tab')).toHaveLength(1);
+    expect(
+      within(screen.getByRole('tablist', { name: 'Open consoles' })).getAllByRole('tab'),
+    ).toHaveLength(1);
   });
 
   it('changes and persists the theme through the settings dialog', async () => {

@@ -100,7 +100,7 @@ impl Sessions {
     }
 
     /// The open session for `id`, if any. The registry lock is released before the caller uses it.
-    async fn get(&self, id: &str) -> Result<Arc<dyn Session>, AppError> {
+    pub async fn get(&self, id: &str) -> Result<Arc<dyn Session>, AppError> {
         self.live
             .lock()
             .await

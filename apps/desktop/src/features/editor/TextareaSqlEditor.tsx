@@ -24,8 +24,25 @@ export default function TextareaSqlEditor({
   const ref = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
+    const el = () => ref.current;
     setActiveEditor({
-      focus: () => ref.current?.focus(),
+      focus: () => el()?.focus(),
+      getText: () => el()?.value ?? '',
+      getSelection: () => ({ start: el()?.selectionStart ?? 0, end: el()?.selectionEnd ?? 0 }),
+      getCaret: () => el()?.selectionStart ?? 0,
+      revealOffset: (offset) => {
+        el()?.setSelectionRange(offset, offset);
+        el()?.focus();
+      },
+      // The plain editor cannot underline; it exposes the marker for tests and assistive tech.
+      markError: (start, end, message) => {
+        el()?.setAttribute('data-error', `${start}-${end}`);
+        el()?.setAttribute('aria-description', message);
+      },
+      clearMarkers: () => {
+        el()?.removeAttribute('data-error');
+        el()?.removeAttribute('aria-description');
+      },
       format: () => {
         try {
           onChange(formatSql(ref.current?.value ?? ''));

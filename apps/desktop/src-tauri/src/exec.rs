@@ -1,0 +1,245 @@
+//! Query jobs: a script runs statement by statement on the data source's session, streaming
+//! progress to the console that started it through a Tauri `Channel`.
+
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
+
+use quarry_db_core::{DbError, ExecOptions, Session, StatementOutcome};
+use serde::{Deserialize, Serialize};
+use tauri::State;
+use tauri::ipc::Channel;
+use tokio::sync::Mutex;
+
+use crate::error::AppError;
+use crate::sessions::Sessions;
+
+pub const MAX_STATEMENTS: usize = 1_000;
+const MAX_ROWS_LIMIT: usize = 10_000;
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatementRequest {
+    pub sql: String,
+    /// Where the statement starts in the console text; echoed back so the UI can map positions.
+    pub offset: u32,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecRequest {
+    pub source_id: String,
+    pub statements: Vec<StatementRequest>,
+    pub max_rows: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatementError {
+    pub message: String,
+    pub detail: Option<String>,
+    pub hint: Option<String>,
+    pub sqlstate: Option<String>,
+    /// 1-based character position within the statement, from the server.
+    pub position: Option<u32>,
+    pub cancelled: bool,
+    pub connection_lost: bool,
+}
+
+impl From<DbError> for StatementError {
+    fn from(e: DbError) -> Self {
+        Self {
+            message: e.message,
+            detail: e.detail,
+            hint: e.hint,
+            sqlstate: e.sqlstate,
+            position: e.position,
+            cancelled: e.cancelled,
+            connection_lost: e.connection_lost,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JobStatus {
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase", tag = "event")]
+pub enum ExecEvent {
+    StatementStarted {
+        index: usize,
+        offset: u32,
+    },
+    StatementDone {
+        index: usize,
+        offset: u32,
+        elapsed_ms: u64,
+        outcome: StatementOutcome,
+    },
+    StatementFailed {
+        index: usize,
+        offset: u32,
+        elapsed_ms: u64,
+        error: StatementError,
+    },
+    Finished {
+        status: JobStatus,
+        executed: usize,
+        elapsed_ms: u64,
+    },
+}
+
+struct Job {
+    source_id: String,
+    session: Arc<dyn Session>,
+    cancel_requested: AtomicBool,
+}
+
+#[derive(Default)]
+pub struct Jobs {
+    running: Mutex<HashMap<String, Arc<Job>>>,
+}
+
+fn millis(since: Instant) -> u64 {
+    u64::try_from(since.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
+impl Jobs {
+    async fn start(
+        self: &Arc<Self>,
+        sessions: &Sessions,
+        request: ExecRequest,
+        channel: Channel<ExecEvent>,
+    ) -> Result<String, AppError> {
+        if request.statements.is_empty() {
+            return Err(AppError::new("invalid", "Nothing to execute."));
+        }
+        if request.statements.len() > MAX_STATEMENTS {
+            return Err(AppError::new(
+                "invalid",
+                format!("At most {MAX_STATEMENTS} statements per run."),
+            ));
+        }
+        let session = sessions.get(&request.source_id).await?;
+        let job_id = uuid::Uuid::new_v4().to_string();
+        {
+            let mut running = self.running.lock().await;
+            // One job per session: a server-side cancel stops whatever the session is running.
+            if running.values().any(|j| j.source_id == request.source_id) {
+                return Err(AppError::new(
+                    "busy",
+                    "A query is already running on this data source. Stop it first.",
+                ));
+            }
+            running.insert(
+                job_id.clone(),
+                Arc::new(Job {
+                    source_id: request.source_id.clone(),
+                    session,
+                    cancel_requested: AtomicBool::new(false),
+                }),
+            );
+        }
+
+        let options = ExecOptions {
+            max_rows: request
+                .max_rows
+                .unwrap_or(ExecOptions::default().max_rows)
+                .clamp(1, MAX_ROWS_LIMIT),
+            ..ExecOptions::default()
+        };
+        let jobs = Arc::clone(self);
+        let id = job_id.clone();
+        tauri::async_runtime::spawn(async move {
+            jobs.run(&id, request.statements, options, channel).await;
+            jobs.running.lock().await.remove(&id);
+        });
+        Ok(job_id)
+    }
+
+    async fn run(
+        &self,
+        job_id: &str,
+        statements: Vec<StatementRequest>,
+        options: ExecOptions,
+        channel: Channel<ExecEvent>,
+    ) {
+        let Some(job) = self.running.lock().await.get(job_id).cloned() else {
+            return;
+        };
+        let started = Instant::now();
+        let mut status = JobStatus::Completed;
+        let mut executed = 0;
+        for (index, statement) in statements.iter().enumerate() {
+            if job.cancel_requested.load(Ordering::SeqCst) {
+                status = JobStatus::Cancelled;
+                break;
+            }
+            let offset = statement.offset;
+            let _ = channel.send(ExecEvent::StatementStarted { index, offset });
+            let at = Instant::now();
+            let result = job.session.execute(&statement.sql, &options).await;
+            executed += 1;
+            match result {
+                Ok(outcome) => {
+                    let _ = channel.send(ExecEvent::StatementDone {
+                        index,
+                        offset,
+                        elapsed_ms: millis(at),
+                        outcome,
+                    });
+                }
+                Err(e) => {
+                    let cancelled = e.cancelled || job.cancel_requested.load(Ordering::SeqCst);
+                    let _ = channel.send(ExecEvent::StatementFailed {
+                        index,
+                        offset,
+                        elapsed_ms: millis(at),
+                        error: e.into(),
+                    });
+                    // Scripts stop at the first error, like running them through psql -v ON_ERROR_STOP.
+                    status = if cancelled {
+                        JobStatus::Cancelled
+                    } else {
+                        JobStatus::Failed
+                    };
+                    break;
+                }
+            }
+        }
+        let _ = channel.send(ExecEvent::Finished {
+            status,
+            executed,
+            elapsed_ms: millis(started),
+        });
+    }
+
+    async fn cancel(&self, job_id: &str) -> Result<(), AppError> {
+        let job = self.running.lock().await.get(job_id).cloned();
+        let Some(job) = job else { return Ok(()) }; // already finished
+        job.cancel_requested.store(true, Ordering::SeqCst);
+        job.session.cancel().await.map_err(AppError::from)
+    }
+}
+
+/// Starts a job and returns its id at once; progress arrives on `on_event`.
+#[tauri::command]
+pub async fn query_execute(
+    jobs: State<'_, Arc<Jobs>>,
+    sessions: State<'_, Arc<Sessions>>,
+    request: ExecRequest,
+    on_event: Channel<ExecEvent>,
+) -> Result<String, AppError> {
+    jobs.inner().start(&sessions, request, on_event).await
+}
+
+#[tauri::command]
+pub async fn query_cancel(jobs: State<'_, Arc<Jobs>>, job_id: String) -> Result<(), AppError> {
+    jobs.cancel(&job_id).await
+}

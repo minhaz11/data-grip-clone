@@ -7,6 +7,9 @@ import { useWorkspace } from './workspaceStore';
 import { SettingsDialog } from '../features/settings/SettingsDialog';
 import { useConnections } from '../features/connections/connectionsStore';
 import { activeEditor } from '../features/editor/editorHandle';
+import { useExec } from '../features/exec/execStore';
+import { runFromEditor } from '../features/exec/runQuery';
+import { DialogHost } from './dialogs';
 import { ConnectionDialog } from '../features/connections/ConnectionDialog';
 import type { ConnectionProfile } from '../ipc/types';
 
@@ -34,6 +37,12 @@ export function App() {
       'settings.open': () => setSettingsOpen(true),
       'datasource.new': () => setConnectionDialog('new'),
       'editor.format': () => activeEditor()?.format(),
+      'query.run': () => void runFromEditor('current'),
+      'query.runScript': () => void runFromEditor('script'),
+      'query.cancel': () => {
+        const id = ws().activeTabId;
+        if (id) void useExec.getState().cancel(id);
+      },
     };
   }, []);
   useKeybindings(handlers);
@@ -71,6 +80,7 @@ export function App() {
         onEditConnection={setConnectionDialog}
       />
       <StatusBar theme={theme} />
+      <DialogHost />
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
       {connectionDialog && (
         <ConnectionDialog
