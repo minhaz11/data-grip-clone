@@ -145,7 +145,16 @@ export interface ColumnInfo {
 export type Cell = string | null;
 
 export type StatementOutcome =
-  | { type: 'rows'; columns: ColumnInfo[]; rows: Cell[][]; totalRows: number; truncated: boolean }
+  | {
+      type: 'rows';
+      columns: ColumnInfo[];
+      /** First page. */
+      rows: Cell[][];
+      totalRows: number;
+      truncated: boolean;
+      /** Server-side cursor with the full result (paging, export); absent for capped results. */
+      cursor?: string;
+    }
   | { type: 'command'; rowsAffected: number };
 
 export interface StatementError {
@@ -190,3 +199,11 @@ export type ExecEvent =
       error: StatementError;
     }
   | { event: 'finished'; status: JobStatus; executed: number; elapsedMs: number };
+
+export type ExportFormat = 'csv' | 'json';
+
+export interface ExportSummary {
+  path: string;
+  rows: number;
+  bytes: number;
+}

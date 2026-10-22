@@ -17,6 +17,9 @@ tokio-postgres = "0.7.18"
 tokio-postgres-rustls = { version = "0.14.0", features = ["ring"] }
 
 [dev-dependencies]
+quarry-io.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
 quarry-secrets = { path = "../secrets" }
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros"] }
 

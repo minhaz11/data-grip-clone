@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/store", "crates/secrets", "crates/connections", "crates/db-core", "crates/db-postgres", "crates/workspace", "apps/desktop/src-tauri"]
+members = ["crates/store", "crates/secrets", "crates/connections", "crates/db-core", "crates/db-postgres", "crates/workspace", "crates/io", "apps/desktop/src-tauri"]
 
 [workspace.package]
 edition = "2024"
@@ -14,6 +14,7 @@ quarry-connections = { path = "crates/connections" }
 quarry-db-core = { path = "crates/db-core" }
 quarry-db-postgres = { path = "crates/db-postgres" }
 quarry-workspace = { path = "crates/workspace" }
+quarry-io = { path = "crates/io" }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"

@@ -3,8 +3,12 @@ import { listen } from '@tauri-apps/api/event';
 import type {
   ConnectionDraft,
   ConnectionProfile,
+  Cell,
+  ColumnInfo,
   ExecEvent,
   ExecRequest,
+  ExportFormat,
+  ExportSummary,
   MetaNode,
   MetadataRequest,
   PasswordChange,
@@ -52,6 +56,18 @@ export interface Backend {
   /** Starts a query job; resolves to its id at once. Progress arrives through `onEvent`. */
   queryExecute(request: ExecRequest, onEvent: (e: ExecEvent) => void): Promise<string>;
   queryCancel(jobId: string): Promise<null>;
+  /** Rows `[offset, offset + limit)` of a result cursor (limit ≤ 2000). */
+  resultPage(sourceId: string, cursor: string, offset: number, limit: number): Promise<Cell[][]>;
+  resultClose(sourceId: string, cursor: string): Promise<null>;
+  /** Native save dialog + streamed export in the backend; `null` if the user cancelled. */
+  resultExport(
+    sourceId: string,
+    cursor: string,
+    columns: ColumnInfo[],
+    format: ExportFormat,
+    fileName: string,
+    onProgress: (rows: number) => void,
+  ): Promise<ExportSummary | null>;
 }
 
 const tauriBackend: Backend = {
@@ -83,6 +99,21 @@ const tauriBackend: Backend = {
     return invoke<string>('query_execute', { request, onEvent: channel });
   },
   queryCancel: (jobId) => invoke<null>('query_cancel', { jobId }),
+  resultPage: (sourceId, cursor, offset, limit) =>
+    invoke<Cell[][]>('result_page', { sourceId, cursor, offset, limit }),
+  resultClose: (sourceId, cursor) => invoke<null>('result_close', { sourceId, cursor }),
+  resultExport: (sourceId, cursor, columns, format, fileName, onProgress) => {
+    const channel = new Channel<number>();
+    channel.onmessage = onProgress;
+    return invoke<ExportSummary | null>('result_export', {
+      sourceId,
+      cursor,
+      columns,
+      format,
+      fileName,
+      onProgress: channel,
+    });
+  },
 };
 
 export function isTauri(): boolean {

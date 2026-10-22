@@ -11,8 +11,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use quarry_db_core::{
-    ConnectError, ConnectErrorKind, ConnectParams, DatabaseAdapter, DbError, ExecOptions, MetaNode,
-    MetadataRequest, OnClose, ServerInfo, Session, StatementOutcome, TlsMode,
+    Cell, ConnectError, ConnectErrorKind, ConnectParams, DatabaseAdapter, DbError, ExecOptions,
+    MetaNode, MetadataRequest, OnClose, ServerInfo, Session, StatementOutcome, TlsMode,
 };
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
@@ -53,6 +53,7 @@ pub struct PgSession {
     /// Out-of-band cancel: opens a short connection with the session's own TLS settings.
     cancel_token: CancelToken,
     tls: MakeRustlsConnect,
+    cursors: exec::Cursors,
 }
 
 impl PgSession {
@@ -81,7 +82,33 @@ impl Session for PgSession {
     }
 
     async fn execute(&self, sql: &str, options: &ExecOptions) -> Result<StatementOutcome, DbError> {
-        self.with_client(async |client| exec::run(client, sql, options).await)
+        self.with_client(async |client| exec::run(client, &self.cursors, sql, options).await)
+            .await
+    }
+
+    async fn fetch(
+        &self,
+        cursor: &str,
+        offset: u64,
+        limit: usize,
+        options: &ExecOptions,
+    ) -> Result<Vec<Vec<Cell>>, DbError> {
+        if !self.cursors.is_open(cursor) {
+            return Err(errors::unknown_cursor());
+        }
+        self.with_client(async |client| {
+            exec::page(client, cursor, offset, limit, options.max_cell_chars)
+                .await
+                .map(|(_, rows)| rows)
+        })
+        .await
+    }
+
+    async fn close_cursor(&self, cursor: &str) -> Result<(), DbError> {
+        if !self.cursors.forget(cursor) {
+            return Ok(());
+        }
+        self.with_client(async |client| client.batch_execute(&format!("CLOSE {cursor}")).await)
             .await
     }
 
@@ -218,6 +245,7 @@ async fn open(
     Ok(PgSession {
         cancel_token: client.cancel_token(),
         tls,
+        cursors: exec::Cursors::default(),
         client: RwLock::new(Some(client)),
         info,
         closed,

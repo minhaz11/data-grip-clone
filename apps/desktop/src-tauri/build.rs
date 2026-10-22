@@ -22,6 +22,9 @@ fn main() {
         "console_write",
         "query_execute",
         "query_cancel",
+        "result_page",
+        "result_close",
+        "result_export",
     ];
     tauri_build::try_build(
         tauri_build::Attributes::new()

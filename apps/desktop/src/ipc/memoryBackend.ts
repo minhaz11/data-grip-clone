@@ -97,6 +97,9 @@ export function createMemoryBackend(): Backend {
     metadataChildren: () => fail('not_connected', 'This data source is not connected.'),
     queryExecute: () => fail('unsupported', 'Running queries requires the Quarry desktop app.'),
     queryCancel: async () => null,
+    resultPage: () => fail('unsupported', 'Result paging requires the Quarry desktop app.'),
+    resultClose: async () => null,
+    resultExport: () => fail('unsupported', 'Export requires the Quarry desktop app.'),
     consoleList: async () => [...consoles.keys()].sort(),
     consoleCreate: async (preferred) => {
       let name = preferred && !consoles.has(preferred) ? preferred : 'console';

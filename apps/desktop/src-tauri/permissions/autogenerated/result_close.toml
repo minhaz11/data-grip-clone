@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-result-close"
+description = "Enables the result_close command without any pre-configured scope."
+commands.allow = ["result_close"]
+
+[[permission]]
+identifier = "deny-result-close"
+description = "Denies the result_close command without any pre-configured scope."
+commands.deny = ["result_close"]

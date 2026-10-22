@@ -14,7 +14,11 @@ use crate::error::AppError;
 pub const STATUS_EVENT: &str = "connection-status";
 
 #[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase", tag = "state")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "state"
+)]
 pub enum StatusEvent {
     Connected {
         id: String,

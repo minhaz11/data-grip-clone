@@ -122,10 +122,35 @@ listed tests run green in CI.
       error positions, cancel < 1 s with the session reusable, read-only rejection.
   - Not yet: NOTICE messages, per-console sessions, transaction mode controls (REQ-TX-01),
     query history (Phase 5), statement timeouts as a setting.
-- **M3.3 Grid + export**: virtualized paged grid; multiple result tabs; CSV/JSON export streamed from
+- **M3.3 Grid + export** ✅: virtualized paged grid; multiple result tabs; CSV/JSON export streamed from
   the backend.
   - **AC**: a 1M-row result never sends more than 2 pages over IPC at once; it scrolls smoothly in
     WebKitGTK; the exported file matches row count and content.
+  - Done:
+    - **Query results stay in a `SCROLL … WITH HOLD` cursor.** It is materialized once, outside
+      any transaction, so no locks or snapshot are held while browsing and user `BEGIN`s are
+      unaffected. The count is exact (`MOVE ALL`), and any page is reached with
+      `MOVE ABSOLUTE n; FETCH n`.
+      - Analysis-time `DECLARE` failures (SQLSTATE 42/0A) re-run directly, which is safe because
+        nothing executed and positions stay correct. Runtime errors are never retried.
+      - The backend accepts only cursors it created, capped at 16 per session. A cursor dropped
+        by the user's `ROLLBACK` reads as "run again".
+      - Measured (1M rows): first page about 0.7 s, any later page about 40 ms.
+    - **Grid:** fixed-height virtual rows with scroll scaled beyond 8M px; a 500-row page cache
+      (LRU 24 pages); at most 2 pages per viewport (tested); resizable columns; keyboard cell
+      navigation; Ctrl+C copy; `role="grid"` semantics. Results that cannot be paged
+      (`RETURNING`, `SHOW`) say so and are capped.
+    - **Export:** the native save dialog opens from Rust, so the path never comes from the
+      WebView. Cursor pages (5,000 rows) go through a bounded queue to a writer thread, the file
+      is written as `.partial` and renamed on success, and progress streams over a `Channel`.
+      CSV keeps NULL distinct from `""`; JSON is lossless for numbers, booleans and json/jsonb
+      (`quarry-io`). An end-to-end test exports 100k rows and checks counts and content.
+    - **Cursor lifetime:** cursors are closed when a console re-runs or closes.
+  - **Bug found and fixed:** serde `rename_all` on internally tagged enums renames only variant
+    tags. `StatementOutcome`/`ExecEvent` fields went out snake_case, breaking M3.2's Output
+    summaries and timings (the Result tab hid it). Fixed with `rename_all_fields`, plus
+    Rust-side JSON contract tests.
+  - Not yet: sorting/filtering (Phase 4), export cancel, configurable CSV dialects (REQ in 07).
 
 ### Phase 4 — Data and schema management
 

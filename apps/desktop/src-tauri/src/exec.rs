@@ -70,7 +70,11 @@ pub enum JobStatus {
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase", tag = "event")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "event"
+)]
 pub enum ExecEvent {
     StatementStarted {
         index: usize,
@@ -242,4 +246,50 @@ pub async fn query_execute(
 #[tauri::command]
 pub async fn query_cancel(jobs: State<'_, Arc<Jobs>>, job_id: String) -> Result<(), AppError> {
     jobs.cancel(&job_id).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn events_json_uses_camel_case_fields() {
+        let done = ExecEvent::StatementDone {
+            index: 0,
+            offset: 5,
+            elapsed_ms: 7,
+            outcome: StatementOutcome::Command { rows_affected: 1 },
+        };
+        assert_eq!(
+            serde_json::to_value(&done).expect("encode"),
+            serde_json::json!({ "event": "statementDone", "index": 0, "offset": 5, "elapsedMs": 7, "outcome": { "type": "command", "rowsAffected": 1 } })
+        );
+        let finished = ExecEvent::Finished {
+            status: JobStatus::Cancelled,
+            executed: 2,
+            elapsed_ms: 9,
+        };
+        assert_eq!(
+            serde_json::to_value(&finished).expect("encode"),
+            serde_json::json!({ "event": "finished", "status": "cancelled", "executed": 2, "elapsedMs": 9 })
+        );
+        let failed = ExecEvent::StatementFailed {
+            index: 1,
+            offset: 0,
+            elapsed_ms: 1,
+            error: StatementError {
+                message: "m".into(),
+                detail: None,
+                hint: None,
+                sqlstate: Some("42601".into()),
+                position: Some(3),
+                cancelled: false,
+                connection_lost: false,
+            },
+        };
+        let json = serde_json::to_value(&failed).expect("encode");
+        assert_eq!(json["elapsedMs"], 1);
+        assert_eq!(json["error"]["connectionLost"], false);
+        assert_eq!(json["error"]["position"], 3);
+    }
 }

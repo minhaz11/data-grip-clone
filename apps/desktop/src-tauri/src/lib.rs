@@ -3,6 +3,7 @@ mod connections;
 mod consoles;
 mod error;
 mod exec;
+mod results;
 mod sessions;
 
 use std::sync::Arc;
@@ -15,6 +16,8 @@ use tauri::Manager;
 
 pub fn run() {
     tauri::Builder::default()
+        // Used from Rust only (export save dialog); the WebView gets no dialog permissions.
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
@@ -54,6 +57,9 @@ pub fn run() {
             consoles::console_write,
             exec::query_execute,
             exec::query_cancel,
+            results::result_page,
+            results::result_close,
+            results::result_export,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Quarry");

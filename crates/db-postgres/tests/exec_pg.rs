@@ -52,6 +52,7 @@ fn rows(o: StatementOutcome) -> (Columns, Rows, u64, bool) {
             rows,
             total_rows,
             truncated,
+            ..
         } => (
             columns.into_iter().map(|c| (c.name, c.type_name)).collect(),
             rows,

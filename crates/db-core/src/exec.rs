@@ -5,7 +5,7 @@ use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExecOptions {
-    /// Rows kept for display; further rows are counted but not returned.
+    /// Rows in the first page (and the cap for results that cannot be paged).
     pub max_rows: usize,
     /// Characters kept per cell; longer values are cut and marked.
     pub max_cell_chars: usize,
@@ -34,7 +34,11 @@ pub struct ColumnInfo {
 pub type Cell = Option<String>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase", tag = "type")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
 pub enum StatementOutcome {
     Rows {
         columns: Vec<ColumnInfo>,
@@ -43,6 +47,11 @@ pub enum StatementOutcome {
         total_rows: u64,
         /// `rows` is a prefix of the full result.
         truncated: bool,
+        /// Server-side cursor holding the full result, for paging and export. `None` for results
+        /// that cannot be kept in a cursor (e.g. `INSERT … RETURNING`, `SHOW`); those return at
+        /// most `max_rows` rows.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cursor: Option<String>,
     },
     /// No result set: DML/DDL/utility. `rows_affected` is 0 for statements without a count.
     Command { rows_affected: u64 },
@@ -50,3 +59,39 @@ pub enum StatementOutcome {
 
 /// Where an error points, as a 1-based character offset into the statement text that was sent.
 pub type ErrorPosition = u32;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The UI reads camelCase fields; internally tagged enums need `rename_all_fields` for that.
+    #[test]
+    fn outcome_json_uses_camel_case_fields() {
+        let rows = StatementOutcome::Rows {
+            columns: vec![ColumnInfo {
+                name: "id".into(),
+                type_name: Some("int4".into()),
+            }],
+            rows: vec![vec![Some("1".into()), None]],
+            total_rows: 10,
+            truncated: true,
+            cursor: Some("c".into()),
+        };
+        assert_eq!(
+            serde_json::to_value(&rows).expect("encode"),
+            serde_json::json!({
+                "type": "rows",
+                "columns": [{ "name": "id", "typeName": "int4" }],
+                "rows": [["1", null]],
+                "totalRows": 10,
+                "truncated": true,
+                "cursor": "c"
+            })
+        );
+        let cmd = StatementOutcome::Command { rows_affected: 3 };
+        assert_eq!(
+            serde_json::to_value(&cmd).expect("encode"),
+            serde_json::json!({ "type": "command", "rowsAffected": 3 })
+        );
+    }
+}

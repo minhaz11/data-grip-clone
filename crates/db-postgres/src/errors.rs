@@ -17,6 +17,9 @@ pub fn err(kind: Kind, message: impl Into<String>, hint: impl Into<String>) -> C
 
 /// Error from a query on an open session.
 pub fn db_error(e: &tokio_postgres::Error) -> DbError {
+    if e.code().is_some_and(|c| c.code() == "34000") {
+        return unknown_cursor(); // invalid_cursor_name
+    }
     match e.as_db_error() {
         Some(db) => DbError {
             message: db.message().to_owned(),
@@ -42,6 +45,18 @@ pub fn db_error(e: &tokio_postgres::Error) -> DbError {
             connection_lost: e.is_closed(),
             cancelled: false,
         },
+    }
+}
+
+pub fn unknown_cursor() -> DbError {
+    DbError {
+        message: "This result is no longer available on the server.".into(),
+        detail: None,
+        hint: Some("Run the query again.".into()),
+        sqlstate: None,
+        position: None,
+        connection_lost: false,
+        cancelled: false,
     }
 }
 

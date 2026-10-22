@@ -2,10 +2,11 @@ import clsx from 'clsx';
 import { CircleCheck, CircleX, LoaderCircle, Ban, Circle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useWorkspace } from '../../app/workspaceStore';
-import type { ColumnInfo, StatementOutcome } from '../../ipc/types';
+import type { StatementOutcome } from '../../ipc/types';
 import { activeEditor } from '../editor/editorHandle';
 import { caretPosition } from '../editor/TextareaSqlEditor';
 import { isRunning, useExec, type Run, type StatementRun } from '../exec/execStore';
+import { ResultGrid } from './ResultGrid';
 
 /** Output log and result sets of the active console's latest run. */
 export function BottomPanel() {
@@ -44,7 +45,7 @@ export function BottomPanel() {
         ) : view === 'output' ? (
           <OutputLog run={run} />
         ) : (
-          <ResultTable statement={results.find((st) => st.index === view) ?? results[0]} />
+          <ResultView run={run} statement={results.find((st) => st.index === view) ?? results[0]} />
         )}
       </div>
     </section>
@@ -203,64 +204,19 @@ function OutputLine({ st }: { st: StatementRun }) {
   );
 }
 
-const NUMERIC = new Set(['int2', 'int4', 'int8', 'float4', 'float8', 'numeric', 'money', 'oid']);
-
-/** First-page table (M3.2). The virtualized, paged grid replaces it in M3.3. */
-function ResultTable({ statement }: { statement: StatementRun | undefined }) {
+function ResultView({ run, statement }: { run: Run; statement: StatementRun | undefined }) {
+  const consoleName = useWorkspace(
+    (s) => s.tabs.find((t) => t.id === run.tabId)?.console ?? 'result',
+  );
   const o = statement?.outcome;
-  if (!o || o.type !== 'rows') return null;
-  const numeric = (c: ColumnInfo) => (c.typeName ? NUMERIC.has(c.typeName) : false);
+  if (!statement || !o || o.type !== 'rows') return null;
+  // Keyed by cursor so a new run starts with a fresh page cache and scroll position.
   return (
-    <div className="min-w-max">
-      {o.truncated && (
-        <p className="sticky left-0 border-b border-border bg-panel-2 px-3 py-1 text-[12px] text-muted">
-          Showing the first {o.rows.length.toLocaleString()} of {o.totalRows.toLocaleString()} rows.
-        </p>
-      )}
-      <table className="border-collapse font-mono text-[12px] select-text">
-        <thead className="sticky top-0 bg-panel">
-          <tr>
-            <th className="border-b border-r border-border px-2 py-1 text-right font-normal text-muted">
-              #
-            </th>
-            {o.columns.map((c, i) => (
-              <th
-                key={i}
-                scope="col"
-                className="border-b border-r border-border px-2 py-1 text-left font-semibold whitespace-nowrap"
-              >
-                {c.name}
-                {c.typeName && <span className="ml-1.5 font-normal text-muted">{c.typeName}</span>}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {o.rows.map((row, r) => (
-            <tr key={r} className="hover:bg-hover">
-              <td className="border-b border-r border-border px-2 py-0.5 text-right text-muted tabular-nums">
-                {r + 1}
-              </td>
-              {row.map((cell, i) => {
-                const col = o.columns[i];
-                return (
-                  <td
-                    key={i}
-                    className={clsx(
-                      'max-w-[480px] truncate border-b border-r border-border px-2 py-0.5 whitespace-pre',
-                      col && numeric(col) && 'text-right tabular-nums',
-                    )}
-                    title={cell ?? 'NULL'}
-                  >
-                    {cell === null ? <span className="text-muted italic">NULL</span> : cell}
-                  </td>
-                );
-              })}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {o.rows.length === 0 && <p className="px-3 py-2 text-muted">No rows.</p>}
-    </div>
+    <ResultGrid
+      key={`${statement.index}:${o.cursor ?? 'capped'}:${run.startedAt}`}
+      sourceId={run.sourceId}
+      outcome={o}
+      exportName={`${consoleName}_result_${statement.index + 1}`}
+    />
   );
 }

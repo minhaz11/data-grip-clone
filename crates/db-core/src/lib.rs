@@ -165,6 +165,17 @@ pub trait Session: Send + Sync {
     /// Asks the server to cancel whatever this session is running. Returns once the request is
     /// delivered; the running `execute` then fails with `cancelled = true`.
     async fn cancel(&self) -> Result<(), DbError>;
+    /// Rows `[offset, offset + limit)` of a result cursor returned by `execute`. Only cursors this
+    /// session created are accepted.
+    async fn fetch(
+        &self,
+        cursor: &str,
+        offset: u64,
+        limit: usize,
+        options: &ExecOptions,
+    ) -> Result<Vec<Vec<Cell>>, DbError>;
+    /// Releases a result cursor. Unknown or already closed cursors are ignored.
+    async fn close_cursor(&self, cursor: &str) -> Result<(), DbError>;
     /// Ends the session; waits for in-flight calls to finish first. Idempotent.
     async fn close(&self);
 }

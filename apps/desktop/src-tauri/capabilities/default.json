@@ -26,6 +26,9 @@
     "allow-console-read",
     "allow-console-write",
     "allow-query-execute",
-    "allow-query-cancel"
+    "allow-query-cancel",
+    "allow-result-page",
+    "allow-result-close",
+    "allow-result-export"
   ]
 }

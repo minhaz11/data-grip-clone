@@ -109,13 +109,15 @@ describe('running queries', () => {
     await waitFor(() =>
       expect(statementsSent()).toEqual([[{ sql: 'select id, email from users', offset: 10 }]]),
     );
-    const grid = await screen.findByRole('table');
+    const grid = await screen.findByRole('grid', { name: 'Result rows' });
     expect(
       within(grid)
         .getAllByRole('columnheader')
         .map((h) => h.textContent),
-    ).toEqual(['#', 'idint4', 'emailtext']);
+    ).toEqual(['idint4', 'emailtext']);
+    expect(grid).toHaveAttribute('aria-rowcount', '3'); // header + 2 rows
     expect(within(grid).getByText('NULL')).toBeInTheDocument();
+    expect(screen.getByText('2 rows')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Result 1' })).toHaveAttribute('aria-selected', 'true');
     await user.click(screen.getByRole('tab', { name: 'Output' }));
     expect(screen.getByLabelText('Statement output')).toHaveTextContent('2 rows');

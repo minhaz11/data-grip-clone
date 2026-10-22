@@ -8,6 +8,7 @@ import type {
   StatementRequest,
 } from '../../ipc/types';
 import { toAppError } from '../../lib/errors';
+import { useWorkspace } from '../../app/workspaceStore';
 
 export interface StatementRun {
   index: number;
@@ -68,6 +69,7 @@ export const useExec = create<ExecState>((set, get) => {
     view: {},
 
     async start(tabId, sourceId, sourceName, statements, onError) {
+      releaseCursors(get().runs[tabId]); // the previous results of this console are replaced
       const run: Run = {
         tabId,
         sourceId,
@@ -163,3 +165,28 @@ export const useExec = create<ExecState>((set, get) => {
 export function isRunning(run: Run | undefined): boolean {
   return run?.status === 'starting' || run?.status === 'running';
 }
+
+/** Closes the server-side cursors a run holds (each keeps a materialized result on the server). */
+function releaseCursors(run: Run | undefined) {
+  if (!run) return;
+  for (const st of run.statements) {
+    if (st.outcome?.type === 'rows' && st.outcome.cursor)
+      void backend.resultClose(run.sourceId, st.outcome.cursor).catch(() => {});
+  }
+}
+
+// Closing a console releases its results.
+useWorkspace.subscribe((ws, prev) => {
+  if (ws.tabs === prev.tabs) return;
+  const open = new Set(ws.tabs.map((t) => t.id));
+  const runs = useExec.getState().runs;
+  for (const id of Object.keys(runs)) {
+    if (!open.has(id)) {
+      releaseCursors(runs[id]);
+      useExec.setState((s) => ({
+        runs: { ...s.runs, [id]: undefined },
+        view: { ...s.view, [id]: undefined },
+      }));
+    }
+  }
+});

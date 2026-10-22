@@ -1,12 +1,96 @@
-//! Running one user statement over the simple-query protocol, which returns every value in the
-//! server's text form (exact for numeric/int8/timestamps, and works for every type).
+//! Running one user statement. Values come back in the server's text form (exact for
+//! numeric/int8/timestamps, works for every type).
+//!
+//! Queries (SELECT/VALUES/TABLE/WITH) run through a `SCROLL … WITH HOLD` cursor: PostgreSQL
+//! materializes the result once, outside any transaction, so browsing holds no locks or snapshot
+//! and any page can be read directly. Other statements run as they are, capped at `max_rows`.
+
+use std::collections::VecDeque;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use futures_util::{TryStreamExt, pin_mut};
 use quarry_db_core::{Cell, ColumnInfo, ExecOptions, StatementOutcome};
 use tokio_postgres::{Client, SimpleQueryMessage};
 
+/// Open result cursors per session; the oldest is closed beyond this.
+pub const MAX_OPEN_CURSORS: usize = 16;
+
+/// Cursors this session created. Only these names are ever interpolated into SQL.
+#[derive(Default)]
+pub struct Cursors {
+    next: AtomicU64,
+    open: Mutex<VecDeque<String>>,
+}
+
+impl Cursors {
+    fn allocate(&self) -> String {
+        format!(
+            "quarry_cursor_{}",
+            self.next.fetch_add(1, Ordering::Relaxed)
+        )
+    }
+
+    /// Registers `name`; returns a cursor to close if the cap was exceeded.
+    fn register(&self, name: String) -> Option<String> {
+        let mut open = self.open.lock().unwrap_or_else(|p| p.into_inner());
+        open.push_back(name);
+        (open.len() > MAX_OPEN_CURSORS)
+            .then(|| open.pop_front())
+            .flatten()
+    }
+
+    pub fn is_open(&self, name: &str) -> bool {
+        self.open
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .iter()
+            .any(|c| c == name)
+    }
+
+    pub fn forget(&self, name: &str) -> bool {
+        let mut open = self.open.lock().unwrap_or_else(|p| p.into_inner());
+        let before = open.len();
+        open.retain(|c| c != name);
+        open.len() != before
+    }
+}
+
+/// Whether a statement can be the body of `DECLARE … CURSOR`: it starts with SELECT, VALUES,
+/// TABLE or WITH (after comments and opening parentheses).
+pub fn cursor_eligible(sql: &str) -> bool {
+    let mut rest = sql;
+    loop {
+        rest = rest.trim_start();
+        if let Some(r) = rest.strip_prefix("--") {
+            rest = r.split_once('\n').map_or("", |(_, after)| after);
+        } else if let Some(r) = rest.strip_prefix("/*") {
+            rest = r.split_once("*/").map_or("", |(_, after)| after);
+        } else if let Some(r) = rest.strip_prefix('(') {
+            rest = r;
+        } else {
+            break;
+        }
+    }
+    let word: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphabetic())
+        .collect::<String>()
+        .to_ascii_uppercase();
+    matches!(word.as_str(), "SELECT" | "VALUES" | "TABLE" | "WITH")
+}
+
+/// Errors raised while parsing/analysing, before anything ran: safe to retry without a cursor.
+fn analysis_error(e: &tokio_postgres::Error) -> bool {
+    e.code().is_some_and(|c| {
+        let code = c.code();
+        code.starts_with("42") || code.starts_with("0A")
+    })
+}
+
 pub async fn run(
     client: &Client,
+    cursors: &Cursors,
     sql: &str,
     options: &ExecOptions,
 ) -> Result<StatementOutcome, tokio_postgres::Error> {
@@ -19,6 +103,99 @@ pub async fn run(
             .collect()
     });
 
+    if cursor_eligible(sql) {
+        let name = cursors.allocate();
+        // `name` is generated here, never taken from callers; `sql` is the user's own statement.
+        match client
+            .batch_execute(&format!("DECLARE {name} SCROLL CURSOR WITH HOLD FOR {sql}"))
+            .await
+        {
+            Ok(()) => {
+                if let Some(evicted) = cursors.register(name.clone()) {
+                    let _ = client.batch_execute(&format!("CLOSE {evicted}")).await;
+                }
+                return first_page(client, &name, types, options).await;
+            }
+            Err(e) if analysis_error(&e) => {} // e.g. data-modifying WITH, SELECT INTO: run directly
+            Err(e) => return Err(e),
+        }
+    }
+    run_direct(client, sql, types, options).await
+}
+
+async fn first_page(
+    client: &Client,
+    name: &str,
+    types: Option<Vec<String>>,
+    options: &ExecOptions,
+) -> Result<StatementOutcome, tokio_postgres::Error> {
+    // The cursor is materialized, so counting is cheap and exact.
+    let mut total_rows = 0;
+    for m in client
+        .simple_query(&format!("MOVE FORWARD ALL FROM {name}"))
+        .await?
+    {
+        if let SimpleQueryMessage::CommandComplete(n) = m {
+            total_rows = n;
+        }
+    }
+    let (columns, rows) = page(client, name, 0, options.max_rows, options.max_cell_chars).await?;
+    let columns = columns
+        .into_iter()
+        .enumerate()
+        .map(|(i, name)| ColumnInfo {
+            name,
+            type_name: types.as_ref().and_then(|t| t.get(i).cloned()),
+        })
+        .collect();
+    let truncated = total_rows > rows.len() as u64;
+    Ok(StatementOutcome::Rows {
+        columns,
+        rows,
+        total_rows,
+        truncated,
+        cursor: Some(name.to_owned()),
+    })
+}
+
+/// Rows `[offset, offset + limit)` of cursor `name` and the column names.
+pub async fn page(
+    client: &Client,
+    name: &str,
+    offset: u64,
+    limit: usize,
+    max_cell_chars: usize,
+) -> Result<(Vec<String>, Vec<Vec<Cell>>), tokio_postgres::Error> {
+    // MOVE ABSOLUTE n leaves the cursor on row n; FETCH FORWARD then returns rows n+1…
+    let sql = format!("MOVE ABSOLUTE {offset} FROM {name}; FETCH FORWARD {limit} FROM {name}");
+    let stream = client.simple_query_raw(&sql).await?;
+    pin_mut!(stream);
+    let mut columns = Vec::new();
+    let mut rows = Vec::new();
+    while let Some(m) = stream.try_next().await? {
+        match m {
+            SimpleQueryMessage::RowDescription(cols) => {
+                columns = cols.iter().map(|c| c.name().to_owned()).collect()
+            }
+            SimpleQueryMessage::Row(row) => {
+                rows.push(
+                    (0..row.len())
+                        .map(|i| row.get(i).map(|v| clip(v, max_cell_chars)))
+                        .collect(),
+                );
+            }
+            _ => {}
+        }
+    }
+    Ok((columns, rows))
+}
+
+async fn run_direct(
+    client: &Client,
+    sql: &str,
+    types: Option<Vec<String>>,
+    options: &ExecOptions,
+) -> Result<StatementOutcome, tokio_postgres::Error> {
     let stream = client.simple_query_raw(sql).await?;
     pin_mut!(stream);
 
@@ -42,7 +219,7 @@ pub async fn run(
             }
             SimpleQueryMessage::Row(row) => {
                 total_rows += 1;
-                // Rows past the display cap are counted, not kept.
+                // Rows past the cap are counted, not kept (no cursor to page through).
                 if rows.len() < options.max_rows {
                     rows.push(
                         (0..row.len())
@@ -64,6 +241,7 @@ pub async fn run(
                 rows,
                 total_rows,
                 truncated,
+                cursor: None,
             }
         }
         None => StatementOutcome::Command { rows_affected },
@@ -80,12 +258,58 @@ fn clip(value: &str, max: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::clip;
+    use super::*;
 
     #[test]
     fn clip_marks_cut_values_and_respects_char_boundaries() {
         assert_eq!(clip("abc", 5), "abc");
         assert_eq!(clip("abcdef", 3), "abc… [6 chars]");
         assert_eq!(clip("ünïcødé", 2), "ün… [7 chars]");
+    }
+
+    #[test]
+    fn cursor_eligibility_skips_comments_and_parens() {
+        for yes in [
+            "select 1",
+            "  SELECT 1",
+            "-- c\nselect 1",
+            "/* c */ values (1)",
+            "((select 1))",
+            "table t",
+            "with x as (select 1) select * from x",
+        ] {
+            assert!(cursor_eligible(yes), "{yes}");
+        }
+        for no in [
+            "insert into t values (1)",
+            "show search_path",
+            "explain select 1",
+            "-- only a comment",
+            "",
+            "selectx 1",
+        ] {
+            assert!(!cursor_eligible(no), "{no}");
+        }
+    }
+
+    #[test]
+    fn registry_caps_open_cursors_and_knows_its_own() {
+        let c = Cursors::default();
+        let names: Vec<String> = (0..=MAX_OPEN_CURSORS).map(|_| c.allocate()).collect();
+        let mut evicted = None;
+        for n in &names {
+            evicted = c.register(n.clone()).or(evicted);
+        }
+        assert_eq!(
+            evicted.as_deref(),
+            Some(names[0].as_str()),
+            "oldest evicted"
+        );
+        assert!(!c.is_open(&names[0]) && c.is_open(&names[1]));
+        assert!(
+            !c.is_open("pg_catalog; drop table x"),
+            "foreign names are never accepted"
+        );
+        assert!(c.forget(&names[1]) && !c.forget(&names[1]));
     }
 }
