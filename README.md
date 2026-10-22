@@ -29,11 +29,20 @@ npm run format:check && npm run lint && npm run typecheck && npm test
 cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
 ```
 
+## IPC bindings
+
+Every type that crosses IPC is generated from Rust into `apps/desktop/src/ipc/bindings.ts`. After
+changing a Rust IPC type, regenerate and commit it; `cargo test` fails while it is stale.
+
+```bash
+npm run bindings
+```
+
 ## Integration tests (disposable PostgreSQL)
 
 ```bash
 scripts/test-pg.sh up                               # quarry-test-pg on 127.0.0.1:55432, TLS on, throwaway password
-scripts/test-pg.sh seed                             # optional: sample "shop" schema for manual browsing
+scripts/test-pg.sh seed                             # sample "shop" schema (cursor tests need it; also for browsing)
 cargo test -p quarry-db-postgres -- --ignored
 scripts/test-pg.sh down
 ```

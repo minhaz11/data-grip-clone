@@ -19,6 +19,7 @@ pub const MAX_STATEMENTS: usize = 1_000;
 const MAX_ROWS_LIMIT: usize = 10_000;
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct StatementRequest {
     pub sql: String,
@@ -27,14 +28,17 @@ pub struct StatementRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ExecRequest {
     pub source_id: String,
     pub statements: Vec<StatementRequest>,
+    #[cfg_attr(test, ts(optional))]
     pub max_rows: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct StatementError {
     pub message: String,
@@ -62,6 +66,7 @@ impl From<DbError> for StatementError {
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum JobStatus {
     Completed,
@@ -70,6 +75,7 @@ pub enum JobStatus {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(
     rename_all = "camelCase",
     rename_all_fields = "camelCase",

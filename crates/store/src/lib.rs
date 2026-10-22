@@ -35,6 +35,7 @@ pub enum StoreError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum ThemePreference {
     #[default]
@@ -46,6 +47,7 @@ pub enum ThemePreference {
 /// Application preferences. Unknown or missing fields fall back to defaults so older/newer
 /// settings rows never block startup.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     pub theme: ThemePreference,

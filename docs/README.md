@@ -24,5 +24,6 @@
     - [0003 Secrets](architecture/decisions/0003-secrets-and-credential-storage.md)
     - [0004 Local storage](architecture/decisions/0004-local-app-storage.md)
     - [0005 AI provider & consent](architecture/decisions/0005-ai-provider-and-consent.md)
+    - [0006 SQL splitter and classifier in TypeScript](architecture/decisions/0006-sql-splitter-and-classifier-in-typescript.md)
 - **Plans**
   - [Feature roadmap: what is still missing](plans/feature-roadmap.md)

@@ -133,6 +133,7 @@ describe('running queries', () => {
         elapsedMs: 2,
         error: {
           message: 'column "emial" does not exist',
+          detail: null,
           sqlstate: '42703',
           position: 13,
           hint: 'Perhaps you meant "email".',

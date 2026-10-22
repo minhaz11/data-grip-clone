@@ -105,6 +105,7 @@ pub async fn result_apply_edits(
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum ExportFormat {
     Csv,
@@ -112,6 +113,7 @@ pub enum ExportFormat {
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ExportColumn {
     pub name: String,
@@ -119,6 +121,7 @@ pub struct ExportColumn {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ExportSummary {
     pub path: String,

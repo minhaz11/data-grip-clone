@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Disposable PostgreSQL for integration tests. Never points at any other database.
 #   scripts/test-pg.sh up     start (or restart) quarry-test-pg on 127.0.0.1:55432 with TLS enabled
-#   scripts/test-pg.sh seed   (re)create a small sample schema "shop" for manual browsing
+#   scripts/test-pg.sh seed   (re)create a small sample schema "shop" (cursor tests need it; also for browsing)
 #   scripts/test-pg.sh down   remove the container
 #   scripts/test-pg.sh env    print the env vars the integration tests read
 # The throwaway password (kept across restarts) and a fresh self-signed certificate live under

@@ -58,6 +58,10 @@ Consoles can share the data source's session or have their own, each with its ow
 
 ### Backend
 
+- [ ] Close the read-only gap found in step 01 (ADR-0006): on read-only sources, block `SET`
+      / `RESET` of `default_transaction_read_only` and `transaction_read_only` and
+      `SET SESSION CHARACTERISTICS AS TRANSACTION`, with an integration test proving a writing
+      function cannot run after such an attempt.
 - [ ] Spike: confirm how to read transaction status from `tokio-postgres`; record the answer here.
 - [ ] Add `transaction_status()` and `begin(isolation)` / `commit()` / `rollback()` to the
       `Session` trait (`crates/db-core/src/lib.rs`) and implement them in `PgSession`.

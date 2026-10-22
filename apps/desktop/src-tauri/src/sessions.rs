@@ -14,6 +14,7 @@ use crate::error::AppError;
 pub const STATUS_EVENT: &str = "connection-status";
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(
     rename_all = "camelCase",
     rename_all_fields = "camelCase",
@@ -36,6 +37,7 @@ pub enum StatusEvent {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct SessionStatus {
     pub id: String,

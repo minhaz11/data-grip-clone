@@ -59,6 +59,7 @@ impl fmt::Debug for ConnectParams {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ServerInfo {
     /// Full version banner, e.g. "PostgreSQL 16.15 on x86_64-pc-linux-musl ...".
@@ -75,6 +76,7 @@ pub struct ServerInfo {
 
 /// Why a connection attempt failed, in terms a user can act on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectErrorKind {
     /// The host name could not be resolved.
@@ -98,6 +100,7 @@ pub enum ConnectErrorKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectError {
     pub kind: ConnectErrorKind,
@@ -133,6 +136,7 @@ pub trait DatabaseAdapter: Send + Sync {
 
 /// A failure while using an open session (as opposed to [`ConnectError`] while opening one).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct DbError {
     pub message: String,

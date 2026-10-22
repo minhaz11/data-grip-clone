@@ -1,3 +1,4 @@
+mod bindings;
 mod commands;
 mod connections;
 mod consoles;

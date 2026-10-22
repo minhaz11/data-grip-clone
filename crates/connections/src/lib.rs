@@ -24,11 +24,12 @@ pub enum ConnectionError {
 
 /// What to do with the password on update. Absent means `Keep`.
 #[derive(Debug, Default, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(tag = "action", content = "value", rename_all = "camelCase")]
 pub enum PasswordChange {
     #[default]
     Keep,
-    Set(SecretString),
+    Set(#[cfg_attr(feature = "ts", ts(type = "string"))] SecretString),
     Clear,
 }
 

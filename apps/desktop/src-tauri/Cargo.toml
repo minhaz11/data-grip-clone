@@ -28,5 +28,12 @@ uuid = { version = "1.28.0", features = ["v4"] }
 tauri-plugin-dialog = "2.8.3"
 quarry-io.workspace = true
 
+[dev-dependencies]
+# Enables the TypeScript derives for the bindings test (src/bindings.rs).
+ts-rs.workspace = true
+quarry-db-core = { workspace = true, features = ["ts"] }
+quarry-store = { workspace = true, features = ["ts"] }
+quarry-connections = { workspace = true, features = ["ts"] }
+
 [lints]
 workspace = true

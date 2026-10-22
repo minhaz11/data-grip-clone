@@ -6,16 +6,20 @@ use serde::Serialize;
 
 /// The only error shape that crosses IPC. Messages are user-facing and never contain secrets.
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct AppError {
     pub kind: &'static str,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub hint: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub sqlstate: Option<String>,
     /// Set when `kind == "connect"`: which connection failure it was.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub connect_kind: Option<ConnectErrorKind>,
 }
 

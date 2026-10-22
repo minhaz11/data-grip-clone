@@ -10,6 +10,7 @@ macro_rules! string_enum {
     ($(#[$m:meta])* $name:ident { $($variant:ident => $text:literal),+ $(,)? }) => {
         $(#[$m])*
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+        #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
         pub enum $name { $(#[serde(rename = $text)] $variant),+ }
 
         impl $name {
@@ -49,6 +50,7 @@ string_enum!(
 
 /// Editable fields of a profile, as sent by the UI.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionDraft {
     pub name: String,
@@ -66,6 +68,7 @@ pub struct ConnectionDraft {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionProfile {
     pub id: String,

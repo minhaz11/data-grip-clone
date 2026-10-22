@@ -13,7 +13,8 @@
     "format:check": "prettier --check .",
     "typecheck": "npm -w apps/desktop run typecheck",
     "test": "npm -w apps/desktop run test",
-    "test:release": "node --test \"scripts/release/*.test.mjs\""
+    "test:release": "node --test \"scripts/release/*.test.mjs\"",
+    "bindings": "UPDATE_BINDINGS=1 cargo test -p quarry-desktop --lib bindings::"
   },
   "devDependencies": {
     "prettier": "3.9.10"

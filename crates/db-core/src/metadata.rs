@@ -4,6 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum ObjectType {
     Table,
@@ -13,6 +14,7 @@ pub enum ObjectType {
 
 /// How to load one level of the tree.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(
     tag = "level",
     rename_all = "camelCase",
@@ -50,6 +52,7 @@ pub enum MetadataRequest {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum MetaKind {
     Schema,
@@ -62,6 +65,7 @@ pub enum MetaKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct MetaNode {
     /// Unique among siblings and stable across refreshes (used for expansion state).
@@ -70,15 +74,19 @@ pub struct MetaNode {
     pub name: String,
     /// Secondary text: column type, index definition, object comment.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub detail: Option<String>,
     /// For groups: number of children, when cheap to know up front.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub count: Option<u64>,
     /// Short flags such as "pk", "not null", "unique", "primary".
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "ts", ts(optional = nullable))]
     pub flags: Vec<String>,
     /// `None` for leaves.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub children: Option<MetadataRequest>,
 }
 

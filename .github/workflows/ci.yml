@@ -49,6 +49,8 @@ jobs:
       - run: cargo test --workspace
       # Integration tests against a disposable PostgreSQL (127.0.0.1:55432, throwaway credentials).
       - run: scripts/test-pg.sh up
+      # The cursor tests read the sample "shop" schema.
+      - run: scripts/test-pg.sh seed
       - run: cargo test -p quarry-db-postgres -- --ignored
       - if: always()
         run: scripts/test-pg.sh down
