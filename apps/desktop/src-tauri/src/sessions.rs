@@ -112,6 +112,14 @@ impl Sessions {
         Ok(self.adapter.test(params).await?)
     }
 
+    /// The statements a schema change would run (no connection needed).
+    pub fn preview_schema(
+        &self,
+        change: &quarry_db_core::SchemaChange,
+    ) -> Result<Vec<String>, AppError> {
+        Ok(self.adapter.preview_schema(change)?)
+    }
+
     fn settings_for(&self, key: &SessionKey) -> TxSettings {
         lock(&self.chosen)
             .get(key)

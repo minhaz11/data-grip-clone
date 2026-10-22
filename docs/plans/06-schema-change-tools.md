@@ -3,11 +3,11 @@
 | Field        | Value                                           |
 | ------------ | ----------------------------------------------- |
 | Milestone    | M4.5                                            |
-| Status       | Not started                                     |
+| Status       | Done                                            |
 | Depends on   | 03, 05                                          |
 | Requirements | REQ-SCHEMA-01 to 07, REQ-SCHEMA-15, REQ-EXPL-16 |
-| Started      | -                                               |
-| Finished     | -                                               |
+| Started      | 2026-10-23                                      |
+| Finished     | 2026-10-23                                      |
 
 ## Goal
 
@@ -51,62 +51,84 @@ production rules apply as strictly as in the console.
 
 ### Backend
 
-- [ ] `TableModel` and related types in `db-core`.
-- [ ] Load `TableModel` from the catalog (reuse step 04/05 queries).
-- [ ] `create_table` builder with unit tests.
-- [ ] `alter_table` diff builder with unit tests per change kind.
-- [ ] Drop builder (IF EXISTS, CASCADE, qualify auto/always/never), Truncate builder (RESTART
-      IDENTITY, CASCADE), Rename builders (table, column, schema).
-- [ ] `schema_apply(source_id, statements)` running one transaction on a short-lived connection,
+- [x] `TableModel` and related types in `db-core`.
+- [x] Load `TableModel` from the catalog (reuse step 04/05 queries).
+- [x] `create_table` builder with unit tests.
+- [x] `alter_table` diff builder with unit tests per change kind.
+- [x] Drop builder (IF EXISTS, CASCADE; names always schema-qualified), Truncate builder
+      (RESTART IDENTITY, CASCADE), Rename builders (table, column, schema).
+- [x] `schema_apply(source_id, statements)` running one transaction on a short-lived connection,
       reporting the failing statement index.
 
 ### IPC
 
-- [ ] Commands `schema_preview_create`, `schema_preview_alter`, `schema_preview_drop`,
-      `schema_preview_truncate`, `schema_preview_rename`, `schema_apply`; capabilities and
-      bindings.
+- [x] Commands `table_model`, `schema_preview` (one command over the `SchemaChange` union) and
+      `schema_apply`; capabilities and bindings.
 
 ### Frontend
 
-- [ ] Table dialog: columns grid (name, type with suggestions, not null, default, identity,
-      comment), PK, uniques, indexes, FKs (target picker, column pairs, ON DELETE/UPDATE,
-      deferrable), checks.
-- [ ] Live preview pane; "edited manually" state; Reset to generated.
-- [ ] Modify Table opens the same dialog prefilled.
-- [ ] Drop dialog listing exact statements, options, typed-name confirmation when required.
-- [ ] Truncate dialog with options and preview.
-- [ ] Rename dialog with preview.
-- [ ] Explorer context actions: New table, Modify table, Drop, Truncate, Rename.
-- [ ] After apply: refresh the affected explorer nodes; mark metadata stale after DDL run from a
-      console or a failed apply, with a Refresh affordance.
+- [x] Table dialog: columns grid (name, type with suggestions, not null, default, identity,
+      comment), PK, uniques, indexes, FKs (target as `schema.table`, column lists, ON
+      DELETE/UPDATE, deferrable), checks.
+- [x] Live preview pane; "edited manually" state; Reset to generated.
+- [x] Modify Table opens the same dialog prefilled.
+- [x] Drop dialog listing exact statements, options, typed-name confirmation when required.
+- [x] Truncate dialog with options and preview.
+- [x] Rename dialog with preview.
+- [x] Explorer context actions: New table, Modify table, Drop, Truncate, Rename.
+- [x] After apply: refresh the affected explorer nodes; mark metadata stale after DDL runs from a
+      console, with a Refresh affordance.
 
 ### Tests
 
-- [ ] Integration: create a table with every column/constraint kind, then compare with the catalog.
-- [ ] Integration: each alter kind; a failing statement mid-script rolls back everything.
-- [ ] Integration: read-only source rejects apply (client and server side).
-- [ ] UI: drop with CASCADE cannot be confirmed without the typed name.
-- [ ] UI: production source requires confirmation for every schema tool (automated test per tool).
-- [ ] UI: manual edit stops regeneration and goes through the classifier.
+- [x] Integration: create a table with every column/constraint kind, then compare with the catalog.
+- [x] Integration: each alter kind; a failing statement mid-script rolls back everything.
+- [x] Integration: read-only source rejects apply (client and server side).
+- [x] UI: drop with CASCADE cannot be confirmed without the typed name.
+- [x] UI: production source requires confirmation for every schema tool (automated test per tool).
+- [x] UI: manual edit stops regeneration and goes through the classifier.
 
 ### Docs
 
-- [ ] Mark M4.5 (and Phase 4) done in `mvp-and-milestones.md`.
+- [x] Mark M4.5 done in `mvp-and-milestones.md` (Phase 4 continues with M4.7, M4.8, M4.10).
 
 ## Acceptance criteria
 
-- [ ] No schema change runs without a preview of the exact statements and a confirm.
-- [ ] A failing statement leaves the database unchanged.
-- [ ] Every destructive or production path has an automated test proving the confirmation.
-- [ ] Explorer reflects the change without a manual refresh.
+- [x] No schema change runs without a preview of the exact statements and a confirm.
+- [x] A failing statement leaves the database unchanged.
+- [x] Every destructive or production path has an automated test proving the confirmation.
+- [x] Explorer reflects the change without a manual refresh.
 
 ## Risks and open questions
 
-- Column type changes that need `USING`: offer a field for the expression, or refuse and point to
-  the console? Decide.
-- Column reorder is not supported by PostgreSQL; the dialog must not offer it.
+- Column type changes that need `USING`: decided. The builder emits a plain `ALTER COLUMN ... TYPE`;
+  when a cast needs an expression the server error names the statement, and the user adds `USING`
+  through Edit SQL (which then runs through the classifier like console SQL).
+- Column reorder is not supported by PostgreSQL; the dialog does not offer it.
+
+## Deviations from the plan
+
+- **One preview command**: `schema_preview(change)` takes a tagged `SchemaChange` union instead of
+  five commands. It is a pure function on the adapter (`DatabaseAdapter::preview_schema`), so it
+  needs no connection.
+- **Names are always qualified** in drop, truncate and rename; there is no qualify option.
+- **Identifiers are quoted only when needed** (`ident()` with a reserved keyword list), so previews
+  read like hand-written SQL; type names pass a strict grammar check, and expressions (defaults,
+  checks, index columns) are used as written, as the dialog says.
+- **Column renames are followed** through keys, foreign keys and the PK, so renaming a column does
+  not drop and recreate constraints that did not otherwise change. An unchanged model produces no
+  statements (integration-tested on a real table).
+- **No stale mark after a failed apply**: the apply is one transaction, so a failure changes
+  nothing. Console DDL marks the source stale (a banner with Refresh).
+- **Modal renders through a portal** on `document.body`. Inside the explorer the resizable panel's
+  pointer handling took focus from dialog inputs.
+- `SchemaChange::AlterTable` boxes its two models (clippy `large_enum_variant`); the IPC shape is
+  unchanged.
 
 ## Progress log
 
-| Date | Note |
-| ---- | ---- |
+| Date       | Note                                                                                                                                                                                               |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-10-23 | Built on a `TableModel` read from the catalog; Modify diffs the loaded model against the edited one, ordered so drops of changed constraints come before column changes and new constraints after. |
+| 2026-10-23 | The explorer's resize handle took pointer focus from dialog inputs in tests; `Modal` now renders through a portal.                                                                                 |
+| 2026-10-23 | Checks: 88 Rust unit, 51 PostgreSQL integration, 143 frontend unit (a production confirmation test for each of the five tools), 24 E2E.                                                            |

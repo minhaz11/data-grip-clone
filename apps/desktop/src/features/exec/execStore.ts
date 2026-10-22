@@ -11,6 +11,8 @@ import type {
   TxMode,
 } from '../../ipc/types';
 import { toAppError } from '../../lib/errors';
+import { classify } from '../../lib/sql/classify';
+import { useMetadata } from '../explorer/metadataStore';
 import { useWorkspace } from '../../app/workspaceStore';
 import { NO_EDITS, toChanges, type PendingEdits } from '../results/editsModel';
 
@@ -151,9 +153,15 @@ export const useExec = create<ExecState>((set, get) => {
             get().setView(tabId, 'output');
             break;
           }
-          case 'finished':
+          case 'finished': {
             patch(tabId, (r) => ({ ...r, status: e.status, elapsedMs: e.elapsedMs }));
+            // DDL that reached the server may have changed what the explorer shows (REQ-EXPL-16).
+            const ran = get().runs[tabId]?.statements.filter((st) => st.state !== 'pending') ?? [];
+            if (ran.some((st) => classify(st.sql).kind === 'ddl')) {
+              useMetadata.getState().markStale(session.sourceId);
+            }
             break;
+          }
         }
       };
 

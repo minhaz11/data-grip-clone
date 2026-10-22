@@ -14,6 +14,8 @@ import type {
   EditTarget,
   ExportSummary,
   RowChange,
+  SchemaChange,
+  TableModel,
   Refinement,
   StatementOutcome,
   MetaNode,
@@ -63,6 +65,12 @@ export interface Backend {
   metadataChildren(id: string, request: MetadataRequest): Promise<MetaNode[]>;
   /** Everything the table viewer shows; `null` if the object no longer exists. */
   objectDetails(id: string, object: ObjectRef): Promise<ObjectDetails | null>;
+  /** The editable model of a table (Modify Table); `null` if it no longer exists. */
+  tableModel(id: string, schema: string, name: string): Promise<TableModel | null>;
+  /** The exact statements a schema change would run. */
+  schemaPreview(change: SchemaChange): Promise<string[]>;
+  /** Runs statements in one transaction on a separate connection; all or nothing. */
+  schemaApply(id: string, statements: string[]): Promise<null>;
   /** DDL for `objects`, as one script that applies in order. */
   ddlGenerate(id: string, objects: DdlObject[], options: DdlOptions): Promise<string>;
   /** Generates DDL and saves it via the native dialog; the saved path, or `null` if cancelled. */
@@ -144,6 +152,9 @@ const tauriBackend: Backend = {
   onConnectionStatus: (cb) => listen<StatusEvent>('connection-status', (e) => cb(e.payload)),
   metadataChildren: (id, request) => invoke<MetaNode[]>('metadata_children', { id, request }),
   objectDetails: (id, object) => invoke<ObjectDetails | null>('object_details', { id, object }),
+  tableModel: (id, schema, name) => invoke<TableModel | null>('table_model', { id, schema, name }),
+  schemaPreview: (change) => invoke<string[]>('schema_preview', { change }),
+  schemaApply: (id, statements) => invoke<null>('schema_apply', { id, statements }),
   ddlGenerate: (id, objects, options) => invoke<string>('ddl_generate', { id, objects, options }),
   ddlSave: (id, objects, options, fileName) =>
     invoke<string | null>('ddl_save', { id, objects, options, fileName }),

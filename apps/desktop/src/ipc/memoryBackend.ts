@@ -97,6 +97,10 @@ export function createMemoryBackend(): Backend {
     metadataChildren: () => fail('not_connected', 'This data source is not connected.'),
     objectDetails: () => fail('not_connected', 'This data source is not connected.'),
     ddlGenerate: () => fail('not_connected', 'This data source is not connected.'),
+    tableModel: () => fail('not_connected', 'This data source is not connected.'),
+    // Statements are built in Rust; the browser has no builder of its own.
+    schemaPreview: () => fail('unsupported', 'Schema tools require the Quarry desktop app.'),
+    schemaApply: () => fail('not_connected', 'This data source is not connected.'),
     ddlSave: () => fail('not_connected', 'This data source is not connected.'),
     queryExecute: () => fail('unsupported', 'Running queries requires the Quarry desktop app.'),
     queryCancel: async () => null,

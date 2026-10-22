@@ -4,7 +4,13 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, vi } from 'vitest';
 import { App } from '../../app/App';
 import { backend } from '../../ipc/client';
-import type { MetaNode, MetadataRequest, ServerInfo, StatusEvent } from '../../ipc/types';
+import type {
+  ConnectionDraft,
+  MetaNode,
+  MetadataRequest,
+  ServerInfo,
+  StatusEvent,
+} from '../../ipc/types';
 import { useConnections } from '../connections/connectionsStore';
 import { NEW_DRAFT } from '../connections/model';
 import { useSessions } from '../connections/sessionsStore';
@@ -110,9 +116,12 @@ export function registerExplorerHarness(): void {
   afterEach(() => vi.restoreAllMocks());
 }
 
-export async function setup(tables = ['customers', 'orders']) {
+export async function setup(
+  tables = ['customers', 'orders'],
+  draft: Partial<ConnectionDraft> = {},
+) {
   const meta = vi.spyOn(backend, 'metadataChildren').mockImplementation(catalog(tables));
-  const p = await backend.connectionCreate({ ...NEW_DRAFT, name: 'Dev' }, 'pw');
+  const p = await backend.connectionCreate({ ...NEW_DRAFT, name: 'Dev', ...draft }, 'pw');
   const user = userEvent.setup();
   render(<App />);
   const tree = await screen.findByRole('tree', { name: 'Data sources' });

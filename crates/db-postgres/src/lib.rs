@@ -7,6 +7,7 @@ mod errors;
 mod exec;
 mod metadata;
 mod refine;
+mod schema_edit;
 mod sqlutil;
 mod tls;
 mod txctl;
@@ -19,8 +20,8 @@ use std::time::{Duration, Instant};
 use quarry_db_core::{
     Cell, ColumnInfo, ConnectError, ConnectErrorKind, ConnectParams, DatabaseAdapter, DbError,
     DdlObject, DdlOptions, EditStatement, EditTarget, ExecOptions, MetaNode, MetadataRequest,
-    ObjectDetails, ObjectRef, OnClose, Refinement, RowChange, ServerInfo, Session,
-    StatementOutcome, TlsMode, TxMode, TxSettings, TxStatus,
+    ObjectDetails, ObjectRef, OnClose, Refinement, RowChange, SchemaChange, ServerInfo, Session,
+    StatementOutcome, TableModel, TlsMode, TxMode, TxSettings, TxStatus,
 };
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
@@ -50,6 +51,33 @@ impl DatabaseAdapter for PostgresAdapter {
     ) -> Result<Arc<dyn Session>, ConnectError> {
         Ok(Arc::new(open(params, Some(on_close)).await?))
     }
+
+    fn preview_schema(&self, change: &SchemaChange) -> Result<Vec<String>, DbError> {
+        schema_edit::build(change).map_err(errors::invalid)
+    }
+}
+
+/// Runs DDL `statements` in one transaction; the first failure rolls back and is named.
+async fn schema_apply(client: &Client, statements: &[String]) -> Result<(), DbError> {
+    let total = statements.len();
+    client
+        .batch_execute("BEGIN")
+        .await
+        .map_err(|e| errors::db_error(&e))?;
+    for (i, sql) in statements.iter().enumerate() {
+        if let Err(e) = client.batch_execute(sql).await {
+            let _ = client.batch_execute("ROLLBACK").await;
+            let mut err = errors::db_error(&e);
+            err.message = format!("Statement {} of {total} failed: {}", i + 1, err.message);
+            err.detail = Some(sql.clone());
+            err.hint = Some("Nothing was changed.".into());
+            return Err(err);
+        }
+    }
+    client
+        .batch_execute("COMMIT")
+        .await
+        .map_err(|e| errors::db_error(&e))
 }
 
 pub struct PgSession {
@@ -357,6 +385,30 @@ impl Session for PgSession {
     async fn object_details(&self, object: &ObjectRef) -> Result<Option<ObjectDetails>, DbError> {
         self.with_client(async |client| metadata::details(client, object).await)
             .await
+    }
+
+    async fn table_model(&self, schema: &str, name: &str) -> Result<Option<TableModel>, DbError> {
+        self.with_client(async |client| schema_edit::load_model(client, schema, name).await)
+            .await
+    }
+
+    async fn apply_schema(&self, statements: &[String]) -> Result<(), DbError> {
+        if statements.is_empty() {
+            return Ok(());
+        }
+        // Like row edits: a separate connection, so an open console transaction is never
+        // committed or mixed in.
+        let side = open(&self.params, None).await.map_err(|e| {
+            errors::invalid(format!(
+                "Could not open a connection to apply the changes: {}",
+                e.message
+            ))
+        })?;
+        let result = side
+            .with_client(async |client| Ok(schema_apply(client, statements).await))
+            .await;
+        side.close().await;
+        result?
     }
 
     async fn ddl(&self, objects: &[DdlObject], options: &DdlOptions) -> Result<String, DbError> {

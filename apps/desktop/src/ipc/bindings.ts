@@ -193,6 +193,54 @@ owner: boolean,
  */
 grants: boolean, };
 
+export type Identity = "always" | "by_default";
+
+export type FkAction = "no_action" | "restrict" | "cascade" | "set_null" | "set_default";
+
+export type ColumnModel = { name: string, 
+/**
+ * The column's name in the catalog (Modify Table); absent for a new column.
+ */
+original: string | null, 
+/**
+ * A type name such as `integer`, `character varying(80)` or `timestamp with time zone`.
+ */
+typeName: string, notNull: boolean, 
+/**
+ * A SQL expression, used as written.
+ */
+default: string | null, identity: Identity | null, comment: string | null, };
+
+export type KeyModel = { 
+/**
+ * The constraint's name; absent lets the server choose one.
+ */
+name: string | null, columns: Array<string>, };
+
+export type CheckModel = { name: string | null, 
+/**
+ * A boolean SQL expression, used as written.
+ */
+expression: string, };
+
+export type ForeignKeyModel = { name: string | null, columns: Array<string>, refSchema: string, refTable: string, refColumns: Array<string>, onDelete: FkAction, onUpdate: FkAction, deferrable: boolean, };
+
+export type IndexModel = { name: string | null, 
+/**
+ * What is indexed, as SQL: `email, created DESC`, or `btree (lower(email))` with a method.
+ */
+columns: string, unique: boolean, };
+
+export type TableModel = { schema: string, name: string, comment: string | null, columns: Array<ColumnModel>, primaryKey: KeyModel | null, uniques: Array<KeyModel>, checks: Array<CheckModel>, foreignKeys: Array<ForeignKeyModel>, indexes: Array<IndexModel>, };
+
+export type DropObject = { "kind": "relation", schema: string, name: string, objectType: ObjectType, } | { "kind": "sequence", schema: string, name: string, } | { "kind": "routine", schema: string, name: string, args: string, procedure: boolean, } | { "kind": "index", schema: string, name: string, } | { "kind": "trigger", schema: string, table: string, name: string, } | { "kind": "schema", schema: string, };
+
+export type RenameObject = { "kind": "relation", schema: string, name: string, objectType: ObjectType, } | { "kind": "column", schema: string, table: string, name: string, } | { "kind": "schema", schema: string, };
+
+export type TableName = { schema: string, name: string, };
+
+export type SchemaChange = { "kind": "createTable", table: TableModel, } | { "kind": "alterTable", original: TableModel, table: TableModel, } | { "kind": "drop", objects: Array<DropObject>, ifExists: boolean, cascade: boolean, } | { "kind": "truncate", tables: Array<TableName>, restartIdentity: boolean, cascade: boolean, } | { "kind": "rename", object: RenameObject, newName: string, };
+
 export type ColumnInfo = { name: string, 
 /**
  * Engine type name ("int4", "text", ...) when the statement could be described.

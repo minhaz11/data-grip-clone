@@ -234,6 +234,29 @@ listed tests run green in CI.
     light, comments, strings and predefined variables in dark), now scanned in both themes.
   - Not yet: aggregates (emitted as a comment), table inheritance (`INHERITS`), arbitrary
     multi-select in the explorer (schema-level generation covers multiple objects).
+- **M4.5 Schema change tools** ✅ (plan: `docs/plans/06-schema-change-tools.md`)
+  - **New table / Modify table** from the explorer: columns (type with suggestions, not null,
+    default, identity, comment), primary key, uniques, checks, foreign keys and indexes. Modify
+    starts from a `TableModel` read from the catalog and diffs it against the edit; column
+    renames carry through keys, and an unchanged model produces no statements.
+  - **Drop** (IF EXISTS, CASCADE), **Truncate** (RESTART IDENTITY, CASCADE) and **Rename**
+    (table, column, schema) for every object kind the explorer shows.
+  - **Exact statements first**: every dialog shows a live preview built in Rust; Edit SQL
+    switches to hand-edited text (Reset to generated returns), which runs through the console's
+    destructive-statement check.
+  - **All or nothing**: apply runs in one transaction on a short-lived side connection; a failure
+    reports "Statement N of M failed" with the statement and changes nothing.
+  - **Guards**: read-only sources offer no schema tools and the server rejects the transaction;
+    production sources confirm with the statements; CASCADE or several objects require typing
+    the name. After apply the explorer refreshes; DDL run in a console marks the source out of
+    date with a Refresh button.
+  - Tests: Rust unit (builders, quoting, type grammar, diff order); integration (create with every
+    constraint kind compared with the catalog, alter kinds, no-op model, rollback on failure,
+    read-only rejection, drop/truncate/rename); UI (create, typed CASCADE confirmation, a
+    production confirmation for each tool, hand edits, modify from the model, read-only, stale
+    banner); E2E (table dialog).
+  - Not yet: `USING` for type changes (via Edit SQL), view/routine source editing, rename
+    refactoring, safe-delete analysis.
 - **M4.6 Transactions and sessions** ✅ (plan: `docs/plans/03-transactions-sessions.md`)
   - **Transaction state comes from the server.** `tokio-postgres` drops the ReadyForQuery
     status, so after any statement that can change it (BEGIN/COMMIT/…, CALL, DO, or an error

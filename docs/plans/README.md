@@ -39,7 +39,7 @@ is the human summary; refresh its Progress column from the script output when yo
 | 03  | [Transactions and sessions](03-transactions-sessions.md)          | M4.6             | 01         | In progress | 97%      |
 | 04  | [Table viewer and richer metadata](04-table-viewer-metadata.md)   | M4.3             | 01         | Done        | 100%     |
 | 05  | [DDL generation](05-ddl-generation.md)                            | M4.4             | 04         | Done        | 100%     |
-| 06  | [Schema change tools](06-schema-change-tools.md)                  | M4.5             | 03, 05     | Not started | 0%       |
+| 06  | [Schema change tools](06-schema-change-tools.md)                  | M4.5             | 03, 05     | Done        | 100%     |
 | 07  | [Result grid gaps and table browsing](07-result-grid.md)          | M4.8             | 03, 04     | Not started | 0%       |
 | 08  | [Editor gaps](08-editor.md)                                       | M4.7             | 03         | Not started | 0%       |
 | 09  | [Query history](09-query-history.md)                              | M5.1             | 03         | Not started | 0%       |

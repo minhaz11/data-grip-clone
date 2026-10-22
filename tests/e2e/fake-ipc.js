@@ -273,6 +273,12 @@
         )
         .join('\n'),
     ddl_save: () => '/tmp/quarry-e2e.sql',
+    table_model: () => null,
+    schema_preview: ({ change }) =>
+      change.kind === 'createTable'
+        ? [`CREATE TABLE ${change.table.schema}.${change.table.name || '?'} (...)`]
+        : [`-- ${change.kind}`],
+    schema_apply: () => null,
     session_state: ({ session }) => sessionState(session),
     session_set_tx: ({ session, settings }) => updateSession(session, { settings }),
     tx_commit: ({ session }) => updateSession(session, { status: 'idle' }),

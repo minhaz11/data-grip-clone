@@ -16,7 +16,16 @@ import { useMetadata } from './metadataStore';
 import { TreeRow } from './TreeRow';
 import { flattenTree, SEP, type Row } from './treeModel';
 import { useWorkspace } from '../../app/workspaceStore';
-import type { DdlObject, ObjectRef } from '../../ipc/types';
+import type {
+  ConnectionProfile as Profile,
+  DdlObject,
+  DropObject,
+  ObjectRef,
+  RenameObject,
+  TableName,
+} from '../../ipc/types';
+import { DropDialog, RenameDialog, TruncateDialog } from '../schema/SchemaDialogs';
+import { TableDialog } from '../schema/TableDialog';
 import { backend } from '../../ipc/client';
 import { toAppError } from '../../lib/errors';
 import { QuickInfo, type QuickInfoTarget } from '../schema/QuickInfo';
@@ -50,6 +59,8 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
   };
   const [actionError, setActionError] = useState<string | null>(null);
   const [quickInfo, setQuickInfo] = useState<QuickInfoTarget | null>(null);
+  const [tool, setTool] = useState<SchemaTool | null>(null);
+  const stale = useMetadata((s) => s.stale);
   const [connectError, setConnectError] = useState<{ name: string; error: AppError } | null>(null);
   const treeRef = useRef<HTMLUListElement>(null);
 
@@ -226,6 +237,108 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
     }
   }
 
+  /** Refreshes what a schema change can affect: the schema's subtree (or the whole source). */
+  function afterChange(sourceId: string, schema: string | null) {
+    refresh(schema === null ? sourceId : `${sourceId}${SEP}s:${schema}`);
+    resetCatalog(sourceId);
+  }
+
+  /** Create/modify/drop/truncate/rename actions for a node (M4.5). */
+  function schemaTools(row: Row): MenuItem[] {
+    if (row.type !== 'node' || row.profile.readOnly) {
+      return [];
+    }
+    const source = row.profile;
+    const n = row.node;
+    const parent = rows.find((r) => r.key === row.parentKey);
+    const from = parent?.type === 'node' ? parent.node.children : undefined;
+    const drop = (objects: DropObject[], label: string): MenuItem => ({
+      label: 'Drop…',
+      danger: true,
+      onSelect: () => setTool({ kind: 'drop', source, objects, label }),
+    });
+    const rename = (object: RenameObject, current: string): MenuItem => ({
+      label: 'Rename…',
+      onSelect: () => setTool({ kind: 'rename', source, object, current }),
+    });
+    const newTable = (schema: string): MenuItem => ({
+      label: 'New table…',
+      onSelect: () => setTool({ kind: 'table', source, schema }),
+    });
+    if (n.kind === 'schema') {
+      return [
+        newTable(n.name),
+        rename({ kind: 'schema', schema: n.name }, n.name),
+        drop([{ kind: 'schema', schema: n.name }], `schema ${n.name}`),
+      ];
+    }
+    if (n.kind === 'group' && n.children?.level === 'objects' && n.key === 'g:tables') {
+      return [newTable(n.children.schema)];
+    }
+    const object = objectOf(row);
+    if (object) {
+      const { schema, name, objectType } = object;
+      const label = `${objectType.replace('_', ' ')} ${schema}.${name}`;
+      const items: MenuItem[] = [];
+      if (objectType === 'table') {
+        items.push({
+          label: 'Modify table…',
+          onSelect: () => setTool({ kind: 'table', source, schema, table: name }),
+        });
+      }
+      items.push(rename({ kind: 'relation', schema, name, objectType }, name));
+      if (objectType === 'table') {
+        items.push({
+          label: 'Truncate…',
+          danger: true,
+          onSelect: () => setTool({ kind: 'truncate', source, tables: [{ schema, name }] }),
+        });
+      }
+      items.push(drop([{ kind: 'relation', schema, name, objectType }], label));
+      return items;
+    }
+    if (n.kind === 'column' && from?.level === 'columns') {
+      return [
+        rename({ kind: 'column', schema: from.schema, table: from.table, name: n.name }, n.name),
+      ];
+    }
+    if (n.kind === 'sequence' && from?.level === 'sequences') {
+      return [
+        drop(
+          [{ kind: 'sequence', schema: from.schema, name: n.name }],
+          `sequence ${from.schema}.${n.name}`,
+        ),
+      ];
+    }
+    if (n.kind === 'index' && from?.level === 'indexes') {
+      return [
+        drop(
+          [{ kind: 'index', schema: from.schema, name: n.name }],
+          `index ${from.schema}.${n.name}`,
+        ),
+      ];
+    }
+    if (n.kind === 'trigger' && from?.level === 'triggers') {
+      return [
+        drop(
+          [{ kind: 'trigger', schema: from.schema, table: from.table, name: n.name }],
+          `trigger ${n.name}`,
+        ),
+      ];
+    }
+    if (n.kind === 'routine' && from?.level === 'routines') {
+      const args = n.key.slice(`r:${n.name}(`.length, -1);
+      const procedure = n.flags?.includes('procedure') ?? false;
+      return [
+        drop(
+          [{ kind: 'routine', schema: from.schema, name: n.name, args, procedure }],
+          `${procedure ? 'procedure' : 'function'} ${from.schema}.${n.name}`,
+        ),
+      ];
+    }
+    return [];
+  }
+
   function openViewer(row: Row): boolean {
     const object = objectOf(row);
     if (!object) {
@@ -262,6 +375,7 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
               { label: 'Copy DDL', onSelect: () => void copyDdl(row, ddl) },
             ]
           : []),
+        ...(live ? schemaTools(row) : []),
         refreshItem,
         { label: 'Copy name', onSelect: () => void navigator.clipboard?.writeText(row.node.name) },
       ];
@@ -382,6 +496,27 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
         </p>
       )}
 
+      {items
+        .filter((p) => stale[p.id] && sessions[p.id]?.state === 'connected')
+        .map((p) => (
+          <div
+            key={p.id}
+            role="status"
+            className="flex items-center gap-2 border-b border-border bg-panel-2 px-3 py-1.5"
+          >
+            <span className="min-w-0 flex-1">
+              {p.name} may be out of date: schema statements ran in a console.
+            </span>
+            <button
+              type="button"
+              className="shrink-0 text-accent underline"
+              onClick={() => afterChange(p.id, null)}
+            >
+              Refresh
+            </button>
+          </div>
+        ))}
+
       {items.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center text-muted">
           <Database size={28} strokeWidth={1.5} aria-hidden />
@@ -442,6 +577,50 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
         />
       )}
       {quickInfo && <QuickInfo target={quickInfo} onClose={() => setQuickInfo(null)} />}
+      {tool?.kind === 'table' && (
+        <TableDialog
+          source={tool.source}
+          schema={tool.schema}
+          table={tool.table}
+          onApplied={() => afterChange(tool.source.id, tool.schema)}
+          onClose={() => setTool(null)}
+        />
+      )}
+      {tool?.kind === 'drop' && (
+        <DropDialog
+          source={tool.source}
+          objects={tool.objects}
+          label={tool.label}
+          onApplied={() =>
+            afterChange(
+              tool.source.id,
+              tool.objects.some((o) => o.kind === 'schema')
+                ? null
+                : (tool.objects[0]?.schema ?? null),
+            )
+          }
+          onClose={() => setTool(null)}
+        />
+      )}
+      {tool?.kind === 'truncate' && (
+        <TruncateDialog
+          source={tool.source}
+          tables={tool.tables}
+          onApplied={() => afterChange(tool.source.id, tool.tables[0]?.schema ?? null)}
+          onClose={() => setTool(null)}
+        />
+      )}
+      {tool?.kind === 'rename' && (
+        <RenameDialog
+          source={tool.source}
+          object={tool.object}
+          current={tool.current}
+          onApplied={() =>
+            afterChange(tool.source.id, tool.object.kind === 'schema' ? null : tool.object.schema)
+          }
+          onClose={() => setTool(null)}
+        />
+      )}
       {pendingDelete && (
         <ConfirmDialog
           title="Delete Data Source"
@@ -464,3 +643,9 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
     </section>
   );
 }
+
+type SchemaTool =
+  | { kind: 'table'; source: Profile; schema: string; table?: string }
+  | { kind: 'drop'; source: Profile; objects: DropObject[]; label: string }
+  | { kind: 'truncate'; source: Profile; tables: TableName[] }
+  | { kind: 'rename'; source: Profile; object: RenameObject; current: string };

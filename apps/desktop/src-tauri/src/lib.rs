@@ -6,6 +6,7 @@ mod ddl;
 mod error;
 mod exec;
 mod results;
+mod schema;
 mod sessions;
 mod transactions;
 
@@ -60,6 +61,9 @@ pub fn run() {
             connections::object_details,
             ddl::ddl_generate,
             ddl::ddl_save,
+            schema::table_model,
+            schema::schema_preview,
+            schema::schema_apply,
             consoles::console_list,
             consoles::console_create,
             consoles::console_read,

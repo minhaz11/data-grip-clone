@@ -14,6 +14,9 @@ interface MetadataState {
   refresh(key: string): void;
   /** Forgets everything about a data source (disconnect, lost session, delete). */
   resetSource(sourceId: string): void;
+  /** Data sources whose tree may be out of date (DDL ran in a console). */
+  stale: Record<string, boolean | undefined>;
+  markStale(sourceId: string): void;
 }
 
 // Bumped per key on refresh/reset so late responses for discarded requests are ignored.
@@ -51,7 +54,16 @@ export const useMetadata = create<MetadataState>((set, get) => {
       if ((generation.get(key) ?? 0) !== gen) return; // refreshed or reset meanwhile
       set((s) => ({ children: { ...s.children, [key]: result } }));
     },
-    refresh: (key) => drop(key, false),
-    resetSource: (sourceId) => drop(sourceId, true),
+    refresh: (key) => {
+      drop(key, false);
+      // Refreshing a whole data source makes its tree current again.
+      if (get().stale[key]) set((s) => ({ stale: { ...s.stale, [key]: undefined } }));
+    },
+    resetSource: (sourceId) => {
+      drop(sourceId, true);
+      set((s) => ({ stale: { ...s.stale, [sourceId]: undefined } }));
+    },
+    stale: {},
+    markStale: (sourceId) => set((s) => ({ stale: { ...s.stale, [sourceId]: true } })),
   };
 });

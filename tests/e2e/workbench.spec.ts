@@ -181,6 +181,24 @@ test.describe('accessibility', () => {
     await expectNoA11yViolations(app, '.monaco-editor');
   });
 
+  test('table dialog previews statements and has no WCAG A/AA violations', async ({ app }) => {
+    await createDataSource(app, 'Dev');
+    await app.getByRole('treeitem', { name: /^Dev/ }).click();
+    await app.getByRole('tree', { name: 'Data sources' }).press('ArrowRight');
+    await app.getByRole('treeitem', { name: 'shop, schema' }).click({ button: 'right' });
+    await app.getByRole('menuitem', { name: 'New table…' }).click();
+    const dialog = app.getByRole('dialog', { name: 'New table in shop' });
+    await dialog.getByLabel('Name', { exact: true }).fill('events');
+    await expect(dialog.getByLabel('Statements to run')).toHaveText(
+      'CREATE TABLE shop.events (...);',
+    );
+    await expectNoA11yViolations(app, '[role="dialog"]');
+    await dialog.getByRole('button', { name: 'Create' }).click();
+    await expect(dialog).toBeHidden();
+    const [applied] = await ipcCalls(app, 'schema_apply');
+    expect(applied?.args).toMatchObject({ statements: ['CREATE TABLE shop.events (...)'] });
+  });
+
   test('connection dialog has no WCAG A/AA violations', async ({ app }) => {
     await app.getByRole('button', { name: 'New data source', exact: true }).click();
     await expect(app.getByRole('dialog', { name: 'New PostgreSQL Data Source' })).toBeVisible();

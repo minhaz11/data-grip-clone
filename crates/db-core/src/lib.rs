@@ -5,6 +5,7 @@ mod ddl;
 mod details;
 mod exec;
 mod metadata;
+mod schema;
 mod tx;
 
 use std::fmt;
@@ -24,6 +25,10 @@ pub use exec::{
     ErrorPosition, ExecOptions, Filter, FilterOp, Refinement, RowChange, SortKey, StatementOutcome,
 };
 pub use metadata::{MetaKind, MetaNode, MetadataRequest, ObjectType};
+pub use schema::{
+    CheckModel, ColumnModel, DropObject, FkAction, ForeignKeyModel, Identity, IndexModel, KeyModel,
+    RenameObject, SchemaChange, TableModel, TableName,
+};
 pub use tx::{Isolation, TxMode, TxSettings, TxStatus};
 
 /// TLS policy, with libpq semantics: `Prefer`/`Require` encrypt without verifying the certificate;
@@ -141,6 +146,8 @@ pub trait DatabaseAdapter: Send + Sync {
         params: &ConnectParams,
         on_close: OnClose,
     ) -> Result<Arc<dyn Session>, ConnectError>;
+    /// The statements a schema change would run, exactly (no connection needed).
+    fn preview_schema(&self, change: &SchemaChange) -> Result<Vec<String>, DbError>;
 }
 
 /// A failure while using an open session (as opposed to [`ConnectError`] while opening one).
@@ -182,6 +189,11 @@ pub trait Session: Send + Sync {
     /// DDL for `objects` from the catalog, as one script that applies cleanly in order. Runs on
     /// a separate short-lived connection, so this session's transaction is never touched.
     async fn ddl(&self, objects: &[DdlObject], options: &DdlOptions) -> Result<String, DbError>;
+    /// The editable model of a table (Modify Table); `None` if it no longer exists.
+    async fn table_model(&self, schema: &str, name: &str) -> Result<Option<TableModel>, DbError>;
+    /// Runs `statements` in one transaction on a separate short-lived connection; the first
+    /// failure rolls everything back and names the statement.
+    async fn apply_schema(&self, statements: &[String]) -> Result<(), DbError>;
     /// Runs one statement exactly as given (no parameters, no rewriting).
     async fn execute(&self, sql: &str, options: &ExecOptions) -> Result<StatementOutcome, DbError>;
     /// Asks the server to cancel whatever this session is running. Returns once the request is
