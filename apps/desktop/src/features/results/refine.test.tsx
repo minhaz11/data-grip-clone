@@ -28,7 +28,7 @@ function renderGrid(refinement: Refinement = { sort: [], filters: [] }) {
   const onRefine = vi.fn();
   const utils = render(
     <ResultGrid
-      sourceId="src"
+      session={{ sourceId: 'src' }}
       outcome={OUTCOME}
       exportName="r"
       onRefine={onRefine}
@@ -53,7 +53,7 @@ describe('server-side sort and filter UI', () => {
 
     rerender(
       <ResultGrid
-        sourceId="src"
+        session={{ sourceId: 'src' }}
         outcome={OUTCOME}
         exportName="r"
         onRefine={onRefine}
@@ -97,7 +97,7 @@ describe('server-side sort and filter UI', () => {
 
     rerender(
       <ResultGrid
-        sourceId="src"
+        session={{ sourceId: 'src' }}
         outcome={OUTCOME}
         exportName="r"
         onRefine={onRefine}
@@ -110,7 +110,7 @@ describe('server-side sort and filter UI', () => {
     // The grid is controlled: the parent applies the change and re-renders it.
     rerender(
       <ResultGrid
-        sourceId="src"
+        session={{ sourceId: 'src' }}
         outcome={OUTCOME}
         exportName="r"
         onRefine={onRefine}
@@ -130,7 +130,11 @@ describe('server-side sort and filter UI', () => {
 
   it('offers no sort controls for results that cannot be re-run', () => {
     render(
-      <ResultGrid sourceId="src" outcome={{ ...OUTCOME, cursor: undefined }} exportName="r" />,
+      <ResultGrid
+        session={{ sourceId: 'src' }}
+        outcome={{ ...OUTCOME, cursor: undefined }}
+        exportName="r"
+      />,
     );
     expect(screen.queryByRole('group', { name: 'Filters' })).not.toBeInTheDocument();
     expect(
@@ -144,6 +148,8 @@ describe('server-side sort and filter UI', () => {
         t1: {
           tabId: 't1',
           sourceId: 'src',
+          session: { sourceId: 'src' },
+          schema: null,
           sourceName: 'Dev',
           jobId: 'j',
           status: 'completed',
@@ -179,11 +185,12 @@ describe('server-side sort and filter UI', () => {
     const r1: Refinement = { sort: [{ column: 0, descending: true }], filters: [] };
     await useExec.getState().refine('t1', 0, r1);
     expect(refine).toHaveBeenCalledWith(
-      'src',
+      { sourceId: 'src' },
       'select id, email from users',
       OUTCOME.columns,
       r1,
       'quarry_cursor_1',
+      null,
     );
     let st = useExec.getState().runs.t1?.statements[0];
     expect(st?.outcome).toEqual(sorted);

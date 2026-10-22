@@ -43,7 +43,13 @@ describe('ResultGrid', () => {
     const page = vi
       .spyOn(backend, 'resultPage')
       .mockImplementation(async (_s, _c, offset, limit) => rowsAt(offset, limit, 1_000_000));
-    render(<ResultGrid sourceId="src" outcome={million()} exportName="console_result_1" />);
+    render(
+      <ResultGrid
+        session={{ sourceId: 'src' }}
+        outcome={million()}
+        exportName="console_result_1"
+      />,
+    );
     const grid = screen.getByRole('grid', { name: 'Result rows' });
     expect(grid).toHaveAttribute('aria-rowcount', '1000001');
     expect(page).not.toHaveBeenCalled(); // the first page arrived with the result
@@ -85,7 +91,7 @@ describe('ResultGrid', () => {
       truncated: false,
       cursor: 'c',
     };
-    render(<ResultGrid sourceId="src" outcome={outcome} exportName="x" />);
+    render(<ResultGrid session={{ sourceId: 'src' }} outcome={outcome} exportName="x" />);
     const grid = screen.getByRole('grid');
     act(() => grid.focus());
     await userEvent.keyboard('{ArrowDown}{ArrowRight}');
@@ -108,10 +114,16 @@ describe('ResultGrid', () => {
         return new Promise((resolve) => (finish = resolve));
       });
     const user = userEvent.setup();
-    render(<ResultGrid sourceId="src" outcome={million()} exportName="console_result_1" />);
+    render(
+      <ResultGrid
+        session={{ sourceId: 'src' }}
+        outcome={million()}
+        exportName="console_result_1"
+      />,
+    );
     await user.click(screen.getByRole('button', { name: /CSV/ }));
     expect(exp).toHaveBeenCalledWith(
-      'src',
+      { sourceId: 'src' },
       'quarry_cursor_1',
       COLUMNS,
       'csv',
@@ -132,7 +144,7 @@ describe('ResultGrid', () => {
       .mockResolvedValueOnce(null)
       .mockRejectedValueOnce({ kind: 'storage', message: 'disk full' });
     const user = userEvent.setup();
-    render(<ResultGrid sourceId="src" outcome={million()} exportName="r" />);
+    render(<ResultGrid session={{ sourceId: 'src' }} outcome={million()} exportName="r" />);
     await user.click(screen.getByRole('button', { name: /JSON/ }));
     await waitFor(() => expect(exp).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
@@ -148,7 +160,7 @@ describe('ResultGrid', () => {
       totalRows: 2000,
       truncated: true,
     };
-    render(<ResultGrid sourceId="src" outcome={outcome} exportName="r" />);
+    render(<ResultGrid session={{ sourceId: 'src' }} outcome={outcome} exportName="r" />);
     expect(
       screen.getByText(/2,000 rows \(first 500 shown; this statement cannot be paged\)/),
     ).toBeInTheDocument();

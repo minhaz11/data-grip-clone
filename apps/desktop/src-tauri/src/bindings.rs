@@ -54,6 +54,13 @@ mod tests {
             decl::<quarry_db_core::ServerInfo>(&cfg),
             decl::<crate::sessions::SessionStatus>(&cfg),
             decl::<crate::sessions::StatusEvent>(&cfg),
+            decl::<crate::sessions::SessionKey>(&cfg),
+            decl::<crate::sessions::SessionState>(&cfg),
+            decl::<quarry_db_core::TxStatus>(&cfg),
+            decl::<quarry_db_core::TxMode>(&cfg),
+            decl::<quarry_db_core::Isolation>(&cfg),
+            decl::<quarry_db_core::TxSettings>(&cfg),
+            decl::<crate::transactions::QuitResolution>(&cfg),
             // Metadata tree
             decl::<quarry_db_core::ObjectType>(&cfg),
             decl::<quarry_db_core::MetadataRequest>(&cfg),

@@ -72,6 +72,25 @@ pub fn unknown_cursor() -> DbError {
     }
 }
 
+/// A read-only source's transaction was switched to read-write (and has been rolled back).
+pub fn read_only_violation() -> DbError {
+    DbError {
+        message: "This data source is read-only, but the statement made the transaction \
+                  read-write, so the transaction was rolled back."
+            .into(),
+        detail: None,
+        hint: Some(
+            "For a guarantee the server enforces, connect with a role that has no write \
+             privileges."
+                .into(),
+        ),
+        sqlstate: Some("25006".into()),
+        position: None,
+        connection_lost: false,
+        cancelled: false,
+    }
+}
+
 pub fn session_closed() -> DbError {
     DbError {
         message: "The connection is closed.".into(),

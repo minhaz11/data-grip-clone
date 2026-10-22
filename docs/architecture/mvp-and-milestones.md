@@ -120,7 +120,7 @@ listed tests run green in CI.
       confirmation, with Cancel focused. The same path will serve AI-generated SQL.
     - Integration tests (disposable server): typed exact values, cap and count, affected rows,
       error positions, cancel < 1 s with the session reusable, read-only rejection.
-  - Not yet: NOTICE messages, per-console sessions, transaction mode controls (REQ-TX-01),
+  - Not yet: NOTICE messages, per-console sessions (done in M4.6), transaction mode controls (done in M4.6),
     query history (Phase 5), statement timeouts as a setting.
 - **M3.3 Grid + export** ✅: virtualized paged grid; multiple result tabs; CSV/JSON export streamed from
   the backend.
@@ -195,6 +195,37 @@ listed tests run green in CI.
   - Tests: builder unit tests (no values in SQL, unsafe types, key checks) and integration tests
     (editability reasons, apply/conflict/rollback, per-change errors, isolation from an open
     console transaction, read-only rejection).
+- **M4.6 Transactions and sessions** ✅ (plan: `docs/plans/03-transactions-sessions.md`)
+  - **Transaction state comes from the server.** `tokio-postgres` drops the ReadyForQuery
+    status, so after any statement that can change it (BEGIN/COMMIT/…, CALL, DO, or an error
+    inside a block) the session probes with a savepoint: 25P01 means no block, 25P02 an aborted
+    one, success an open one. The probe takes no snapshot, so `BEGIN; SET TRANSACTION …` still
+    works.
+  - **Manual mode** opens `BEGIN ISOLATION LEVEL …` before the first statement that needs one
+    (not before VACUUM, CREATE DATABASE, `… CONCURRENTLY` and other statements that refuse a
+    block). Commit and Rollback are commands, shown in Manual mode or whenever a block is open.
+    Defaults per data source (store migration 3); the console can switch mode and isolation.
+  - **Sessions** are keyed by data source plus optional console: a console can have its own
+    session (forked with the same credentials) and its own transaction; jobs run one per
+    session, so two own-session consoles run at once. Results and cursors carry the session.
+  - **Schema per console**: each run puts the console's schema first in the search path
+    (server-side `quote_ident`, followed by the server's default path); the registry re-applies
+    it only when it differs from what it last set, so a user's own `SET search_path` stays.
+  - **Nothing open is lost silently**: closing a console with its own open transaction,
+    switching its session or data source, disconnecting, deleting a data source, and quitting
+    (the window close is held by Rust) all ask Commit / Roll back / Cancel, with Cancel focused.
+    A failed commit keeps the dialog open with the error.
+  - **Cancel stage 2**: three seconds after Stop, "Drop connection" aborts the connection task,
+    so a stuck statement ends at once (the server may still finish it).
+  - **Read-only gap closed** (ADR-0006): statements that switch to read-write are blocked in the
+    UI, and the server side restores the read-only default before every statement outside a
+    block and rolls back any block made read-write (also after `set_config()` in a SELECT).
+  - Tests: integration (manual commit visibility, rollback, failed blocks, explicit blocks,
+    isolation, no-block statements, paging inside/after a transaction and after rollback,
+    concurrent forks, schema selection and quoting, read-only switches, abort); store migration
+    from version 2; classifier; UI (session/schema sent, guards for close/disconnect/quit,
+    failed commit, mode switch); E2E (Manual mode to Commit).
+  - Not yet: savepoint UI; refresh of results after Commit/Rollback.
 - Table viewer (columns/indexes/constraints/FKs), DDL generation, create/alter forms with DDL preview,
   destructive-operation confirmation.
 

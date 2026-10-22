@@ -6,6 +6,8 @@ import { snapshot, useWorkspace } from './workspaceStore';
 import { useConnections } from '../features/connections/connectionsStore';
 import { useSessions } from '../features/connections/sessionsStore';
 import { resetCatalog } from '../features/editor/catalog';
+import { askQuit } from '../features/exec/txGuards';
+import { useTx } from '../features/exec/txStore';
 
 /** Global keyboard shortcuts, dispatched through the keymap so bindings stay configurable. */
 export function useKeybindings(handlers: Partial<Record<CommandId, () => void>>) {
@@ -64,6 +66,8 @@ export function useWorkspacePersistence(): { ready: boolean; error: string | nul
         await useSettings.getState().load();
         await useConnections.getState().load();
         unlistenStatus = await useSessions.getState().init();
+        const unlistenTx = await useTx.getState().init();
+        const unlistenQuit = await backend.onQuitRequested((open) => void askQuit(open));
         // Completion catalogs are only valid for the session they were read from.
         const unsubscribeCatalog = useSessions.subscribe((s, prev) => {
           for (const id of Object.keys(prev.byId)) {
@@ -74,6 +78,8 @@ export function useWorkspacePersistence(): { ready: boolean; error: string | nul
         const unlisten = unlistenStatus;
         unlistenStatus = () => {
           unlisten();
+          unlistenTx();
+          unlistenQuit();
           unsubscribeCatalog();
         };
         await useWorkspace.getState().hydrate(await backend.workspaceGet());

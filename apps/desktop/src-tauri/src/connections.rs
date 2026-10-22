@@ -71,7 +71,7 @@ pub async fn connection_delete(
 
 // ---- Connectivity (M2.2) ----
 
-use quarry_db_core::{MetaNode, MetadataRequest, ServerInfo};
+use quarry_db_core::{MetaNode, MetadataRequest, ServerInfo, TxSettings};
 use tauri::AppHandle;
 
 use crate::sessions::{SessionStatus, Sessions};
@@ -105,13 +105,20 @@ pub async fn connection_connect(
     password: Option<SecretString>,
 ) -> Result<ServerInfo, AppError> {
     let key = id.clone();
-    let params = run(&manager, move |m| {
+    let (params, defaults) = run(&manager, move |m| {
         let profile = m.profile(&key)?;
+        let defaults = TxSettings {
+            mode: profile.draft.tx_mode,
+            isolation: profile.draft.isolation,
+        };
         let pw = m.resolve_password(Some(&key), password)?;
-        quarry_connections::connect_params(profile.draft, pw)
+        Ok((
+            quarry_connections::connect_params(profile.draft, pw)?,
+            defaults,
+        ))
     })
     .await?;
-    sessions.inner().connect(&app, &id, &params).await
+    sessions.inner().connect(&app, &id, &params, defaults).await
 }
 
 #[tauri::command]

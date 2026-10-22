@@ -10,6 +10,8 @@ import { useConnections } from '../connections/connectionsStore';
 import { askPasswordAndConnect } from '../../app/dialogs';
 import { useSessions } from '../connections/sessionsStore';
 import { resetCatalog } from '../editor/catalog';
+import { disconnectSource, resolveTransactions } from '../exec/txGuards';
+import { openTransactions } from '../exec/txStore';
 import { useMetadata } from './metadataStore';
 import { TreeRow } from './TreeRow';
 import { flattenTree, type Row } from './treeModel';
@@ -29,13 +31,18 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
   const loadError = useConnections((s) => s.error);
   const sessions = useSessions((s) => s.byId);
   const connect = useSessions((s) => s.connect);
-  const disconnect = useSessions((s) => s.disconnect);
   const { children, expanded, setExpanded, load, refresh, resetSource } = useMetadata();
 
   const [filter, setFilter] = useState('');
   const [pickedKey, setSelectedKey] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; row: Row } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<ConnectionProfile | null>(null);
+  // Deleting disconnects: open transactions are resolved first.
+  const askDelete = async (p: ConnectionProfile) => {
+    if (await resolveTransactions(openTransactions(p.id), `Delete ${p.name}?`)) {
+      setPendingDelete(p);
+    }
+  };
   const [actionError, setActionError] = useState<string | null>(null);
   const [connectError, setConnectError] = useState<{ name: string; error: AppError } | null>(null);
   const treeRef = useRef<HTMLUListElement>(null);
@@ -139,12 +146,12 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
     const live = state === 'connected' || state === 'connecting';
     return [
       live
-        ? { label: 'Disconnect', onSelect: () => void disconnect(p.id) }
+        ? { label: 'Disconnect', onSelect: () => void disconnectSource(p.id) }
         : { label: 'Connect', onSelect: () => void runConnect(p) },
       ...(state === 'connected' ? [refreshItem] : []),
       { label: 'Properties…', shortcut: 'Enter', onSelect: () => onEdit(p) },
       { label: 'Duplicate', shortcut: 'Ctrl+D', onSelect: () => void runDuplicate(p) },
-      { label: 'Delete…', shortcut: 'Delete', danger: true, onSelect: () => setPendingDelete(p) },
+      { label: 'Delete…', shortcut: 'Delete', danger: true, onSelect: () => void askDelete(p) },
     ];
   }
 
@@ -166,7 +173,7 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
       if (row.type === 'source') onEdit(row.profile);
       else void toggle(row);
     } else if (e.key === 'F5' && e.ctrlKey) refreshRow(row);
-    else if (row.type === 'source' && e.key === 'Delete') setPendingDelete(row.profile);
+    else if (row.type === 'source' && e.key === 'Delete') void askDelete(row.profile);
     else if (row.type === 'source' && e.ctrlKey && e.key.toLowerCase() === 'd')
       void runDuplicate(row.profile);
     else if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {

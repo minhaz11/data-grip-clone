@@ -43,7 +43,7 @@ function Harness() {
   const [edits, setEdits] = useState(NO_EDITS);
   return (
     <ResultGrid
-      sourceId="src"
+      session={{ sourceId: 'src' }}
       outcome={OUTCOME}
       exportName="r"
       editing={{
@@ -146,6 +146,7 @@ describe('edit bar and submit', () => {
     render(
       <EditBar
         source={source()}
+        session={{ sourceId: 'src' }}
         target={null}
         reason='"customers" has no primary key.'
         edits={NO_EDITS}
@@ -169,6 +170,7 @@ describe('edit bar and submit', () => {
     render(
       <EditBar
         source={source()}
+        session={{ sourceId: 'src' }}
         target={TARGET}
         edits={oneEdit}
         submitting={false}
@@ -195,6 +197,7 @@ describe('edit bar and submit', () => {
       <>
         <EditBar
           source={source('production')}
+          session={{ sourceId: 'src' }}
           target={TARGET}
           edits={oneEdit}
           submitting={false}
@@ -219,6 +222,8 @@ describe('edit bar and submit', () => {
         t1: {
           tabId: 't1',
           sourceId: 'src',
+          session: { sourceId: 'src' },
+          schema: null,
           sourceName: 'Dev',
           jobId: 'j',
           status: 'completed',
@@ -250,13 +255,14 @@ describe('edit bar and submit', () => {
     const refine = vi.spyOn(backend, 'resultRefine').mockResolvedValue(refreshed);
 
     await act(() => useExec.getState().submitEdits('t1', 0));
-    expect(apply).toHaveBeenCalledWith('src', TARGET, toChanges(oneEdit));
+    expect(apply).toHaveBeenCalledWith({ sourceId: 'src' }, TARGET, toChanges(oneEdit));
     expect(refine).toHaveBeenCalledWith(
-      'src',
+      { sourceId: 'src' },
       expect.any(String),
       OUTCOME.columns,
       { sort: [{ column: 0, descending: true }], filters: [] },
       'quarry_cursor_1',
+      null,
     );
     let st = useExec.getState().runs.t1?.statements[0];
     expect(st?.edits).toEqual(NO_EDITS);

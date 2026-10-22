@@ -3,9 +3,11 @@ import { Modal } from '../../components/ui/Modal';
 import type {
   ConnectionDraft,
   ConnectionProfile,
+  Isolation,
   PasswordChange,
   SaveMode,
   SslMode,
+  TxMode,
 } from '../../ipc/types';
 import { backend } from '../../ipc/client';
 import type { AppError, ServerInfo } from '../../ipc/types';
@@ -374,6 +376,35 @@ export function ConnectionDialog({ profile, onClose }: Props) {
               />
               <span className="text-muted">seconds</span>
             </div>
+          )}
+        </Field>
+
+        <Field label="Transactions">
+          {(id) => (
+            <select
+              id={id}
+              className={input}
+              value={draft.txMode}
+              onChange={(e) => patch({ txMode: e.target.value as TxMode })}
+            >
+              <option value="auto">Auto-commit each statement</option>
+              <option value="manual">Manual: commit or roll back explicitly</option>
+            </select>
+          )}
+        </Field>
+
+        <Field label="Isolation">
+          {(id) => (
+            <select
+              id={id}
+              className={input}
+              value={draft.isolation}
+              onChange={(e) => patch({ isolation: e.target.value as Isolation })}
+            >
+              <option value="read_committed">Read committed</option>
+              <option value="repeatable_read">Repeatable read</option>
+              <option value="serializable">Serializable</option>
+            </select>
           )}
         </Field>
 

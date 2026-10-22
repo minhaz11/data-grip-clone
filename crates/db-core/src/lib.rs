@@ -3,6 +3,7 @@
 
 mod exec;
 mod metadata;
+mod tx;
 
 use std::fmt;
 use std::sync::Arc;
@@ -16,6 +17,7 @@ pub use exec::{
     ErrorPosition, ExecOptions, Filter, FilterOp, Refinement, RowChange, SortKey, StatementOutcome,
 };
 pub use metadata::{MetaKind, MetaNode, MetadataRequest, ObjectType};
+pub use tx::{Isolation, TxMode, TxSettings, TxStatus};
 
 /// TLS policy, with libpq semantics: `Prefer`/`Require` encrypt without verifying the certificate;
 /// `VerifyCa` checks the chain; `VerifyFull` also checks the host name.
@@ -208,6 +210,26 @@ pub trait Session: Send + Sync {
     async fn close_cursor(&self, cursor: &str) -> Result<(), DbError>;
     /// Ends the session; waits for in-flight calls to finish first. Idempotent.
     async fn close(&self);
+    /// Drops the connection at once, without waiting: running calls fail as connection lost.
+    /// The server may keep running a statement until it notices. `on_close` is not called.
+    fn abort(&self);
+
+    /// The transaction state after the last statement or commit/rollback.
+    fn tx_status(&self) -> TxStatus;
+    fn tx_settings(&self) -> TxSettings;
+    /// Takes effect from the next statement; an open transaction is not touched.
+    fn set_tx_settings(&self, settings: TxSettings);
+    /// Commits the open transaction (a failed one is rolled back by the server) and returns the
+    /// new state. Without an open transaction this does nothing.
+    async fn commit(&self) -> Result<TxStatus, DbError>;
+    /// Rolls back the open transaction, if any, and returns the new state.
+    async fn rollback(&self) -> Result<TxStatus, DbError>;
+    /// Puts `schema` first in the search path (followed by the server's default path), or restores
+    /// the default with `None`. Applies to this session until changed.
+    async fn set_schema(&self, schema: Option<&str>) -> Result<(), DbError>;
+    /// Opens another session with the same parameters (credentials included), for consoles that
+    /// want their own connection and transaction.
+    async fn fork(&self, on_close: OnClose) -> Result<Arc<dyn Session>, ConnectError>;
 }
 
 #[cfg(test)]

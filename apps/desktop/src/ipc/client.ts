@@ -17,10 +17,14 @@ import type {
   MetaNode,
   MetadataRequest,
   PasswordChange,
+  QuitResolution,
   ServerInfo,
+  SessionKey,
+  SessionState,
   SessionStatus,
   Settings,
   StatusEvent,
+  TxSettings,
   WorkspaceState,
 } from './types';
 import { createMemoryBackend } from './memoryBackend';
@@ -62,32 +66,47 @@ export interface Backend {
   queryExecute(request: ExecRequest, onEvent: (e: ExecEvent) => void): Promise<string>;
   queryCancel(jobId: string): Promise<null>;
   /** Rows `[offset, offset + limit)` of a result cursor (limit ≤ 2000). */
-  resultPage(sourceId: string, cursor: string, offset: number, limit: number): Promise<Cell[][]>;
-  resultClose(sourceId: string, cursor: string): Promise<null>;
-  /** Re-runs `sql` with server-side sort/filter; closes `previousCursor`. */
+  resultPage(session: SessionKey, cursor: string, offset: number, limit: number): Promise<Cell[][]>;
+  resultClose(session: SessionKey, cursor: string): Promise<null>;
+  /** Re-runs `sql` with server-side sort/filter (in `schema`, as the run did); closes `previousCursor`. */
   resultRefine(
-    sourceId: string,
+    session: SessionKey,
     sql: string,
     columns: ColumnInfo[],
     refinement: Refinement,
     previousCursor: string | null,
+    schema: string | null,
   ): Promise<StatementOutcome>;
   resultPreviewEdits(
-    sourceId: string,
+    session: SessionKey,
     target: EditTarget,
     changes: RowChange[],
   ): Promise<EditStatement[]>;
   /** All or nothing; resolves to the number of changes applied. */
-  resultApplyEdits(sourceId: string, target: EditTarget, changes: RowChange[]): Promise<number>;
+  resultApplyEdits(session: SessionKey, target: EditTarget, changes: RowChange[]): Promise<number>;
   /** Native save dialog + streamed export in the backend; `null` if the user cancelled. */
   resultExport(
-    sourceId: string,
+    session: SessionKey,
     cursor: string,
     columns: ColumnInfo[],
     format: ExportFormat,
     fileName: string,
     onProgress: (rows: number) => void,
   ): Promise<ExportSummary | null>;
+  /** Transaction state and settings of a session (open or not). */
+  sessionState(session: SessionKey): Promise<SessionState>;
+  sessionSetTx(session: SessionKey, settings: TxSettings): Promise<SessionState>;
+  txCommit(session: SessionKey): Promise<SessionState>;
+  txRollback(session: SessionKey): Promise<SessionState>;
+  /** Closes a console's own session. */
+  sessionClose(session: SessionKey): Promise<null>;
+  /** Drops a session's connection even while a statement runs (second-stage cancel). */
+  sessionDrop(session: SessionKey): Promise<null>;
+  /** Resolves every open transaction, then exits the app. */
+  appQuit(resolution: QuitResolution): Promise<null>;
+  onSessionState(cb: (e: SessionState) => void): Promise<() => void>;
+  /** The window was closed while transactions are open; the UI decides and calls `appQuit`. */
+  onQuitRequested(cb: (open: SessionKey[]) => void): Promise<() => void>;
 }
 
 const tauriBackend: Backend = {
@@ -119,26 +138,27 @@ const tauriBackend: Backend = {
     return invoke<string>('query_execute', { request, onEvent: channel });
   },
   queryCancel: (jobId) => invoke<null>('query_cancel', { jobId }),
-  resultPage: (sourceId, cursor, offset, limit) =>
-    invoke<Cell[][]>('result_page', { sourceId, cursor, offset, limit }),
-  resultClose: (sourceId, cursor) => invoke<null>('result_close', { sourceId, cursor }),
-  resultRefine: (sourceId, sql, columns, refinement, previousCursor) =>
+  resultPage: (session, cursor, offset, limit) =>
+    invoke<Cell[][]>('result_page', { session, cursor, offset, limit }),
+  resultClose: (session, cursor) => invoke<null>('result_close', { session, cursor }),
+  resultRefine: (session, sql, columns, refinement, previousCursor, schema) =>
     invoke<StatementOutcome>('result_refine', {
-      sourceId,
+      session,
       sql,
       columns,
       refinement,
       previousCursor,
+      schema,
     }),
-  resultPreviewEdits: (sourceId, target, changes) =>
-    invoke<EditStatement[]>('result_preview_edits', { sourceId, target, changes }),
-  resultApplyEdits: (sourceId, target, changes) =>
-    invoke<number>('result_apply_edits', { sourceId, target, changes }),
-  resultExport: (sourceId, cursor, columns, format, fileName, onProgress) => {
+  resultPreviewEdits: (session, target, changes) =>
+    invoke<EditStatement[]>('result_preview_edits', { session, target, changes }),
+  resultApplyEdits: (session, target, changes) =>
+    invoke<number>('result_apply_edits', { session, target, changes }),
+  resultExport: (session, cursor, columns, format, fileName, onProgress) => {
     const channel = new Channel<number>();
     channel.onmessage = onProgress;
     return invoke<ExportSummary | null>('result_export', {
-      sourceId,
+      session,
       cursor,
       columns,
       format,
@@ -146,6 +166,16 @@ const tauriBackend: Backend = {
       onProgress: channel,
     });
   },
+  sessionState: (session) => invoke<SessionState>('session_state', { session }),
+  sessionSetTx: (session, settings) =>
+    invoke<SessionState>('session_set_tx', { session, settings }),
+  txCommit: (session) => invoke<SessionState>('tx_commit', { session }),
+  txRollback: (session) => invoke<SessionState>('tx_rollback', { session }),
+  sessionClose: (session) => invoke<null>('session_close', { session }),
+  sessionDrop: (session) => invoke<null>('session_drop', { session }),
+  appQuit: (resolution) => invoke<null>('app_quit', { resolution }),
+  onSessionState: (cb) => listen<SessionState>('session-state', (e) => cb(e.payload)),
+  onQuitRequested: (cb) => listen<SessionKey[]>('quit-requested', (e) => cb(e.payload)),
 };
 
 export function isTauri(): boolean {

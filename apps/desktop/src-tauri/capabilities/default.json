@@ -32,6 +32,13 @@
     "allow-result-export",
     "allow-result-refine",
     "allow-result-preview-edits",
-    "allow-result-apply-edits"
+    "allow-result-apply-edits",
+    "allow-session-state",
+    "allow-session-set-tx",
+    "allow-tx-commit",
+    "allow-tx-rollback",
+    "allow-session-close",
+    "allow-session-drop",
+    "allow-app-quit"
   ]
 }

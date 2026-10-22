@@ -28,6 +28,13 @@ fn main() {
         "result_refine",
         "result_preview_edits",
         "result_apply_edits",
+        "session_state",
+        "session_set_tx",
+        "tx_commit",
+        "tx_rollback",
+        "session_close",
+        "session_drop",
+        "app_quit",
     ];
     tauri_build::try_build(
         tauri_build::Attributes::new()

@@ -72,6 +72,32 @@ test('asks before running a destructive statement, with Cancel focused', async (
   expect(await ipcCalls(app, 'query_execute')).toEqual([]);
 });
 
+test('manual transactions stay open until Commit', async ({ app }) => {
+  await createDataSource(app, 'Dev');
+  await app.getByRole('treeitem', { name: /^Dev/ }).click();
+  await app.getByRole('tree', { name: 'Data sources' }).press('ArrowRight');
+  await expect(app.getByRole('treeitem', { name: 'shop, schema' })).toBeVisible();
+
+  await consoleWith(app, 'Dev', "insert into shop.customers values (3, 'c@example.test')");
+  const toolbar = app.getByRole('toolbar', { name: 'Console toolbar' });
+  await toolbar.getByLabel('Tx').selectOption('manual');
+  await expect(toolbar.getByLabel('Isolation level')).toBeVisible();
+  await app.locator('.monaco-editor').first().click();
+  await app.keyboard.press('ControlOrMeta+Enter');
+
+  await expect(toolbar.getByRole('status')).toHaveText('Transaction open');
+  await expect(app.getByLabel('transaction open')).toHaveText('TX');
+  await expect(app.getByLabel('Transaction state')).toHaveText('Transaction open');
+  // Controls wrap instead of scrolling sideways: nothing in the toolbar is hidden.
+  expect(await toolbar.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await toolbar.getByRole('button', { name: 'Commit' }).click();
+  await expect.poll(() => ipcCalls(app, 'tx_commit')).toHaveLength(1);
+  await expect(toolbar.getByRole('status')).toBeHidden();
+  await expect(app.getByLabel('transaction open')).toBeHidden();
+  const [commit] = await ipcCalls(app, 'tx_commit');
+  expect(commit?.args).toMatchObject({ session: { sourceId: 'fake-1' } });
+});
+
 test.describe('accessibility', () => {
   test('main workbench has no WCAG A/AA violations', async ({ app }) => {
     await createDataSource(app, 'Dev');

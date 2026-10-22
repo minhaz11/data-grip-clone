@@ -10,12 +10,15 @@ import { activeEditor } from './editorHandle';
 import { SqlEditor } from './SqlEditor';
 import { isRunning, useExec } from '../exec/execStore';
 import { runFromEditor } from '../exec/runQuery';
+import { TxControls } from '../exec/TxControls';
+import { changeSource, closeConsole } from '../exec/txGuards';
+import { keyOf, sessionOf, useTx } from '../exec/txStore';
 
 export function EditorArea({ theme }: { theme: 'light' | 'dark' }) {
   const tabs = useWorkspace((s) => s.tabs);
   const activeTabId = useWorkspace((s) => s.activeTabId);
   const activate = useWorkspace((s) => s.activate);
-  const closeTab = useWorkspace((s) => s.closeTab);
+  const closeTab = closeConsole;
   const newConsole = useWorkspace((s) => s.newConsole);
   const sources = useConnections((s) => s.items);
   const selectedSourceId = useConnections((s) => s.selectedId);
@@ -91,6 +94,7 @@ export function EditorArea({ theme }: { theme: 'light' | 'dark' }) {
                     •
                   </span>
                 )}
+                <TabTxBadge tab={tab} />
               </button>
               {/* Mouse affordance only: a tablist may contain only tabs, so keyboard and screen-reader
                   users close the active tab with the tab.close shortcut instead. */}
@@ -113,10 +117,31 @@ export function EditorArea({ theme }: { theme: 'light' | 'dark' }) {
   );
 }
 
+/** Marks a tab whose session has an open (or failed) transaction. */
+function TabTxBadge({ tab }: { tab: ConsoleTab }) {
+  const session = sessionOf(tab);
+  const state = useTx((s) => (session ? s.states[keyOf(session)] : undefined));
+  if (!state?.open || state.status === 'idle') {
+    return null;
+  }
+  const failed = state.status === 'failed';
+  return (
+    <span
+      className={clsx(
+        'ml-1.5 rounded px-1 font-sans text-[10px] font-semibold',
+        failed ? 'bg-danger text-danger-fg' : 'bg-accent text-accent-fg',
+      )}
+      aria-label={failed ? 'transaction failed' : 'transaction open'}
+      title={failed ? 'The transaction failed; roll it back.' : 'A transaction is open.'}
+    >
+      TX
+    </span>
+  );
+}
+
 function ConsolePane({ tab, theme }: { tab: ConsoleTab; theme: 'light' | 'dark' }) {
   const fontSize = useSettings((s) => s.settings.editorFontSize);
   const updateText = useWorkspace((s) => s.updateText);
-  const setSource = useWorkspace((s) => s.setSource);
   const setCaret = useWorkspace((s) => s.setCaret);
   const sources = useConnections((s) => s.items);
   const [formatError, setFormatError] = useState<string | null>(null);
@@ -141,13 +166,13 @@ function ConsolePane({ tab, theme }: { tab: ConsoleTab; theme: 'light' | 'dark' 
       <div
         role="toolbar"
         aria-label="Console toolbar"
-        className="flex h-8 shrink-0 items-center gap-2 border-b border-border px-2 text-[12px]"
+        className="flex min-h-8 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border px-2 py-1 text-[12px] whitespace-nowrap"
       >
         <label className="flex items-center gap-1.5">
           <span className="text-muted">Data source</span>
           <select
             value={tab.sourceId ?? ''}
-            onChange={(e) => setSource(tab.id, e.target.value || null)}
+            onChange={(e) => void changeSource(tab.id, e.target.value || null)}
             className="max-w-48 rounded border border-border bg-bg px-1.5 py-0.5"
           >
             <option value="">None</option>
@@ -194,6 +219,7 @@ function ConsolePane({ tab, theme }: { tab: ConsoleTab; theme: 'light' | 'dark' 
         >
           <AlignLeft size={13} aria-hidden /> Format
         </button>
+        <TxControls tab={tab} />
         {formatError && (
           <span role="alert" className="min-w-0 truncate text-danger" title={formatError}>
             {formatError}

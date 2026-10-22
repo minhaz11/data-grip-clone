@@ -3155,6 +3155,7 @@ dependencies = [
 name = "quarry-store"
 version = "0.1.0"
 dependencies = [
+ "quarry-db-core",
  "rusqlite",
  "serde",
  "serde_json",

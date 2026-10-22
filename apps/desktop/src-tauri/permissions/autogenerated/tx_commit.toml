@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tx-commit"
+description = "Enables the tx_commit command without any pre-configured scope."
+commands.allow = ["tx_commit"]
+
+[[permission]]
+identifier = "deny-tx-commit"
+description = "Denies the tx_commit command without any pre-configured scope."
+commands.deny = ["tx_commit"]

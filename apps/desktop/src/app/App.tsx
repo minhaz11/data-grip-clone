@@ -9,6 +9,7 @@ import { useConnections } from '../features/connections/connectionsStore';
 import { activeEditor } from '../features/editor/editorHandle';
 import { useExec } from '../features/exec/execStore';
 import { runFromEditor } from '../features/exec/runQuery';
+import { closeConsole } from '../features/exec/txGuards';
 import { DialogHost } from './dialogs';
 import { ConnectionDialog } from '../features/connections/ConnectionDialog';
 import type { ConnectionProfile } from '../ipc/types';
@@ -28,7 +29,7 @@ export function App() {
       'console.new': () => void ws().newConsole(useConnections.getState().selectedId),
       'tab.close': () => {
         const id = ws().activeTabId;
-        if (id) void ws().closeTab(id);
+        if (id) void closeConsole(id);
       },
       'tab.next': () => ws().cycleTab(1),
       'tab.previous': () => ws().cycleTab(-1),

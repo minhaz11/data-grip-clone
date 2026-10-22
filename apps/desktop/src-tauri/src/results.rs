@@ -19,7 +19,7 @@ use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::error::AppError;
-use crate::sessions::Sessions;
+use crate::sessions::{SessionKey, Sessions};
 
 pub const MAX_PAGE_ROWS: usize = 2_000;
 const EXPORT_PAGE_ROWS: usize = 5_000;
@@ -27,14 +27,14 @@ const EXPORT_PAGE_ROWS: usize = 5_000;
 #[tauri::command]
 pub async fn result_page(
     sessions: State<'_, Arc<Sessions>>,
-    source_id: String,
+    session: SessionKey,
     cursor: String,
     offset: u64,
     limit: usize,
 ) -> Result<Vec<Vec<Cell>>, AppError> {
-    let session = sessions.get(&source_id).await?;
+    let live = sessions.get(&session).await?;
     let limit = limit.clamp(1, MAX_PAGE_ROWS);
-    Ok(session
+    Ok(live
         .fetch(&cursor, offset, limit, &ExecOptions::default())
         .await?)
 }
@@ -42,12 +42,12 @@ pub async fn result_page(
 #[tauri::command]
 pub async fn result_close(
     sessions: State<'_, Arc<Sessions>>,
-    source_id: String,
+    session: SessionKey,
     cursor: String,
 ) -> Result<(), AppError> {
     // A closed session already dropped its cursors.
-    match sessions.get(&source_id).await {
-        Ok(session) => Ok(session.close_cursor(&cursor).await?),
+    match sessions.get(&session).await {
+        Ok(live) => Ok(live.close_cursor(&cursor).await?),
         Err(_) => Ok(()),
     }
 }
@@ -57,13 +57,18 @@ pub async fn result_close(
 #[tauri::command]
 pub async fn result_refine(
     sessions: State<'_, Arc<Sessions>>,
-    source_id: String,
+    session: SessionKey,
     sql: String,
     columns: Vec<ExportColumn>,
     refinement: Refinement,
     previous_cursor: Option<String>,
+    schema: Option<String>,
 ) -> Result<StatementOutcome, AppError> {
-    let session = sessions.get(&source_id).await?;
+    let live = sessions.get(&session).await?;
+    // The re-run must resolve names the way the original run did.
+    sessions
+        .apply_schema(&session, &live, schema.as_deref())
+        .await?;
     let columns: Vec<ColumnInfo> = columns
         .into_iter()
         .map(|c| ColumnInfo {
@@ -71,11 +76,11 @@ pub async fn result_refine(
             type_name: c.type_name,
         })
         .collect();
-    let outcome = session
+    let outcome = live
         .refine(&sql, &columns, &refinement, &ExecOptions::default())
         .await?;
     if let Some(previous) = previous_cursor {
-        let _ = session.close_cursor(&previous).await;
+        let _ = live.close_cursor(&previous).await;
     }
     Ok(outcome)
 }
@@ -84,31 +89,31 @@ pub async fn result_refine(
 #[tauri::command]
 pub async fn result_preview_edits(
     sessions: State<'_, Arc<Sessions>>,
-    source_id: String,
+    session: SessionKey,
     target: EditTarget,
     changes: Vec<RowChange>,
 ) -> Result<Vec<EditStatement>, AppError> {
-    let session = sessions.get(&source_id).await?;
-    Ok(session.preview_edits(&target, &changes)?)
+    let live = sessions.get(&session).await?;
+    Ok(live.preview_edits(&target, &changes)?)
 }
 
 /// Applies row changes in one transaction (all or nothing); returns how many were applied.
 #[tauri::command]
 pub async fn result_apply_edits(
     sessions: State<'_, Arc<Sessions>>,
-    source_id: String,
+    session: SessionKey,
     target: EditTarget,
     changes: Vec<RowChange>,
 ) -> Result<usize, AppError> {
-    let session = sessions.get(&source_id).await?;
-    match session.apply_edits(&target, &changes).await {
+    let live = sessions.get(&session).await?;
+    match live.apply_edits(&target, &changes).await {
         Ok(applied) => {
-            tracing::info!(source = %source_id, changes = applied, "row changes applied");
+            tracing::info!(source = %session.source_id, changes = applied, "row changes applied");
             Ok(applied)
         }
         Err(e) => {
             tracing::warn!(
-                source = %source_id,
+                source = %session.source_id,
                 changes = changes.len(),
                 sqlstate = e.sqlstate.as_deref().unwrap_or(""),
                 "row changes rolled back"
@@ -150,14 +155,14 @@ pub struct ExportSummary {
 pub async fn result_export(
     app: AppHandle,
     sessions: State<'_, Arc<Sessions>>,
-    source_id: String,
+    session: SessionKey,
     cursor: String,
     columns: Vec<ExportColumn>,
     format: ExportFormat,
     file_name: String,
     on_progress: Channel<u64>,
 ) -> Result<Option<ExportSummary>, AppError> {
-    let session = sessions.get(&source_id).await?;
+    let live = sessions.get(&session).await?;
     let format = match format {
         ExportFormat::Csv => Format::Csv,
         ExportFormat::Json => Format::Json,
@@ -221,7 +226,7 @@ pub async fn result_export(
     let mut offset = 0u64;
     let fetch_result: Result<(), AppError> = async {
         loop {
-            let page = session
+            let page = live
                 .fetch(&cursor, offset, EXPORT_PAGE_ROWS, &options)
                 .await?;
             let n = page.len();
@@ -252,7 +257,7 @@ pub async fn result_export(
             })?;
             let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
             // The destination path is the user's; counts are enough to diagnose.
-            tracing::info!(source = %source_id, rows, bytes, "export finished");
+            tracing::info!(source = %session.source_id, rows, bytes, "export finished");
             Ok(Some(ExportSummary {
                 path: path.display().to_string(),
                 rows,
@@ -261,7 +266,7 @@ pub async fn result_export(
         }
         (fetched, written) => {
             let _ = std::fs::remove_file(&partial); // never leave a half-written export behind
-            tracing::warn!(source = %source_id, "export failed");
+            tracing::warn!(source = %session.source_id, "export failed");
             fetched?;
             let e = written
                 .err()

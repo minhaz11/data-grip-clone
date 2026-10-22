@@ -3,12 +3,14 @@ import { useState } from 'react';
 import { askConfirm } from '../../app/dialogs';
 import { Modal } from '../../components/ui/Modal';
 import { backend } from '../../ipc/client';
-import type { ConnectionProfile, EditStatement, EditTarget } from '../../ipc/types';
+import type { ConnectionProfile, EditStatement, EditTarget, SessionKey } from '../../ipc/types';
 import { toAppError } from '../../lib/errors';
 import { addInsert, pendingCount, toChanges, type PendingEdits } from './editsModel';
 
 interface Props {
   source: ConnectionProfile | undefined;
+  /** Session the result came from (previews are built there). */
+  session: SessionKey;
   target: EditTarget | null;
   /** Why the result cannot be edited, when `target` is null. */
   reason?: string;
@@ -28,6 +30,7 @@ export function formatParam(v: string | null): string {
 
 export function EditBar({
   source,
+  session,
   target,
   reason,
   edits,
@@ -53,7 +56,7 @@ export function EditBar({
 
   async function loadStatements(): Promise<EditStatement[]> {
     if (!source || !target) return [];
-    return backend.resultPreviewEdits(source.id, target, toChanges(edits));
+    return backend.resultPreviewEdits(session, target, toChanges(edits));
   }
 
   async function openPreview() {

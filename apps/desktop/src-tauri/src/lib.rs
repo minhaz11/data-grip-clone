@@ -6,6 +6,7 @@ mod error;
 mod exec;
 mod results;
 mod sessions;
+mod transactions;
 
 use std::sync::Arc;
 
@@ -13,7 +14,7 @@ use quarry_connections::ConnectionManager;
 use quarry_db_postgres::PostgresAdapter;
 use quarry_secrets::KeyringStore;
 use quarry_store::Store;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 pub fn run() {
     tauri::Builder::default()
@@ -67,7 +68,26 @@ pub fn run() {
             results::result_preview_edits,
             results::result_apply_edits,
             results::result_export,
+            transactions::session_state,
+            transactions::session_set_tx,
+            transactions::tx_commit,
+            transactions::tx_rollback,
+            transactions::session_close,
+            transactions::session_drop,
+            transactions::app_quit,
         ])
+        // Never lose an open transaction silently: ask the UI first (REQ-ERR-09).
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let open = window
+                    .state::<Arc<sessions::Sessions>>()
+                    .open_transactions();
+                if !open.is_empty() {
+                    api.prevent_close();
+                    let _ = window.emit(transactions::QUIT_REQUESTED_EVENT, open);
+                }
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running Quarry");
 }

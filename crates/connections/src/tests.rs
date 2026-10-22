@@ -1,5 +1,6 @@
 use std::sync::Mutex;
 
+use quarry_db_core::{Isolation, TxMode};
 use quarry_store::{Engine, Environment, SslMode};
 
 use super::*;
@@ -53,6 +54,8 @@ fn draft(name: &str, mode: SaveMode) -> ConnectionDraft {
         environment: Environment::Development,
         color: None,
         save_mode: mode,
+        tx_mode: TxMode::Auto,
+        isolation: Isolation::ReadCommitted,
     }
 }
 

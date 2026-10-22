@@ -5,6 +5,7 @@
 use std::sync::{Arc, Mutex};
 
 use quarry_connections::{ConnectionManager, PasswordChange, connect_params};
+use quarry_db_core::{Isolation, TxMode};
 use quarry_logging::{LOG_FILE, RedactingWriter, RotatingFile, subscriber};
 use quarry_secrets::{CredentialStore, MemoryStore, SecretError, SecretString};
 use quarry_store::{ConnectionDraft, Engine, Environment, SaveMode, SslMode, Store};
@@ -47,6 +48,8 @@ fn draft(name: &str, mode: SaveMode) -> ConnectionDraft {
         environment: Environment::Development,
         color: None,
         save_mode: mode,
+        tx_mode: TxMode::Auto,
+        isolation: Isolation::ReadCommitted,
     }
 }
 

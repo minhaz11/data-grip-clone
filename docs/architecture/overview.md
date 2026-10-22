@@ -97,7 +97,9 @@ Cross-cutting pieces:
 
 1. Classify every statement.
 2. If the connection is **read-only** and any statement is a write or DDL, block it with an
-   explanation.
+   explanation. The session itself
+   also keeps it read-only: it restores the read-only default before each statement outside a
+   transaction and rolls back any transaction switched to read-write (M4.6).
 3. If a statement is **destructive** (DROP/TRUNCATE/ALTER … DROP, or DELETE/UPDATE without WHERE),
    show a confirmation dialog that lists the statements.
 4. If the connection environment is **production**, require an extra confirmation for any write,

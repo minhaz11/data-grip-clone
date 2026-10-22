@@ -29,6 +29,8 @@ interface WorkspaceStore {
   cycleTab(delta: 1 | -1): void;
   updateText(id: string, text: string): void;
   setSource(id: string, sourceId: string | null): void;
+  setOwnSession(id: string, own: boolean): void;
+  setSchema(id: string, schema: string | null): void;
   /** Writes every unsaved console now (tab close, app hide). */
   flushAll(): Promise<void>;
   setCaret(caret: { line: number; column: number } | null): void;
@@ -175,7 +177,10 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => {
       );
     },
 
-    setSource: (id, sourceId) => patchTab(id, { sourceId }),
+    // A different data source has different schemas.
+    setSource: (id, sourceId) => patchTab(id, { sourceId, schema: null }),
+    setOwnSession: (id, ownSession) => patchTab(id, { ownSession }),
+    setSchema: (id, schema) => patchTab(id, { schema }),
 
     async flushAll() {
       await Promise.all(
@@ -209,7 +214,13 @@ export function snapshot(
   return {
     layout: s.layout,
     panels: { explorerCollapsed: s.explorerCollapsed, bottomCollapsed: s.bottomCollapsed },
-    tabs: s.tabs.map(({ id, console, sourceId }) => ({ id, console, sourceId })),
+    tabs: s.tabs.map(({ id, console, sourceId, ownSession, schema }) => ({
+      id,
+      console,
+      sourceId,
+      ...(ownSession ? { ownSession } : {}),
+      ...(schema ? { schema } : {}),
+    })),
     activeTabId: s.activeTabId,
   };
 }

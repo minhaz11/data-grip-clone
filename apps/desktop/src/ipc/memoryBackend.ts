@@ -104,6 +104,21 @@ export function createMemoryBackend(): Backend {
     resultRefine: () =>
       fail('unsupported', 'Sorting and filtering require the Quarry desktop app.'),
     resultExport: () => fail('unsupported', 'Export requires the Quarry desktop app.'),
+    // No sessions exist in the browser: every session is closed and idle.
+    sessionState: async (session) => ({
+      session,
+      open: false,
+      status: 'idle',
+      settings: { mode: 'auto', isolation: 'read_committed' },
+    }),
+    sessionSetTx: async (session, settings) => ({ session, open: false, status: 'idle', settings }),
+    txCommit: () => fail('not_connected', 'This data source is not connected.'),
+    txRollback: () => fail('not_connected', 'This data source is not connected.'),
+    sessionClose: async () => null,
+    sessionDrop: async () => null,
+    appQuit: async () => null,
+    onSessionState: async () => () => {},
+    onQuitRequested: async () => () => {},
     consoleList: async () => [...consoles.keys()].sort(),
     consoleCreate: async (preferred) => {
       let name = preferred && !consoles.has(preferred) ? preferred : 'console';

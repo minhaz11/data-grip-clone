@@ -38,11 +38,19 @@ const MIGRATIONS: &[&str] = &[
          updated_at           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
      ) STRICT;
      CREATE UNIQUE INDEX connections_name_unique ON connections (name COLLATE NOCASE);",
+    // 3: default transaction mode and isolation per data source (M4.6).
+    "ALTER TABLE connections ADD COLUMN tx_mode TEXT NOT NULL DEFAULT 'auto';
+     ALTER TABLE connections ADD COLUMN isolation TEXT NOT NULL DEFAULT 'read_committed';",
 ];
 
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
 pub fn migrate(conn: &mut Connection) -> Result<i64, StoreError> {
+    migrate_to(conn, LATEST_VERSION)
+}
+
+/// Applies migrations up to `target` (tests build databases of older versions with this).
+pub(crate) fn migrate_to(conn: &mut Connection, target: i64) -> Result<i64, StoreError> {
     let current: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if current > LATEST_VERSION {
         return Err(StoreError::NewerSchema {
@@ -50,7 +58,12 @@ pub fn migrate(conn: &mut Connection) -> Result<i64, StoreError> {
             supported: LATEST_VERSION,
         });
     }
-    for (index, sql) in MIGRATIONS.iter().enumerate().skip(current as usize) {
+    for (index, sql) in MIGRATIONS
+        .iter()
+        .enumerate()
+        .take(target as usize)
+        .skip(current as usize)
+    {
         let version = index as i64 + 1;
         let tx = conn.transaction()?;
         tx.execute_batch(sql)
@@ -58,5 +71,5 @@ pub fn migrate(conn: &mut Connection) -> Result<i64, StoreError> {
         tx.pragma_update(None, "user_version", version)?;
         tx.commit()?;
     }
-    Ok(LATEST_VERSION)
+    Ok(target.max(current))
 }

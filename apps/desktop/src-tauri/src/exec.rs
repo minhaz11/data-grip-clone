@@ -8,12 +8,12 @@ use std::time::Instant;
 
 use quarry_db_core::{DbError, ExecOptions, Session, StatementOutcome};
 use serde::{Deserialize, Serialize};
-use tauri::State;
 use tauri::ipc::Channel;
+use tauri::{AppHandle, State};
 use tokio::sync::Mutex;
 
 use crate::error::AppError;
-use crate::sessions::Sessions;
+use crate::sessions::{SessionKey, Sessions};
 
 pub const MAX_STATEMENTS: usize = 1_000;
 const MAX_ROWS_LIMIT: usize = 10_000;
@@ -31,10 +31,15 @@ pub struct StatementRequest {
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ExecRequest {
-    pub source_id: String,
+    pub session: SessionKey,
     pub statements: Vec<StatementRequest>,
     #[cfg_attr(test, ts(optional))]
     pub max_rows: Option<usize>,
+    /// The console's schema, put first in the search path before the statements run; absent
+    /// means the server's default path.
+    #[serde(default)]
+    #[cfg_attr(test, ts(optional))]
+    pub schema: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -106,7 +111,7 @@ pub enum ExecEvent {
 }
 
 struct Job {
-    source_id: String,
+    key: SessionKey,
     session: Arc<dyn Session>,
     cancel_requested: AtomicBool,
 }
@@ -123,7 +128,8 @@ fn millis(since: Instant) -> u64 {
 impl Jobs {
     async fn start(
         self: &Arc<Self>,
-        sessions: &Sessions,
+        app: &AppHandle,
+        sessions: &Arc<Sessions>,
         request: ExecRequest,
         channel: Channel<ExecEvent>,
     ) -> Result<String, AppError> {
@@ -136,25 +142,34 @@ impl Jobs {
                 format!("At most {MAX_STATEMENTS} statements per run."),
             ));
         }
-        let session = sessions.get(&request.source_id).await?;
+        let key = request.session.clone();
+        let session = sessions.get_or_open(app, &key).await?;
         let job_id = uuid::Uuid::new_v4().to_string();
         {
             let mut running = self.running.lock().await;
             // One job per session: a server-side cancel stops whatever the session is running.
-            if running.values().any(|j| j.source_id == request.source_id) {
+            if running.values().any(|j| j.key == key) {
                 return Err(AppError::new(
                     "busy",
-                    "A query is already running on this data source. Stop it first.",
+                    "A query is already running in this session. Stop it first.",
                 ));
             }
             running.insert(
                 job_id.clone(),
                 Arc::new(Job {
-                    source_id: request.source_id.clone(),
-                    session,
+                    key: key.clone(),
+                    session: Arc::clone(&session),
                     cancel_requested: AtomicBool::new(false),
                 }),
             );
+        }
+        // After the busy check, so it never runs between another job's statements.
+        if let Err(e) = sessions
+            .apply_schema(&key, &session, request.schema.as_deref())
+            .await
+        {
+            self.running.lock().await.remove(&job_id);
+            return Err(e);
         }
 
         let options = ExecOptions {
@@ -167,14 +182,17 @@ impl Jobs {
         // SQL text and values are never logged; ids, counts and outcomes are enough to diagnose.
         tracing::info!(
             job = %job_id,
-            source = %request.source_id,
+            source = %key.source_id,
+            console = ?key.console,
             statements = request.statements.len(),
             "query job started"
         );
         let jobs = Arc::clone(self);
         let id = job_id.clone();
+        let (app, sessions) = (app.clone(), Arc::clone(sessions));
         tauri::async_runtime::spawn(async move {
-            jobs.run(&id, request.statements, options, channel).await;
+            jobs.run(&id, request.statements, options, channel, &app, &sessions)
+                .await;
             jobs.running.lock().await.remove(&id);
         });
         Ok(job_id)
@@ -186,6 +204,8 @@ impl Jobs {
         statements: Vec<StatementRequest>,
         options: ExecOptions,
         channel: Channel<ExecEvent>,
+        app: &AppHandle,
+        sessions: &Sessions,
     ) {
         let Some(job) = self.running.lock().await.get(job_id).cloned() else {
             return;
@@ -201,8 +221,12 @@ impl Jobs {
             let offset = statement.offset;
             let _ = channel.send(ExecEvent::StatementStarted { index, offset });
             let at = Instant::now();
+            let tx_before = job.session.tx_status();
             let result = job.session.execute(&statement.sql, &options).await;
             executed += 1;
+            if job.session.tx_status() != tx_before {
+                sessions.emit_state(app, &job.key).await;
+            }
             match result {
                 Ok(outcome) => {
                     let _ = channel.send(ExecEvent::StatementDone {
@@ -258,12 +282,15 @@ impl Jobs {
 /// Starts a job and returns its id at once; progress arrives on `on_event`.
 #[tauri::command]
 pub async fn query_execute(
+    app: AppHandle,
     jobs: State<'_, Arc<Jobs>>,
     sessions: State<'_, Arc<Sessions>>,
     request: ExecRequest,
     on_event: Channel<ExecEvent>,
 ) -> Result<String, AppError> {
-    jobs.inner().start(&sessions, request, on_event).await
+    jobs.inner()
+        .start(&app, sessions.inner(), request, on_event)
+        .await
 }
 
 #[tauri::command]

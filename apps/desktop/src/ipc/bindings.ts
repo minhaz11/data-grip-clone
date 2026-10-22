@@ -21,13 +21,29 @@ export type Environment = "none" | "development" | "testing" | "staging" | "prod
 
 export type SaveMode = "never" | "untilRestart" | "forever";
 
-export type ConnectionDraft = { name: string, engine: Engine, host: string, port: number, database: string, username: string, sslMode: SslMode, connectTimeoutSecs: number, readOnly: boolean, environment: Environment, color: string | null, saveMode: SaveMode, };
+export type ConnectionDraft = { name: string, engine: Engine, host: string, port: number, database: string, username: string, sslMode: SslMode, connectTimeoutSecs: number, readOnly: boolean, environment: Environment, color: string | null, saveMode: SaveMode, 
+/**
+ * Transaction mode new sessions of this data source start in.
+ */
+txMode: TxMode, 
+/**
+ * Isolation level for transactions opened in Manual mode.
+ */
+isolation: Isolation, };
 
 export type ConnectionProfile = { id: string, 
 /**
  * True when a password is in the OS credential store (save mode `forever`).
  */
-passwordSaved: boolean, createdAt: string, updatedAt: string, name: string, engine: Engine, host: string, port: number, database: string, username: string, sslMode: SslMode, connectTimeoutSecs: number, readOnly: boolean, environment: Environment, color: string | null, saveMode: SaveMode, };
+passwordSaved: boolean, createdAt: string, updatedAt: string, name: string, engine: Engine, host: string, port: number, database: string, username: string, sslMode: SslMode, connectTimeoutSecs: number, readOnly: boolean, environment: Environment, color: string | null, saveMode: SaveMode, 
+/**
+ * Transaction mode new sessions of this data source start in.
+ */
+txMode: TxMode, 
+/**
+ * Isolation level for transactions opened in Manual mode.
+ */
+isolation: Isolation, };
 
 export type PasswordChange = { "action": "keep" } | { "action": "set", "value": string } | { "action": "clear" };
 
@@ -48,6 +64,24 @@ latencyMs: number, };
 export type SessionStatus = { id: string, info: ServerInfo, };
 
 export type StatusEvent = { "state": "connected", id: string, info: ServerInfo, } | { "state": "disconnected", id: string, } | { "state": "lost", id: string, reason: string, };
+
+export type SessionKey = { sourceId: string, 
+/**
+ * Console name for a console's own session; absent for the shared one.
+ */
+console?: string, };
+
+export type SessionState = { session: SessionKey, open: boolean, status: TxStatus, settings: TxSettings, };
+
+export type TxStatus = "idle" | "active" | "failed";
+
+export type TxMode = "auto" | "manual";
+
+export type Isolation = "read_committed" | "repeatable_read" | "serializable";
+
+export type TxSettings = { mode: TxMode, isolation: Isolation, };
+
+export type QuitResolution = "commit" | "rollback";
 
 export type ObjectType = "table" | "view" | "materialized_view";
 
@@ -115,7 +149,12 @@ export type StatementRequest = { sql: string,
  */
 offset: number, };
 
-export type ExecRequest = { sourceId: string, statements: Array<StatementRequest>, maxRows?: number, };
+export type ExecRequest = { session: SessionKey, statements: Array<StatementRequest>, maxRows?: number, 
+/**
+ * The console's schema, put first in the search path before the statements run; absent
+ * means the server's default path.
+ */
+schema?: string, };
 
 export type JobStatus = "completed" | "failed" | "cancelled";
 

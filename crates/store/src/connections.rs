@@ -1,6 +1,7 @@
 //! Connection profile repository. Profiles hold *where* and *how* to connect; passwords live in
 //! `quarry-secrets` and only a `password_saved` flag is recorded here.
 
+use quarry_db_core::{Isolation, TxMode};
 use rusqlite::{ErrorCode, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 
@@ -65,6 +66,44 @@ pub struct ConnectionDraft {
     pub environment: Environment,
     pub color: Option<String>,
     pub save_mode: SaveMode,
+    /// Transaction mode new sessions of this data source start in.
+    #[serde(default)]
+    pub tx_mode: TxMode,
+    /// Isolation level for transactions opened in Manual mode.
+    #[serde(default)]
+    pub isolation: Isolation,
+}
+
+fn tx_mode_text(m: TxMode) -> &'static str {
+    match m {
+        TxMode::Auto => "auto",
+        TxMode::Manual => "manual",
+    }
+}
+
+fn parse_tx_mode(s: &str) -> Result<TxMode, StoreError> {
+    match s {
+        "auto" => Ok(TxMode::Auto),
+        "manual" => Ok(TxMode::Manual),
+        other => Err(StoreError::Invalid(format!("unknown TxMode '{other}'"))),
+    }
+}
+
+fn isolation_text(i: Isolation) -> &'static str {
+    match i {
+        Isolation::ReadCommitted => "read_committed",
+        Isolation::RepeatableRead => "repeatable_read",
+        Isolation::Serializable => "serializable",
+    }
+}
+
+fn parse_isolation(s: &str) -> Result<Isolation, StoreError> {
+    match s {
+        "read_committed" => Ok(Isolation::ReadCommitted),
+        "repeatable_read" => Ok(Isolation::RepeatableRead),
+        "serializable" => Ok(Isolation::Serializable),
+        other => Err(StoreError::Invalid(format!("unknown Isolation '{other}'"))),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -131,7 +170,8 @@ impl ConnectionDraft {
 }
 
 const COLUMNS: &str = "id, name, engine, host, port, database, username, ssl_mode, \
-    connect_timeout_secs, read_only, environment, color, save_mode, password_saved, created_at, updated_at";
+    connect_timeout_secs, read_only, environment, color, save_mode, password_saved, created_at, updated_at, \
+    tx_mode, isolation";
 
 fn from_row(row: &Row<'_>) -> rusqlite::Result<Result<ConnectionProfile, StoreError>> {
     let text = |i: usize| row.get::<_, String>(i);
@@ -151,6 +191,8 @@ fn from_row(row: &Row<'_>) -> rusqlite::Result<Result<ConnectionProfile, StoreEr
                 environment: Environment::parse(&text(10)?)?,
                 color: row.get(11)?,
                 save_mode: SaveMode::parse(&text(12)?)?,
+                tx_mode: parse_tx_mode(&text(16)?)?,
+                isolation: parse_isolation(&text(17)?)?,
             },
             password_saved: row.get(13)?,
             created_at: text(14)?,
@@ -201,12 +243,13 @@ impl Store {
         self.conn()
             .execute(
                 "INSERT INTO connections (id, name, engine, host, port, database, username, ssl_mode,
-                     connect_timeout_secs, read_only, environment, color, save_mode)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                     connect_timeout_secs, read_only, environment, color, save_mode, tx_mode, isolation)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
                 params![
                     id, d.name, d.engine.as_str(), d.host, d.port, d.database, d.username,
                     d.ssl_mode.as_str(), d.connect_timeout_secs, d.read_only,
-                    d.environment.as_str(), d.color, d.save_mode.as_str()
+                    d.environment.as_str(), d.color, d.save_mode.as_str(),
+                    tx_mode_text(d.tx_mode), isolation_text(d.isolation)
                 ],
             )
             .map_err(|e| map_unique(e, &d.name))?;
@@ -224,13 +267,14 @@ impl Store {
             .execute(
                 "UPDATE connections SET name = ?2, engine = ?3, host = ?4, port = ?5, database = ?6,
                      username = ?7, ssl_mode = ?8, connect_timeout_secs = ?9, read_only = ?10,
-                     environment = ?11, color = ?12, save_mode = ?13,
+                     environment = ?11, color = ?12, save_mode = ?13, tx_mode = ?14, isolation = ?15,
                      updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
                  WHERE id = ?1",
                 params![
                     id, d.name, d.engine.as_str(), d.host, d.port, d.database, d.username,
                     d.ssl_mode.as_str(), d.connect_timeout_secs, d.read_only,
-                    d.environment.as_str(), d.color, d.save_mode.as_str()
+                    d.environment.as_str(), d.color, d.save_mode.as_str(),
+                    tx_mode_text(d.tx_mode), isolation_text(d.isolation)
                 ],
             )
             .map_err(|e| map_unique(e, &d.name))?;
@@ -296,6 +340,8 @@ pub(crate) mod tests {
             environment: Environment::Development,
             color: None,
             save_mode: SaveMode::Forever,
+            tx_mode: TxMode::Auto,
+            isolation: Isolation::ReadCommitted,
         }
     }
 
@@ -396,5 +442,67 @@ pub(crate) mod tests {
         }
         assert_eq!(json["saveMode"], "forever");
         assert_eq!(json["engine"], "postgresql");
+        assert_eq!(json["txMode"], "auto");
+        assert_eq!(json["isolation"], "read_committed");
+    }
+
+    #[test]
+    fn transaction_defaults_round_trip() {
+        let store = Store::open_in_memory().expect("open");
+        store
+            .insert_connection("a", draft("Local"))
+            .expect("insert");
+        let updated = store
+            .update_connection(
+                "a",
+                ConnectionDraft {
+                    tx_mode: TxMode::Manual,
+                    isolation: Isolation::Serializable,
+                    ..draft("Local")
+                },
+            )
+            .expect("update");
+        assert_eq!(
+            (updated.draft.tx_mode, updated.draft.isolation),
+            (TxMode::Manual, Isolation::Serializable)
+        );
+        // Drafts from older UIs without the fields get the defaults.
+        let old: ConnectionDraft = serde_json::from_value(serde_json::json!({
+            "name": "x", "engine": "postgresql", "host": "h", "port": 5432, "database": "d",
+            "username": "u", "sslMode": "prefer", "connectTimeoutSecs": 10, "readOnly": false,
+            "environment": "none", "color": null, "saveMode": "never"
+        }))
+        .expect("decode");
+        assert_eq!(
+            (old.tx_mode, old.isolation),
+            (TxMode::Auto, Isolation::ReadCommitted)
+        );
+    }
+
+    #[test]
+    fn upgrading_from_version_2_keeps_profiles_with_auto_defaults() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("app.db");
+        {
+            let mut raw = rusqlite::Connection::open(&path).expect("raw");
+            crate::migrations::migrate_to(&mut raw, 2).expect("v2");
+            raw.execute_batch(
+                "INSERT INTO connections (id, name, engine, host, port, database, username,
+                     ssl_mode, connect_timeout_secs, read_only, environment, color, save_mode)
+                 VALUES ('old', 'Old', 'postgresql', 'h', 5432, 'd', 'u', 'prefer', 10, 0,
+                     'none', NULL, 'never')",
+            )
+            .expect("v2 row");
+        }
+        let store = Store::open(&path).expect("upgrade");
+        assert_eq!(
+            store.schema_version().expect("version"),
+            crate::LATEST_VERSION
+        );
+        let p = store.get_connection("old").expect("get").expect("kept");
+        assert_eq!(
+            (p.draft.tx_mode, p.draft.isolation),
+            (TxMode::Auto, Isolation::ReadCommitted)
+        );
     }
 }

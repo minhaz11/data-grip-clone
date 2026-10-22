@@ -1,13 +1,14 @@
 import { useWorkspace } from '../../app/workspaceStore';
 import { askConfirm, askPasswordAndConnect } from '../../app/dialogs';
 import type { StatementRequest } from '../../ipc/types';
-import { classify, modifies } from '../../lib/sql/classify';
+import { blockedOnReadOnly, classify, modifies } from '../../lib/sql/classify';
 import { splitStatements, statementAt } from '../../lib/sql/statements';
 import { useConnections } from '../connections/connectionsStore';
 import { effectiveColor } from '../connections/model';
 import { useSessions } from '../connections/sessionsStore';
 import { activeEditor } from '../editor/editorHandle';
 import { isRunning, useExec } from './execStore';
+import { keyOf, sessionOf, useTx } from './txStore';
 
 export type RunMode = 'current' | 'script';
 
@@ -63,12 +64,14 @@ export async function runFromEditor(mode: RunMode): Promise<void> {
   // Guards: read-only blocks, destructive or production writes need explicit confirmation.
   const classified = statements.map((s) => ({ ...s, c: classify(s.sql) }));
   const modifying = classified.filter((s) => modifies(s.c));
-  if (source.readOnly && modifying.length > 0) {
+  const blocked = classified.filter((s) => blockedOnReadOnly(s.c));
+  if (source.readOnly && blocked.length > 0) {
+    const reason = blocked[0]?.c.unlocksWrites;
     exec.reject(
       tab.id,
       source.id,
       source.name,
-      `"${source.name}" is read-only; not running ${modifying.length === 1 ? 'a statement' : `${modifying.length} statements`} that may modify data or schema: ${firstLine(modifying[0]?.sql ?? '')}`,
+      `"${source.name}" is read-only; not running ${blocked.length === 1 ? 'a statement' : `${blocked.length} statements`} that ${reason ?? 'may modify data or schema'}: ${firstLine(blocked[0]?.sql ?? '')}`,
     );
     ws.setBottomCollapsed(false);
     return;
@@ -124,9 +127,13 @@ export async function runFromEditor(mode: RunMode): Promise<void> {
     }
   }
 
+  const session = sessionOf(tab);
+  if (!session) return;
+  const txMode = useTx.getState().states[keyOf(session)]?.settings.mode ?? source.txMode;
   editor.clearMarkers();
   ws.setBottomCollapsed(false);
-  await exec.start(tab.id, source.id, source.name, statements, (failed) => {
+  const options = { schema: tab.schema ?? null, txMode };
+  await exec.start(tab.id, session, source.name, statements, options, (failed) => {
     const e = failed.error;
     if (!e) return;
     // Server positions are 1-based characters within the statement; underline the next word.

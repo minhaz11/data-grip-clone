@@ -95,12 +95,15 @@ function useElapsed(run: Run): number {
 
 function RunSummary({ run }: { run: Run }) {
   const elapsed = useElapsed(run);
+  // Logged with each run, so the output says whether its changes were committed (REQ-TX-02).
+  const mode =
+    run.txMode === 'manual' ? ' (manual transaction)' : run.txMode ? ' (auto-commit)' : '';
   const label =
     run.status === 'starting' || run.status === 'running'
-      ? `Running on ${run.sourceName}…`
+      ? `Running on ${run.sourceName}${mode}…`
       : run.status === 'rejected'
         ? 'Not run'
-        : `${run.status === 'completed' ? 'Completed' : run.status === 'cancelled' ? 'Cancelled' : 'Failed'} on ${run.sourceName}`;
+        : `${run.status === 'completed' ? 'Completed' : run.status === 'cancelled' ? 'Cancelled' : 'Failed'} on ${run.sourceName}${mode}`;
   return (
     <span className="ml-auto flex items-center gap-2 px-3 text-muted" aria-live="polite">
       {label}
@@ -234,6 +237,7 @@ function ResultView({ run, statement }: { run: Run; statement: StatementRun | un
     <div className="flex h-full flex-col">
       <EditBar
         source={source}
+        session={run.session}
         target={target}
         reason={reason}
         edits={edits}
@@ -248,7 +252,7 @@ function ResultView({ run, statement }: { run: Run; statement: StatementRun | un
         {/* Re-keyed per result (cursor), so each re-run starts with a fresh page cache and scroll position. */}
         <ResultGrid
           key={`${statement.index}:${o.cursor ?? 'capped'}:${run.startedAt}`}
-          sourceId={run.sourceId}
+          session={run.session}
           outcome={o}
           exportName={`${consoleName}_result_${statement.index + 1}`}
           // Only cursor-backed query results can be re-run with sort/filter.

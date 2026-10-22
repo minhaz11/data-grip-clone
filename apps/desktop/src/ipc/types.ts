@@ -20,6 +20,10 @@ export interface ConsoleTabState {
   console: string;
   /** Data source the console runs against, if bound. */
   sourceId: string | null;
+  /** Runs in its own session (own transaction) instead of the data source's shared one. */
+  ownSession?: boolean;
+  /** Schema put first in the search path for this console's runs; absent = server default. */
+  schema?: string | null;
 }
 
 /** Pre-M3.1 tabs kept their text inline; migrated into console files on load. */

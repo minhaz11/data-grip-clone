@@ -4,9 +4,11 @@ import type {
   ExecEvent,
   JobStatus,
   Refinement,
+  SessionKey,
   StatementError,
   StatementOutcome,
   StatementRequest,
+  TxMode,
 } from '../../ipc/types';
 import { toAppError } from '../../lib/errors';
 import { useWorkspace } from '../../app/workspaceStore';
@@ -36,6 +38,12 @@ export interface Run {
   tabId: string;
   sourceId: string;
   sourceName: string;
+  /** The session the statements ran in; results (cursors) live there. */
+  session: SessionKey;
+  /** Console schema the run used; re-runs (sort/filter) use it too. */
+  schema: string | null;
+  /** Transaction mode at the start of the run, shown in the output log. */
+  txMode?: TxMode;
   jobId: string | null;
   /** `rejected`: never started (guard, not connected, backend refused). */
   status: 'starting' | 'running' | JobStatus | 'rejected';
@@ -44,6 +52,8 @@ export interface Run {
   elapsedMs?: number;
   /** Why the run was rejected. */
   error?: string;
+  /** When Stop was pressed; after a while the UI offers to drop the connection. */
+  cancelRequestedAt?: number;
 }
 
 /** Which bottom-panel view a console shows: the output log or one result set. */
@@ -54,9 +64,10 @@ interface ExecState {
   view: Record<string, ResultView | undefined>;
   start(
     tabId: string,
-    sourceId: string,
+    session: SessionKey,
     sourceName: string,
     statements: StatementRequest[],
+    options: { schema: string | null; txMode?: TxMode },
     onError?: (s: StatementRun) => void,
   ): Promise<void>;
   reject(tabId: string, sourceId: string, sourceName: string, error: string): void;
@@ -86,12 +97,15 @@ export const useExec = create<ExecState>((set, get) => {
     runs: {},
     view: {},
 
-    async start(tabId, sourceId, sourceName, statements, onError) {
+    async start(tabId, session, sourceName, statements, options, onError) {
       releaseCursors(get().runs[tabId]); // the previous results of this console are replaced
       const run: Run = {
         tabId,
-        sourceId,
+        sourceId: session.sourceId,
         sourceName,
+        session,
+        schema: options.schema,
+        txMode: options.txMode,
         jobId: null,
         status: 'starting',
         statements: statements.map((s, index) => ({
@@ -144,7 +158,10 @@ export const useExec = create<ExecState>((set, get) => {
       };
 
       try {
-        const jobId = await backend.queryExecute({ sourceId, statements }, onEvent);
+        const jobId = await backend.queryExecute(
+          { session, statements, ...(options.schema ? { schema: options.schema } : {}) },
+          onEvent,
+        );
         patch(tabId, (r) => ({ ...r, jobId }));
       } catch (e) {
         patch(tabId, (r) => ({ ...r, status: 'rejected', error: toAppError(e).message }));
@@ -159,6 +176,8 @@ export const useExec = create<ExecState>((set, get) => {
             tabId,
             sourceId,
             sourceName,
+            session: { sourceId },
+            schema: null,
             jobId: null,
             status: 'rejected',
             statements: [],
@@ -172,8 +191,10 @@ export const useExec = create<ExecState>((set, get) => {
 
     async cancel(tabId) {
       const run = get().runs[tabId];
-      if (run?.jobId && (run.status === 'running' || run.status === 'starting'))
+      if (run?.jobId && (run.status === 'running' || run.status === 'starting')) {
+        patch(tabId, (r) => ({ ...r, cancelRequestedAt: r.cancelRequestedAt ?? Date.now() }));
         await backend.queryCancel(run.jobId);
+      }
     },
 
     setView: (tabId, view) => set((s) => ({ view: { ...s.view, [tabId]: view } })),
@@ -200,7 +221,7 @@ export const useExec = create<ExecState>((set, get) => {
       if (changes.length === 0) return;
       patchStatement(tabId, index, { submitting: true, submitError: undefined });
       try {
-        const applied = await backend.resultApplyEdits(run.sourceId, edit.target, changes);
+        const applied = await backend.resultApplyEdits(run.session, edit.target, changes);
         patchStatement(tabId, index, { submitting: false, edits: NO_EDITS, submitted: applied });
         // Show what the server now holds (same sort/filter, fresh cursor).
         await get().refine(tabId, index, st.refinement ?? { sort: [], filters: [] });
@@ -221,11 +242,12 @@ export const useExec = create<ExecState>((set, get) => {
       patchStatement(tabId, index, { refining: true, refineError: undefined });
       try {
         const outcome = await backend.resultRefine(
-          run.sourceId,
+          run.session,
           st.sql,
           st.outcome.columns,
           refinement,
           cursor,
+          run.schema,
         );
         // Sorting/filtering wraps the same query, so the rows' source table (editability) is unchanged.
         const previous = st.outcome.edit;
@@ -250,7 +272,7 @@ function releaseCursors(run: Run | undefined) {
   if (!run) return;
   for (const st of run.statements) {
     if (st.outcome?.type === 'rows' && st.outcome.cursor)
-      void backend.resultClose(run.sourceId, st.outcome.cursor).catch(() => {});
+      void backend.resultClose(run.session, st.outcome.cursor).catch(() => {});
   }
 }
 

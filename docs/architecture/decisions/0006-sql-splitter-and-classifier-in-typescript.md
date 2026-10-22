@@ -38,12 +38,11 @@ Rust (or be shared, e.g. compiled to WASM) and run in the backend before executi
   UI**, not a security boundary. A user who owns the credentials can always reach the database
   with another client.
 - Read-only sources are also enforced by the server (`default_transaction_read_only = on` at
-  connect). That setting can be changed by the session itself. Today this statement is classified
-  as `session` and allowed:
-  `SET default_transaction_read_only = off`. After it, a `SELECT` that calls a writing function
-  would succeed. Closing this gap is the first task
-  of step 03 (block those settings on read-only sources, or run read-only work inside an explicit
-  `READ ONLY` transaction). For a hard guarantee, users should connect with a database role that
-  has no write privileges; the connection dialog should say so.
+  connect). That setting can be changed by the session itself. Until step 03, this statement was
+  classified as `session` and allowed: `SET default_transaction_read_only = off`. After it, a
+  `SELECT` that calls a writing function would succeed. **Closed in step 03 (M4.6):** the UI blocks statements that switch to
+  read-write, and the session restores the read-only default before every statement outside a
+  transaction and rolls back any transaction made read-write. For a guarantee the server
+  enforces by itself, users should still connect with a role that has no write privileges.
 - Rust-side tests cannot cover the guards; they are covered by the TS unit tests
   (`lib/sql/*.test.ts`) and the UI tests in `features/exec/`.

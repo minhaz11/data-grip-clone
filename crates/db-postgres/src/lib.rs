@@ -8,6 +8,7 @@ mod metadata;
 mod refine;
 mod sqlutil;
 mod tls;
+mod txctl;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -17,7 +18,7 @@ use std::time::{Duration, Instant};
 use quarry_db_core::{
     Cell, ColumnInfo, ConnectError, ConnectErrorKind, ConnectParams, DatabaseAdapter, DbError,
     EditStatement, EditTarget, ExecOptions, MetaNode, MetadataRequest, OnClose, Refinement,
-    RowChange, ServerInfo, Session, StatementOutcome, TlsMode,
+    RowChange, ServerInfo, Session, StatementOutcome, TlsMode, TxMode, TxSettings, TxStatus,
 };
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
@@ -59,8 +60,45 @@ pub struct PgSession {
     cancel_token: CancelToken,
     tls: MakeRustlsConnect,
     cursors: exec::Cursors,
-    /// Kept to open the short-lived connection that applies edits.
+    /// Kept to open the short-lived connection that applies edits, and for `fork`.
     params: ConnectParams,
+    tx: std::sync::Mutex<TxState>,
+}
+
+#[derive(Default, Clone, Copy)]
+struct TxState {
+    status: TxStatus,
+    settings: TxSettings,
+}
+
+/// Asks the server whether a transaction block is open. `tokio-postgres` does not expose the
+/// ReadyForQuery status, so this uses a savepoint: it fails with 25P01 outside a block, 25P02 in
+/// an aborted one, and succeeds (and is released) inside an open one.
+async fn probe_tx(client: &Client) -> TxStatus {
+    match client.batch_execute("SAVEPOINT quarry_tx_probe").await {
+        Ok(()) => {
+            let _ = client
+                .batch_execute("RELEASE SAVEPOINT quarry_tx_probe")
+                .await;
+            TxStatus::Active
+        }
+        Err(e) if e.code().is_some_and(|c| c.code() == "25P02") => TxStatus::Failed,
+        Err(_) => TxStatus::Idle,
+    }
+}
+
+/// Whether the current transaction may write. Uses SHOW, which takes no snapshot: a SELECT here
+/// would count as the transaction's first query and make a following `SET TRANSACTION` fail.
+async fn transaction_writable(client: &Client) -> Result<bool, tokio_postgres::Error> {
+    let value = client
+        .simple_query("SHOW transaction_read_only")
+        .await?
+        .into_iter()
+        .find_map(|m| match m {
+            tokio_postgres::SimpleQueryMessage::Row(row) => row.get(0).map(str::to_owned),
+            _ => None,
+        });
+    Ok(value.as_deref() == Some("off"))
 }
 
 /// Runs `statements` in one transaction; every update/delete must affect exactly one row.
@@ -127,6 +165,69 @@ async fn edits_apply(
 }
 
 impl PgSession {
+    fn tx(&self) -> TxState {
+        *self.tx.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    fn set_tx_status(&self, status: TxStatus) {
+        self.tx.lock().unwrap_or_else(|p| p.into_inner()).status = status;
+    }
+
+    /// Runs one user statement with the transaction rules of this session:
+    /// - Manual mode opens a transaction before the first statement that needs one.
+    /// - Read-only sources restore the read-only default before every statement outside a
+    ///   transaction (`set_config()` inside any query could have switched it off), and roll back
+    ///   a transaction that was switched to read-write.
+    /// - The transaction state is re-read from the server whenever a statement could change it.
+    async fn execute_in_tx(
+        &self,
+        client: &Client,
+        sql: &str,
+        options: &ExecOptions,
+    ) -> Result<StatementOutcome, DbError> {
+        let kind = txctl::kind(sql);
+        let state = self.tx();
+        let db = |e: tokio_postgres::Error| errors::db_error(&e);
+        if state.status == TxStatus::Idle {
+            if self.params.read_only {
+                client
+                    .batch_execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY")
+                    .await
+                    .map_err(db)?;
+            }
+            if state.settings.mode == TxMode::Manual
+                && matches!(kind, txctl::Kind::Other | txctl::Kind::Procedural)
+            {
+                client
+                    .batch_execute(&format!(
+                        "BEGIN ISOLATION LEVEL {}",
+                        state.settings.isolation.sql()
+                    ))
+                    .await
+                    .map_err(db)?;
+                self.set_tx_status(TxStatus::Active);
+            }
+        }
+
+        let result = exec::run(client, &self.cursors, sql, options)
+            .await
+            .map_err(|e| errors::db_error(&e));
+
+        if kind != txctl::Kind::Other || (result.is_err() && self.tx().status != TxStatus::Idle) {
+            self.set_tx_status(probe_tx(client).await);
+        }
+        if self.params.read_only
+            && self.tx().status == TxStatus::Active
+            && (kind == txctl::Kind::Control || txctl::is_set(sql))
+            && transaction_writable(client).await.unwrap_or(false)
+        {
+            let _ = client.batch_execute("ROLLBACK").await;
+            self.set_tx_status(TxStatus::Idle);
+            return Err(errors::read_only_violation());
+        }
+        result
+    }
+
     async fn with_client<T>(
         &self,
         f: impl AsyncFnOnce(&Client) -> Result<T, tokio_postgres::Error>,
@@ -152,8 +253,9 @@ impl Session for PgSession {
     }
 
     async fn execute(&self, sql: &str, options: &ExecOptions) -> Result<StatementOutcome, DbError> {
-        self.with_client(async |client| exec::run(client, &self.cursors, sql, options).await)
-            .await
+        let guard = self.client.read().await;
+        let client = guard.as_ref().ok_or_else(errors::session_closed)?;
+        self.execute_in_tx(client, sql, options).await
     }
 
     async fn fetch(
@@ -248,6 +350,80 @@ impl Session for PgSession {
     async fn metadata(&self, request: &MetadataRequest) -> Result<Vec<MetaNode>, DbError> {
         self.with_client(async |client| metadata::load(client, request).await)
             .await
+    }
+
+    fn tx_status(&self) -> TxStatus {
+        self.tx().status
+    }
+
+    fn tx_settings(&self) -> TxSettings {
+        self.tx().settings
+    }
+
+    fn set_tx_settings(&self, settings: TxSettings) {
+        self.tx.lock().unwrap_or_else(|p| p.into_inner()).settings = settings;
+    }
+
+    async fn commit(&self) -> Result<TxStatus, DbError> {
+        let before = self.tx().status;
+        let status = self
+            .with_client(async |client| {
+                if before != TxStatus::Idle {
+                    // On a failed transaction the server answers COMMIT with a rollback.
+                    client.batch_execute("COMMIT").await?;
+                }
+                Ok(probe_tx(client).await)
+            })
+            .await?;
+        self.set_tx_status(status);
+        if before == TxStatus::Failed {
+            return Err(errors::invalid(
+                "The transaction had failed, so the server rolled it back instead of committing."
+                    .into(),
+            ));
+        }
+        Ok(status)
+    }
+
+    async fn rollback(&self) -> Result<TxStatus, DbError> {
+        let status = self
+            .with_client(async |client| {
+                client.batch_execute("ROLLBACK").await?;
+                Ok(probe_tx(client).await)
+            })
+            .await?;
+        self.set_tx_status(status);
+        Ok(status)
+    }
+
+    async fn set_schema(&self, schema: Option<&str>) -> Result<(), DbError> {
+        self.with_client(async |client| match schema {
+            // quote_ident on the server, so any schema name is safe and exact.
+            Some(schema) => client
+                .execute(
+                    "SELECT set_config('search_path', quote_ident($1) || ', ' || reset_val, false)
+                       FROM pg_settings WHERE name = 'search_path'",
+                    &[&schema],
+                )
+                .await
+                .map(|_| ()),
+            None => client.batch_execute("RESET search_path").await,
+        })
+        .await
+    }
+
+    fn abort(&self) {
+        self.closed.store(true, Ordering::SeqCst);
+        // Aborting the connection task drops the socket; waiting client calls then fail.
+        if let Ok(mut task) = self.task.try_lock()
+            && let Some(task) = task.take()
+        {
+            task.abort();
+        }
+    }
+
+    async fn fork(&self, on_close: OnClose) -> Result<Arc<dyn Session>, ConnectError> {
+        Ok(Arc::new(open(&self.params, Some(on_close)).await?))
     }
 
     async fn close(&self) {
@@ -373,6 +549,7 @@ async fn open(
         tls,
         cursors: exec::Cursors::default(),
         params: params.clone(),
+        tx: std::sync::Mutex::new(TxState::default()),
         client: RwLock::new(Some(client)),
         info,
         closed,

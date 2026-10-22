@@ -16,7 +16,24 @@
     connections: [],
     consoles: new Map(),
     seq: 0,
+    // Per session (sourceId + console): transaction settings and status.
+    sessions: new Map(),
   };
+
+  const sessionKey = (session) => `${session.sourceId}|${session.console ?? ''}`;
+  function sessionState(session) {
+    const s = state.sessions.get(sessionKey(session)) ?? {
+      settings: { mode: 'auto', isolation: 'read_committed' },
+      status: 'idle',
+    };
+    return { session, open: true, status: s.status, settings: s.settings };
+  }
+  function updateSession(session, patch) {
+    const next = { ...sessionState(session), ...patch };
+    state.sessions.set(sessionKey(session), { settings: next.settings, status: next.status });
+    setTimeout(() => emit('session-state', sessionState(session)), 0);
+    return sessionState(session);
+  }
 
   const INFO = {
     version: 'PostgreSQL 16.15 (fake)',
@@ -174,6 +191,12 @@
       return null;
     },
     query_execute: ({ request, onEvent }) => {
+      // Manual mode: the first statement opens a transaction (like the Rust session does).
+      const current = sessionState(request.session);
+      const ends = request.statements.some((s) => /^\s*(commit|rollback|end)\b/i.test(s.sql));
+      if (current.settings.mode === 'manual' && current.status === 'idle' && !ends) {
+        updateSession(request.session, { status: 'active' });
+      }
       const messages = [];
       request.statements.forEach((statement, index) => {
         const outcome = /^\s*select/i.test(statement.sql)
@@ -204,6 +227,13 @@
       sendOnChannel(onProgress, [ROWS.rows.length]);
       return { path: '/tmp/quarry-e2e.csv', rows: ROWS.rows.length, bytes: 42 };
     },
+    session_state: ({ session }) => sessionState(session),
+    session_set_tx: ({ session, settings }) => updateSession(session, { settings }),
+    tx_commit: ({ session }) => updateSession(session, { status: 'idle' }),
+    tx_rollback: ({ session }) => updateSession(session, { status: 'idle' }),
+    session_close: () => null,
+    session_drop: () => null,
+    app_quit: () => null,
     'plugin:event|listen': ({ event, handler }) => {
       listeners.set(event, [...(listeners.get(event) ?? []), handler]);
       return handler;

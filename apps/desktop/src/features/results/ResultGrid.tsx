@@ -9,6 +9,7 @@ import type {
   EditTarget,
   ExportSummary,
   Refinement,
+  SessionKey,
   StatementOutcome,
 } from '../../ipc/types';
 import { toAppError } from '../../lib/errors';
@@ -46,7 +47,8 @@ const widthCache = new Map<string, number[]>();
 const NO_REFINEMENT: Refinement = { sort: [], filters: [] };
 
 interface Props {
-  sourceId: string;
+  /** Session holding the result's cursor. */
+  session: SessionKey;
   outcome: RowsOutcome;
   /** Base name suggested for exported files. */
   exportName: string;
@@ -73,7 +75,7 @@ export interface EditingProps {
  * Loads pages of a cursor-backed result on demand. Page 0 is the first page that came with the
  * outcome; results without a cursor only have that page.
  */
-function usePages(sourceId: string, outcome: RowsOutcome) {
+function usePages(session: SessionKey, outcome: RowsOutcome) {
   const [pages, setPages] = useState(() => new Map<number, Cell[][]>([[0, outcome.rows]]));
   const [error, setError] = useState<string | null>(null);
   const inFlight = useRef(new Set<number>());
@@ -86,7 +88,7 @@ function usePages(sourceId: string, outcome: RowsOutcome) {
         if (pages.has(page) || inFlight.current.has(page)) continue;
         inFlight.current.add(page);
         backend
-          .resultPage(sourceId, outcome.cursor, page * PAGE_SIZE, PAGE_SIZE)
+          .resultPage(session, outcome.cursor, page * PAGE_SIZE, PAGE_SIZE)
           .then((rows) => {
             setPages((prev) => {
               const next = new Map(prev);
@@ -106,7 +108,7 @@ function usePages(sourceId: string, outcome: RowsOutcome) {
           .finally(() => inFlight.current.delete(page));
       }
     },
-    [outcome.cursor, pages, sourceId],
+    [outcome.cursor, pages, session],
   );
 
   const row = (index: number): Cell[] | undefined =>
@@ -115,7 +117,7 @@ function usePages(sourceId: string, outcome: RowsOutcome) {
 }
 
 export function ResultGrid({
-  sourceId,
+  session,
   outcome,
   exportName,
   onRefine,
@@ -128,7 +130,7 @@ export function ResultGrid({
   const { columns } = outcome;
   // Rows the user can browse: all of them with a cursor, otherwise only what came back.
   const baseCount = outcome.cursor ? outcome.totalRows : outcome.rows.length;
-  const { row, ensure, error } = usePages(sourceId, outcome);
+  const { row, ensure, error } = usePages(session, outcome);
   const edits = editing?.edits ?? NO_EDITS;
   const target = editing?.target ?? null;
   // Inserted rows are shown after the existing ones.
@@ -310,7 +312,7 @@ export function ResultGrid({
   return (
     <div className="flex h-full flex-col">
       <GridToolbar
-        sourceId={sourceId}
+        session={session}
         outcome={outcome}
         exportName={exportName}
         rowCount={rowCount}
@@ -606,7 +608,7 @@ function CellEditor({
 }
 
 function GridToolbar({
-  sourceId,
+  session,
   outcome,
   exportName,
   rowCount,
@@ -614,7 +616,7 @@ function GridToolbar({
   refining,
   refinement,
 }: {
-  sourceId: string;
+  session: SessionKey;
   outcome: RowsOutcome;
   exportName: string;
   rowCount: number;
@@ -632,7 +634,7 @@ function GridToolbar({
     setExporting({ format, rows: 0 });
     try {
       const summary = await backend.resultExport(
-        sourceId,
+        session,
         cursor,
         outcome.columns,
         format,
