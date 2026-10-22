@@ -53,7 +53,7 @@ export function ConfirmDialog({
             type="button"
             onClick={confirm}
             disabled={busy}
-            className={`rounded px-3 py-1 text-white disabled:opacity-50 ${danger ? 'bg-danger' : 'bg-accent'}`}
+            className={`rounded px-3 py-1 disabled:opacity-50 ${danger ? 'bg-danger text-danger-fg' : 'bg-accent text-accent-fg'}`}
           >
             {busy ? 'Working…' : confirmLabel}
           </button>

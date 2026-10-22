@@ -101,7 +101,21 @@ pub async fn result_apply_edits(
     changes: Vec<RowChange>,
 ) -> Result<usize, AppError> {
     let session = sessions.get(&source_id).await?;
-    Ok(session.apply_edits(&target, &changes).await?)
+    match session.apply_edits(&target, &changes).await {
+        Ok(applied) => {
+            tracing::info!(source = %source_id, changes = applied, "row changes applied");
+            Ok(applied)
+        }
+        Err(e) => {
+            tracing::warn!(
+                source = %source_id,
+                changes = changes.len(),
+                sqlstate = e.sqlstate.as_deref().unwrap_or(""),
+                "row changes rolled back"
+            );
+            Err(e.into())
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -237,6 +251,8 @@ pub async fn result_export(
                 AppError::new("storage", format!("could not save {}: {e}", path.display()))
             })?;
             let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            // The destination path is the user's; counts are enough to diagnose.
+            tracing::info!(source = %source_id, rows, bytes, "export finished");
             Ok(Some(ExportSummary {
                 path: path.display().to_string(),
                 rows,
@@ -245,6 +261,7 @@ pub async fn result_export(
         }
         (fetched, written) => {
             let _ = std::fs::remove_file(&partial); // never leave a half-written export behind
+            tracing::warn!(source = %source_id, "export failed");
             fetched?;
             let e = written
                 .err()

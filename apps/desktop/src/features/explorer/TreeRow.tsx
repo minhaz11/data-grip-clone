@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import type { MetaKind } from '../../ipc/types';
 import type { SessionState } from '../connections/sessionsStore';
-import { effectiveColor, endpointLabel, ENVIRONMENTS } from '../connections/model';
+import { effectiveColor, endpointLabel, ENVIRONMENTS, readableTextOn } from '../connections/model';
 import type { Row } from './treeModel';
 
 const INDENT = 14;
@@ -170,8 +170,8 @@ export function TreeRow({
         {c.readOnly && <Lock size={12} className="shrink-0 text-muted" aria-hidden />}
         {c.environment === 'production' && (
           <span
-            className="shrink-0 rounded px-1 text-[10px] font-semibold uppercase text-white"
-            style={{ background: color ?? undefined }}
+            className="shrink-0 rounded bg-danger px-1 text-[10px] font-semibold uppercase text-danger-fg"
+            style={color ? { background: color, color: readableTextOn(color) } : undefined}
           >
             prod
           </span>

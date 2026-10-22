@@ -38,9 +38,10 @@ apps/desktop/                  Tauri app
   src-tauri/                   Tauri entry crate: commands, job registry, sessions, bindings test
 crates/
   db-core  db-postgres  connections  secrets  store  workspace  io      built
+  logging                                                               built (redacting log file)
   ai-core  ai-anthropic                                                 planned (steps 16 to 18)
 docs/  (reverse-engineering, architecture, decisions, plans)
-tests/e2e/                     planned: Playwright with the in-memory backend (step 02)
+tests/e2e/                     Playwright + axe against the Vite build with a fake IPC layer
 ```
 
 The diagram above shows logical components. The `exec`, `metadata` and `sql` boxes did not become

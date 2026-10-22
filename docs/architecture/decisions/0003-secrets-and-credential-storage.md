@@ -32,3 +32,7 @@
 - Linux users need a running Secret Service. Ubuntu GNOME provides gnome-keyring, which is present
   on this machine.
 - Export/import of connection profiles excludes secrets by design.
+- Implemented (step 02): the redaction layer is `crates/logging`. Every log event is redacted as a
+  whole before it is written (URL credentials, secret-named fields in key=value and JSON form,
+  `sk-ant-` keys), and a canary test drives the connection manager with a marker password and
+  scans the log file. CI runs gitleaks over the full history on every push and PR.

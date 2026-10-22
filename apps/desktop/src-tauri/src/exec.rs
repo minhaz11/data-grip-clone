@@ -164,6 +164,13 @@ impl Jobs {
                 .clamp(1, MAX_ROWS_LIMIT),
             ..ExecOptions::default()
         };
+        // SQL text and values are never logged; ids, counts and outcomes are enough to diagnose.
+        tracing::info!(
+            job = %job_id,
+            source = %request.source_id,
+            statements = request.statements.len(),
+            "query job started"
+        );
         let jobs = Arc::clone(self);
         let id = job_id.clone();
         tauri::async_runtime::spawn(async move {
@@ -207,6 +214,13 @@ impl Jobs {
                 }
                 Err(e) => {
                     let cancelled = e.cancelled || job.cancel_requested.load(Ordering::SeqCst);
+                    tracing::debug!(
+                        job = %job_id,
+                        index,
+                        sqlstate = e.sqlstate.as_deref().unwrap_or(""),
+                        connection_lost = e.connection_lost,
+                        "statement failed"
+                    );
                     let _ = channel.send(ExecEvent::StatementFailed {
                         index,
                         offset,
@@ -223,10 +237,12 @@ impl Jobs {
                 }
             }
         }
+        let elapsed_ms = millis(started);
+        tracing::info!(job = %job_id, ?status, executed, elapsed_ms, "query job finished");
         let _ = channel.send(ExecEvent::Finished {
             status,
             executed,
-            elapsed_ms: millis(started),
+            elapsed_ms,
         });
     }
 
@@ -234,6 +250,7 @@ impl Jobs {
         let job = self.running.lock().await.get(job_id).cloned();
         let Some(job) = job else { return Ok(()) }; // already finished
         job.cancel_requested.store(true, Ordering::SeqCst);
+        tracing::info!(job = %job_id, "cancel requested");
         job.session.cancel().await.map_err(AppError::from)
     }
 }

@@ -2,11 +2,16 @@
 
 A desktop database IDE: Tauri 2 (Rust backend) + React/TypeScript. Design docs live in [`docs/`](docs/README.md).
 
-## Prerequisites (Linux)
+## Prerequisites
 
-- Node.js ≥ 22 and npm
+All platforms:
+
+- Node.js 22 or newer and npm (`.nvmrc` pins 22: run `nvm use` if your default Node is older)
 - Rust (stable) via [rustup](https://rustup.rs)
-- Tauri system libraries:
+
+macOS: Xcode Command Line Tools (`xcode-select --install`). No other system libraries are needed.
+
+Linux: the Tauri system libraries:
 
 ```bash
 sudo apt install -y build-essential pkg-config libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
@@ -28,6 +33,23 @@ npm run dev              # UI only in a browser, with a non-persistent in-memory
 npm run format:check && npm run lint && npm run typecheck && npm test
 cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
 ```
+
+## UI end-to-end tests
+
+Playwright drives the production Vite build in WebKit and Chromium, with the Rust backend replaced by
+a fake IPC layer (`tests/e2e/fake-ipc.js`), and scans key screens with axe (WCAG 2.1 A/AA).
+
+```bash
+npx playwright install chromium webkit                # once
+npm run test:e2e
+```
+
+## Logs
+
+The desktop app writes a redacted, size-capped log (5 MB, 3 rotations) to the OS log directory, for
+example `~/Library/Logs/dev.quarry.desktop/quarry.log` on macOS or
+`~/.local/share/dev.quarry.desktop/logs/quarry.log` on Linux. Secrets are masked before writing; SQL
+text and row data are never logged. Set `QUARRY_LOG=debug` (or any `tracing` filter) for more detail.
 
 ## IPC bindings
 

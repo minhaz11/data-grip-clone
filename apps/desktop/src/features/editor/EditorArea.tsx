@@ -92,9 +92,12 @@ export function EditorArea({ theme }: { theme: 'light' | 'dark' }) {
                   </span>
                 )}
               </button>
+              {/* Mouse affordance only: a tablist may contain only tabs, so keyboard and screen-reader
+                  users close the active tab with the tab.close shortcut instead. */}
               <button
                 type="button"
-                aria-label={`Close ${tab.console}`}
+                tabIndex={-1}
+                aria-hidden
                 title={`Close (${shortcutLabel('tab.close')})`}
                 onClick={() => void closeTab(tab.id)}
                 className="mr-1 rounded p-0.5 opacity-60 hover:bg-hover hover:opacity-100"
@@ -160,7 +163,7 @@ function ConsolePane({ tab, theme }: { tab: ConsoleTab; theme: 'light' | 'dark' 
           onClick={() => void runFromEditor('current')}
           disabled={running}
           title={`Run statement or selection (${shortcutLabel('query.run')})`}
-          className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[#3f9d5a] hover:bg-hover disabled:opacity-40"
+          className="flex items-center gap-1 rounded px-1.5 py-0.5 text-success hover:bg-hover disabled:opacity-40"
         >
           <Play size={13} aria-hidden /> Run
         </button>

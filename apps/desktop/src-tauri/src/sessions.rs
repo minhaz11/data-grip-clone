@@ -89,8 +89,22 @@ impl Sessions {
             .unwrap_or_else(|p| p.into_inner())
             .remove(id);
 
-        let session = result?;
+        let session = match result {
+            Ok(session) => session,
+            Err(e) => {
+                tracing::warn!(source = %id, kind = ?e.kind, "connect failed");
+                return Err(e.into());
+            }
+        };
         let info = session.info().clone();
+        tracing::info!(
+            source = %id,
+            server_version = %info.server_version,
+            tls = info.tls,
+            read_only = info.read_only,
+            latency_ms = info.latency_ms,
+            "connected"
+        );
         let stale = self.live.lock().await.insert(id.to_owned(), session);
         if let Some(stale) = stale {
             stale.close().await;
@@ -149,11 +163,17 @@ impl Sessions {
         let (app, id, sessions) = (app.clone(), id.to_owned(), Arc::clone(self));
         Box::new(move |reason| {
             let event = match reason {
-                Some(reason) => StatusEvent::Lost {
-                    id: id.clone(),
-                    reason,
-                },
-                None => StatusEvent::Disconnected { id: id.clone() },
+                Some(reason) => {
+                    tracing::warn!(source = %id, reason = %reason, "connection lost");
+                    StatusEvent::Lost {
+                        id: id.clone(),
+                        reason,
+                    }
+                }
+                None => {
+                    tracing::info!(source = %id, "disconnected");
+                    StatusEvent::Disconnected { id: id.clone() }
+                }
             };
             let _ = app.emit(STATUS_EVENT, event);
             // Drop the dead entry (a deliberate disconnect already removed it).

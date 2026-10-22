@@ -5,8 +5,33 @@ export const ENVIRONMENTS: { value: Environment; label: string; color: string | 
   { value: 'development', label: 'Development', color: '#3f9d5a' },
   { value: 'testing', label: 'Testing', color: '#7a5fc8' },
   { value: 'staging', label: 'Staging', color: '#d98a1f' },
-  { value: 'production', label: 'Production', color: '#d64545' },
+  { value: 'production', label: 'Production', color: '#c43a3a' },
 ];
+
+/** WCAG relative luminance of a `#rrggbb` color, or `null` if it cannot be parsed. */
+function luminance(hex: string): number | null {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  if (!m) {
+    return null;
+  }
+  const [r, g, b] = m.slice(1).map((h) => {
+    const c = parseInt(h, 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  }) as [number, number, number];
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/**
+ * Black or white, whichever contrasts more with `background`. One of them always reaches at least
+ * 4.58:1 (WCAG AA), so badges stay legible on any color the user picks.
+ */
+export function readableTextOn(background: string): '#000000' | '#ffffff' {
+  const l = luminance(background);
+  if (l === null) {
+    return '#ffffff';
+  }
+  return (l + 0.05) / 0.05 > 1.05 / (l + 0.05) ? '#000000' : '#ffffff';
+}
 
 /** Explicit color wins; otherwise the environment's default; `null` means no marker. */
 export function effectiveColor(c: Pick<ConnectionDraft, 'color' | 'environment'>): string | null {

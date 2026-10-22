@@ -81,8 +81,16 @@ impl ConnectionManager {
         {
             // Roll back so a failed keyring write never leaves a half-created data source.
             let _ = self.store.delete_connection(&id);
+            tracing::warn!(id = %id, error = %e, "data source not created: credential store refused");
             return Err(e);
         }
+        tracing::info!(
+            id = %profile.id,
+            name = %profile.draft.name,
+            host = %profile.draft.host,
+            save_mode = mode.as_str(),
+            "data source created"
+        );
         self.reload(&profile.id)
     }
 
@@ -104,6 +112,7 @@ impl ConnectionManager {
         }
         // Validate and persist the profile first; secrets only move once that succeeded.
         self.store.update_connection(id, draft)?;
+        tracing::info!(id = %id, save_mode = new_mode.as_str(), "data source updated");
 
         let secret = match change {
             PasswordChange::Set(s) => Some(s),
@@ -137,6 +146,7 @@ impl ConnectionManager {
             .ok_or(ConnectionError::NotFound)?;
         self.clear_secret(id)?;
         self.store.delete_connection(id)?;
+        tracing::info!(id = %id, "data source deleted");
         Ok(())
     }
 
@@ -229,7 +239,7 @@ pub fn connect_params(
     password: Option<SecretString>,
 ) -> Result<ConnectParams, ConnectionError> {
     let d = draft.normalized()?;
-    Ok(ConnectParams {
+    let params = ConnectParams {
         host: d.host,
         port: d.port,
         database: d.database,
@@ -245,7 +255,10 @@ pub fn connect_params(
         connect_timeout: Duration::from_secs(u64::from(d.connect_timeout_secs)),
         read_only: d.read_only,
         application_name: "Quarry".into(),
-    })
+    };
+    // `ConnectParams`'s Debug never prints the password; the log writer redacts as a second line.
+    tracing::debug!(?params, "connect parameters");
+    Ok(params)
 }
 
 #[cfg(test)]

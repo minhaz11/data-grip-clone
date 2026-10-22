@@ -20,6 +20,9 @@ pub fn run() {
         // Used from Rust only (export save dialog); the WebView gets no dialog permissions.
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            // Redacting, size-capped log file (ADR-0003); also stderr in development builds.
+            quarry_logging::init(&app.path().app_log_dir()?, cfg!(debug_assertions))?;
+            tracing::info!(version = %app.package_info().version, "Quarry starting");
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
             let store = Arc::new(Store::open(&dir.join("app.db"))?);

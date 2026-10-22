@@ -166,7 +166,7 @@ function OutputLine({ st }: { st: StatementRun }) {
         aria-label={st.state}
         className={clsx(
           'mt-0.5 shrink-0',
-          st.state === 'done' && 'text-[#3f9d5a]',
+          st.state === 'done' && 'text-success',
           st.state === 'running' && 'animate-spin text-accent',
           st.state === 'failed' && (e?.cancelled ? 'text-muted' : 'text-danger'),
           st.state === 'pending' && 'text-muted',
