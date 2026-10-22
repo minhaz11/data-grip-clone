@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-result-apply-edits"
+description = "Enables the result_apply_edits command without any pre-configured scope."
+commands.allow = ["result_apply_edits"]
+
+[[permission]]
+identifier = "deny-result-apply-edits"
+description = "Denies the result_apply_edits command without any pre-configured scope."
+commands.deny = ["result_apply_edits"]

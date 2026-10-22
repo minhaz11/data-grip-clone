@@ -30,6 +30,8 @@
     "allow-result-page",
     "allow-result-close",
     "allow-result-export",
-    "allow-result-refine"
+    "allow-result-refine",
+    "allow-result-preview-edits",
+    "allow-result-apply-edits"
   ]
 }

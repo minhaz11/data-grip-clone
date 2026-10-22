@@ -12,8 +12,8 @@ use quarry_secrets::SecretString;
 use serde::Serialize;
 
 pub use exec::{
-    Cell, ColumnInfo, ErrorPosition, ExecOptions, Filter, FilterOp, Refinement, SortKey,
-    StatementOutcome,
+    Cell, ColumnInfo, ColumnValue, EditColumn, EditStatement, EditTarget, Editability,
+    ErrorPosition, ExecOptions, Filter, FilterOp, Refinement, RowChange, SortKey, StatementOutcome,
 };
 pub use metadata::{MetaKind, MetaNode, MetadataRequest, ObjectType};
 
@@ -186,6 +186,20 @@ pub trait Session: Send + Sync {
         refinement: &Refinement,
         options: &ExecOptions,
     ) -> Result<StatementOutcome, DbError>;
+    /// The statements `apply_edits` would run for `changes`, exactly (SQL plus bound values).
+    fn preview_edits(
+        &self,
+        target: &EditTarget,
+        changes: &[RowChange],
+    ) -> Result<Vec<EditStatement>, DbError>;
+    /// Applies `changes` in one transaction on a separate connection (so an open transaction in
+    /// this session is never touched). Each update/delete must affect exactly one row, otherwise
+    /// everything is rolled back. Returns the number of changes applied.
+    async fn apply_edits(
+        &self,
+        target: &EditTarget,
+        changes: &[RowChange],
+    ) -> Result<usize, DbError>;
     /// Releases a result cursor. Unknown or already closed cursors are ignored.
     async fn close_cursor(&self, cursor: &str) -> Result<(), DbError>;
     /// Ends the session; waits for in-flight calls to finish first. Idempotent.

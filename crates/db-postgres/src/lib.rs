@@ -1,9 +1,12 @@
 //! PostgreSQL adapter (ADR-0002): tokio-postgres over rustls.
 
+mod editability;
+mod edits;
 mod errors;
 mod exec;
 mod metadata;
 mod refine;
+mod sqlutil;
 mod tls;
 
 use std::net::SocketAddr;
@@ -13,8 +16,8 @@ use std::time::{Duration, Instant};
 
 use quarry_db_core::{
     Cell, ColumnInfo, ConnectError, ConnectErrorKind, ConnectParams, DatabaseAdapter, DbError,
-    ExecOptions, MetaNode, MetadataRequest, OnClose, Refinement, ServerInfo, Session,
-    StatementOutcome, TlsMode,
+    EditStatement, EditTarget, ExecOptions, MetaNode, MetadataRequest, OnClose, Refinement,
+    RowChange, ServerInfo, Session, StatementOutcome, TlsMode,
 };
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
@@ -56,6 +59,71 @@ pub struct PgSession {
     cancel_token: CancelToken,
     tls: MakeRustlsConnect,
     cursors: exec::Cursors,
+    /// Kept to open the short-lived connection that applies edits.
+    params: ConnectParams,
+}
+
+/// Runs `statements` in one transaction; every update/delete must affect exactly one row.
+async fn edits_apply(
+    client: &Client,
+    changes: &[RowChange],
+    statements: &[EditStatement],
+) -> Result<usize, DbError> {
+    let total = statements.len();
+    let fail = async |message: String, e: Option<&tokio_postgres::Error>| -> DbError {
+        let _ = client.batch_execute("ROLLBACK").await;
+        let mut err = e
+            .map(errors::db_error)
+            .unwrap_or_else(|| errors::invalid(String::new()));
+        err.message = message;
+        err.position = None;
+        err.hint = Some("Nothing was saved. Refresh the result and try again.".into());
+        err
+    };
+    client
+        .batch_execute("BEGIN")
+        .await
+        .map_err(|e| errors::db_error(&e))?;
+    for (i, (st, change)) in statements.iter().zip(changes).enumerate() {
+        let what = match change {
+            RowChange::Update { .. } => "update",
+            RowChange::Delete { .. } => "delete",
+            RowChange::Insert { .. } => "insert",
+        };
+        let binds: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = st
+            .params
+            .iter()
+            .map(|p| p as &(dyn tokio_postgres::types::ToSql + Sync))
+            .collect();
+        match client.execute(&st.sql, &binds).await {
+            Ok(1) => {}
+            Ok(n) => {
+                let why = if n == 0 {
+                    "matched no row: it was changed or deleted since it was read"
+                } else {
+                    "matched more than one row"
+                };
+                return Err(
+                    fail(format!("Change {} of {total} ({what}) {why}.", i + 1), None).await,
+                );
+            }
+            Err(e) => {
+                let msg = e
+                    .as_db_error()
+                    .map_or_else(|| e.to_string(), |d| d.message().to_owned());
+                return Err(fail(
+                    format!("Change {} of {total} ({what}) failed: {msg}", i + 1),
+                    Some(&e),
+                )
+                .await);
+            }
+        }
+    }
+    client
+        .batch_execute("COMMIT")
+        .await
+        .map_err(|e| errors::db_error(&e))?;
+    Ok(total)
 }
 
 impl PgSession {
@@ -131,6 +199,35 @@ impl Session for PgSession {
             position: None,
             ..e
         })
+    }
+
+    fn preview_edits(
+        &self,
+        target: &EditTarget,
+        changes: &[RowChange],
+    ) -> Result<Vec<EditStatement>, DbError> {
+        edits::build(target, changes).map_err(errors::invalid)
+    }
+
+    async fn apply_edits(
+        &self,
+        target: &EditTarget,
+        changes: &[RowChange],
+    ) -> Result<usize, DbError> {
+        let statements = edits::build(target, changes).map_err(errors::invalid)?;
+        // A separate connection: an open transaction in this session is never committed or
+        // mixed in, and the edit transaction is isolated from the user's console.
+        let side = open(&self.params, None).await.map_err(|e| {
+            errors::invalid(format!(
+                "Could not open a connection to apply the changes: {}",
+                e.message
+            ))
+        })?;
+        let result = side
+            .with_client(async |client| Ok(edits_apply(client, changes, &statements).await))
+            .await;
+        side.close().await;
+        result?
     }
 
     async fn close_cursor(&self, cursor: &str) -> Result<(), DbError> {
@@ -275,6 +372,7 @@ async fn open(
         cancel_token: client.cancel_token(),
         tls,
         cursors: exec::Cursors::default(),
+        params: params.clone(),
         client: RwLock::new(Some(client)),
         info,
         closed,

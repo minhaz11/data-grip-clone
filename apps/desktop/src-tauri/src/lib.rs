@@ -60,6 +60,8 @@ pub fn run() {
             results::result_page,
             results::result_close,
             results::result_refine,
+            results::result_preview_edits,
+            results::result_apply_edits,
             results::result_export,
         ])
         .run(tauri::generate_context!())

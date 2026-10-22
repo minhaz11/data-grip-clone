@@ -6,6 +6,7 @@ import type {
   Cell,
   ColumnInfo,
   ExportFormat,
+  EditTarget,
   ExportSummary,
   Refinement,
   StatementOutcome,
@@ -21,6 +22,16 @@ import {
 } from './gridModel';
 import { FilterBar } from './FilterBar';
 import { nextSort } from './refineModel';
+import {
+  addInsert,
+  NO_EDITS,
+  removeInsert,
+  rowKey,
+  setCell,
+  setInsert,
+  toggleDelete,
+  type PendingEdits,
+} from './editsModel';
 
 type RowsOutcome = Extract<StatementOutcome, { type: 'rows' }>;
 
@@ -46,6 +57,16 @@ interface Props {
   refineError?: string;
   /** Identifies the result view across re-runs (keeps column widths). */
   widthsKey?: string;
+  /** Row editing; omit for read-only results. */
+  editing?: EditingProps;
+}
+
+export interface EditingProps {
+  target: EditTarget;
+  edits: PendingEdits;
+  /** While submitting, edits are frozen. */
+  busy: boolean;
+  onChange(f: (e: PendingEdits) => PendingEdits): void;
 }
 
 /**
@@ -102,11 +123,60 @@ export function ResultGrid({
   refining = false,
   refineError,
   widthsKey,
+  editing,
 }: Props) {
   const { columns } = outcome;
   // Rows the user can browse: all of them with a cursor, otherwise only what came back.
-  const rowCount = outcome.cursor ? outcome.totalRows : outcome.rows.length;
+  const baseCount = outcome.cursor ? outcome.totalRows : outcome.rows.length;
   const { row, ensure, error } = usePages(sourceId, outcome);
+  const edits = editing?.edits ?? NO_EDITS;
+  const target = editing?.target ?? null;
+  // Inserted rows are shown after the existing ones.
+  const rowCount = baseCount + edits.inserts.length;
+  const [editingCell, setEditingCell] = useState<{ row: number; col: number } | null>(null);
+
+  function viewOf(r: number): RowView {
+    if (r >= baseCount) {
+      const ins = edits.inserts[r - baseCount];
+      const values = ins?.values ?? {};
+      return {
+        cells: columns.map((_, i) => (i in values ? (values[i] ?? null) : null)),
+        state: 'inserted',
+        changed: new Set(Object.keys(values).map(Number)),
+        defaults: new Set(columns.map((_, i) => i).filter((i) => !(i in values))),
+      };
+    }
+    const cells = row(r);
+    const key = target ? rowKey(target, cells) : null;
+    if (!key || !cells) return { cells, state: 'normal', changed: new Set() };
+    if (key in edits.deletes) return { cells, state: 'deleted', changed: new Set() };
+    const upd = edits.updates[key];
+    if (!upd) return { cells, state: 'normal', changed: new Set() };
+    return {
+      cells: cells.map((v, i) => (i in upd.set ? (upd.set[i] ?? null) : v)),
+      state: 'normal',
+      changed: new Set(Object.keys(upd.set).map(Number)),
+    };
+  }
+
+  function canEdit(r: number, col: number): boolean {
+    if (!editing || editing.busy || refining || !target?.columns[col]) return false;
+    if (r >= baseCount) return r - baseCount < edits.inserts.length;
+    const cells = row(r);
+    const key = target ? rowKey(target, cells) : null;
+    return key !== null && !(key in edits.deletes);
+  }
+
+  function commit(r: number, col: number, value: Cell) {
+    if (!editing || !target) return;
+    if (r >= baseCount) {
+      const id = edits.inserts[r - baseCount]?.id;
+      if (id) editing.onChange((e) => setInsert(e, id, col, value));
+    } else {
+      const original = row(r);
+      if (original) editing.onChange((e) => setCell(e, target, original, col, value));
+    }
+  }
 
   const scroller = useRef<HTMLDivElement>(null);
   const [scroll, setScroll] = useState({ top: 0, left: 0 });
@@ -177,7 +247,14 @@ export function ResultGrid({
   }
 
   function onKeyDown(e: React.KeyboardEvent) {
-    if (!selected || rowCount === 0) return;
+    if (!selected || rowCount === 0) {
+      if (editing && e.key === 'Insert' && !editing.busy) {
+        e.preventDefault();
+        editing.onChange((x) => addInsert(x, `new-${Date.now()}-${x.inserts.length}`));
+        setSelected({ row: 0, col: 0 });
+      }
+      return;
+    }
     const page = Math.max(1, Math.floor(viewport / ROW_HEIGHT) - 1);
     const keys: Record<string, () => void> = {
       ArrowDown: () => moveTo(selected.row + 1, selected.col),
@@ -189,6 +266,31 @@ export function ResultGrid({
       Home: () => moveTo(e.ctrlKey ? 0 : selected.row, 0),
       End: () => moveTo(e.ctrlKey ? rowCount - 1 : selected.row, columns.length - 1),
     };
+    if (editing && !editingCell) {
+      if ((e.key === 'Enter' || e.key === 'F2') && canEdit(selected.row, selected.col)) {
+        e.preventDefault();
+        setEditingCell({ row: selected.row, col: selected.col });
+        return;
+      }
+      if (e.key === 'Delete' && target && !editing.busy) {
+        e.preventDefault();
+        if (selected.row >= baseCount) {
+          const id = edits.inserts[selected.row - baseCount]?.id;
+          if (id) editing.onChange((x) => removeInsert(x, id));
+        } else {
+          const cells = row(selected.row);
+          if (cells) editing.onChange((x) => toggleDelete(x, target, cells));
+        }
+        return;
+      }
+      if (e.key === 'Insert' && !editing.busy) {
+        e.preventDefault();
+        editing.onChange((x) => addInsert(x, `new-${Date.now()}-${x.inserts.length}`));
+        // The new row is at the old row count (moveTo would clamp to the old last row).
+        setSelected({ row: rowCount, col: 0 });
+        return;
+      }
+    }
     const action = keys[e.key];
     if (action) {
       e.preventDefault();
@@ -313,12 +415,37 @@ export function ResultGrid({
                   key={r}
                   index={r}
                   top={win.shift + (r - win.first) * ROW_HEIGHT}
-                  cells={row(r)}
+                  view={viewOf(r)}
                   columns={columns}
                   widths={widths}
                   numberWidth={numberWidth}
                   selectedCol={selected?.row === r ? selected.col : null}
                   onSelect={(col) => setSelected({ row: r, col })}
+                  onEdit={(col) => canEdit(r, col) && setEditingCell({ row: r, col })}
+                  editor={
+                    editingCell?.row === r
+                      ? {
+                          col: editingCell.col,
+                          node: (
+                            <CellEditor
+                              initial={viewOf(r).cells?.[editingCell.col] ?? ''}
+                              onCancel={() => {
+                                setEditingCell(null);
+                                scroller.current?.focus();
+                              }}
+                              onCommit={(value, move) => {
+                                const { row: er, col: ec } = editingCell;
+                                setEditingCell(null);
+                                commit(er, ec, value);
+                                scroller.current?.focus();
+                                if (move === 'down') moveTo(er + 1, ec);
+                                if (move === 'right') moveTo(er, ec + 1);
+                              }}
+                            />
+                          ),
+                        }
+                      : null
+                  }
                 />
               ))}
             </div>
@@ -330,56 +457,84 @@ export function ResultGrid({
   );
 }
 
+/** How one visible row should look, derived from loaded cells plus pending edits. */
+interface RowView {
+  cells: Cell[] | undefined;
+  state: 'normal' | 'deleted' | 'inserted';
+  /** Columns with a pending value (shown highlighted). */
+  changed: Set<number>;
+  /** Inserted rows: columns left to the server default. */
+  defaults?: Set<number>;
+}
+
 function GridRow({
   index,
   top,
-  cells,
+  view,
   columns,
   widths,
   numberWidth,
   selectedCol,
+  editor,
   onSelect,
+  onEdit,
 }: {
   index: number;
   top: number;
-  cells: Cell[] | undefined;
+  view: RowView;
   columns: ColumnInfo[];
   widths: number[];
   numberWidth: number;
   selectedCol: number | null;
+  editor: { col: number; node: React.ReactNode } | null;
   onSelect(col: number): void;
+  onEdit(col: number): void;
 }) {
+  const { cells, state } = view;
   return (
     <div
       role="row"
       aria-rowindex={index + 2}
-      className="absolute left-0 flex hover:bg-hover"
+      data-state={state}
+      className={clsx(
+        'absolute left-0 flex hover:bg-hover',
+        state === 'deleted' && 'bg-danger/10 text-muted line-through',
+        state === 'inserted' && 'bg-[#3f9d5a]/10',
+      )}
       style={{ top, height: ROW_HEIGHT }}
     >
       <div
-        className="shrink-0 border-r border-b border-border px-2 text-right leading-[22px] text-muted tabular-nums"
+        className="shrink-0 border-r border-b border-border px-2 text-right leading-[22px] text-muted tabular-nums no-underline"
         style={{ width: numberWidth }}
       >
-        {index + 1}
+        {state === 'inserted' ? '+' : index + 1}
       </div>
       {columns.map((c, i) => {
         const v = cells?.[i];
         const numeric = c.typeName !== undefined && NUMERIC.has(c.typeName);
+        const changed = view.changed.has(i);
         return (
           <div
             key={i}
             role="gridcell"
             aria-selected={selectedCol === i}
+            data-changed={changed || undefined}
             onMouseDown={() => onSelect(i)}
+            onDoubleClick={() => onEdit(i)}
             title={v === undefined ? undefined : (v ?? 'NULL')}
             className={clsx(
-              'shrink-0 truncate border-r border-b border-border px-2 leading-[22px] whitespace-pre',
+              'relative shrink-0 truncate border-r border-b border-border px-2 leading-[22px] whitespace-pre',
               numeric && 'text-right tabular-nums',
+              changed && 'bg-[#d98a1f]/25',
               selectedCol === i && 'bg-selected outline outline-1 -outline-offset-1 outline-accent',
             )}
             style={{ width: widths[i] }}
           >
-            {cells === undefined ? (
+            {editor?.col === i ? (
+              editor.node
+            ) : view.defaults?.has(i) ? (
+              <span className="text-muted italic">default</span>
+            ) : cells === undefined ? (
               <span className="text-muted">…</span>
             ) : v === null ? (
               <span className="text-muted italic">NULL</span>
@@ -389,6 +544,63 @@ function GridRow({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/** Inline cell editor: Enter saves and moves down, Tab saves and moves right, Esc cancels. */
+function CellEditor({
+  initial,
+  onCommit,
+  onCancel,
+}: {
+  initial: string;
+  onCommit(value: Cell, move: 'down' | 'right' | 'none'): void;
+  onCancel(): void;
+}) {
+  const [draft, setDraft] = useState(initial);
+  // Finish exactly once: some engines fire blur when the editor is removed after Enter/Esc.
+  const done = useRef(false);
+  const finish = (f: () => void) => {
+    if (done.current) return;
+    done.current = true;
+    f();
+  };
+  return (
+    <div className="absolute inset-0 z-10 flex bg-bg" onMouseDown={(e) => e.stopPropagation()}>
+      <input
+        aria-label="Cell value"
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            finish(() => onCommit(draft, 'down'));
+          } else if (e.key === 'Tab') {
+            e.preventDefault();
+            finish(() => onCommit(draft, 'right'));
+          } else if (e.key === 'Escape') {
+            e.preventDefault();
+            finish(onCancel);
+          }
+        }}
+        onBlur={() => finish(() => onCommit(draft, 'none'))}
+        className="min-w-0 flex-1 bg-transparent px-1.5 font-mono outline outline-2 -outline-offset-2 outline-accent"
+      />
+      <button
+        type="button"
+        aria-label="Set NULL"
+        title="Set NULL"
+        onMouseDown={(e) => {
+          e.preventDefault(); // keep focus so blur does not save the draft first
+          finish(() => onCommit(null, 'none'));
+        }}
+        className="shrink-0 px-1 text-[10px] text-muted hover:text-fg"
+      >
+        NULL
+      </button>
     </div>
   );
 }

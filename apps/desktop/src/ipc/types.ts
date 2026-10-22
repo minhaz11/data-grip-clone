@@ -154,6 +154,8 @@ export type StatementOutcome =
       truncated: boolean;
       /** Server-side cursor with the full result (paging, export); absent for capped results. */
       cursor?: string;
+      /** Whether rows can be edited (cursor-backed query results only). */
+      edit?: Editability;
     }
   | { type: 'command'; rowsAffected: number };
 
@@ -228,4 +230,38 @@ export interface Filter {
 export interface Refinement {
   sort: SortKey[];
   filters: Filter[];
+}
+
+// ---- Row editing (mirrors quarry_db_core::exec) ----
+
+export interface EditColumn {
+  name: string;
+  typeName: string;
+}
+
+export interface EditTarget {
+  schema: string;
+  table: string;
+  /** Per result column: the base column it shows, or null if not editable. */
+  columns: (EditColumn | null)[];
+  /** Result-column positions of the primary key. */
+  key: number[];
+}
+
+export type Editability =
+  { status: 'editable'; target: EditTarget } | { status: 'readOnly'; reason: string };
+
+export interface ColumnValue {
+  column: number;
+  value: Cell;
+}
+
+export type RowChange =
+  | { kind: 'update'; key: Cell[]; set: ColumnValue[]; original: ColumnValue[] }
+  | { kind: 'delete'; key: Cell[] }
+  | { kind: 'insert'; values: ColumnValue[] };
+
+export interface EditStatement {
+  sql: string;
+  params: Cell[];
 }

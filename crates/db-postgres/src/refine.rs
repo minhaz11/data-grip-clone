@@ -5,6 +5,8 @@
 
 use quarry_db_core::{ColumnInfo, Filter, FilterOp, Refinement};
 
+use crate::sqlutil::safe_type;
+
 pub const MAX_FILTERS: usize = 20;
 pub const MAX_SORT_KEYS: usize = 10;
 pub const MAX_VALUE_CHARS: usize = 10_000;
@@ -13,20 +15,6 @@ pub const MAX_VALUE_CHARS: usize = 10_000;
 pub struct Built {
     pub sql: String,
     pub params: Vec<String>,
-}
-
-/// A PostgreSQL type name safe to place in a cast (`int4`, `timestamptz`, `_text`, …).
-fn safe_type(name: &str) -> Option<&str> {
-    let ok = !name.is_empty()
-        && name.len() <= 63
-        && name
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_lowercase() || c == '_')
-        && name
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
-    ok.then_some(name)
 }
 
 /// Escapes LIKE wildcards so user text matches literally (with `ESCAPE '\'`).
@@ -289,15 +277,5 @@ mod tests {
                 .sql
                 .ends_with("ORDER BY 1 DESC")
         );
-    }
-
-    #[test]
-    fn type_name_allowlist() {
-        for ok in ["int4", "timestamptz", "_text", "varchar"] {
-            assert!(safe_type(ok).is_some(), "{ok}");
-        }
-        for bad in ["", "Int4", "int4)", "a b", "x;y", "\"q\""] {
-            assert!(safe_type(bad).is_none(), "{bad}");
-        }
     }
 }

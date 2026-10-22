@@ -171,11 +171,30 @@ listed tests run green in CI.
     tests (numeric vs text order, typed timestamp filters, literal `%`/`_`, NULL tests, duplicate
     names, CTEs with inner ORDER BY, 22P02 messages, injection as a plain value).
   - Paging controls: superseded by the virtual scroller over cursor pages (M3.3).
-- Safe row editing:
-  - Requires a PK/unique key (otherwise read-only, with a reason shown).
-  - Pending-change highlighting.
-  - Preview of the generated DML.
-  - Submit in a transaction, and revert.
+- **M4.2 Safe row editing** ✅
+  - **Editability** comes from the server's column origins (RowDescription table OID and
+    attnum) and the catalog, never from SQL text. A result is editable only when its columns come
+    from one base table (not a view or temp table) with a primary key that is fully present in
+    the result. Otherwise the edit bar shows why: several tables, no primary key, missing key
+    columns, computed columns only, a view, a temp table, or a read-only data source.
+  - **Pending changes** are keyed by primary-key values (stable across paging and re-sorts):
+    edited cells amber, deleted rows red and struck through, new rows green with `default`
+    placeholders. Editing back to the original drops the change. Keys: double-click, F2 or Enter
+    to edit (Enter saves and moves down, Tab moves right, Esc cancels, a NULL button sets NULL);
+    Delete toggles deletion; Insert adds a row.
+  - **Preview** shows the exact statements and bound values from the same Rust builder Submit
+    uses. Identifiers come from the catalog, always quoted; values are bound and cast; type names
+    are allow-listed.
+  - **Submit** runs one transaction on a **separate short-lived connection**, so an open
+    console `BEGIN` is never committed or mixed in. Each update/delete must affect exactly one
+    row, and updates also require the edited columns to still hold their original values
+    (`IS NOT DISTINCT FROM`, optimistic lock). Any mismatch or server error rolls everything
+    back, with a "Change N of M" message. Production sources confirm with the statements;
+    read-only sources are blocked (and the server rejects writes anyway). After a submit the
+    result is re-read with the same sort and filter.
+  - Tests: builder unit tests (no values in SQL, unsafe types, key checks) and integration tests
+    (editability reasons, apply/conflict/rollback, per-change errors, isolation from an open
+    console transaction, read-only rejection).
 - Table viewer (columns/indexes/constraints/FKs), DDL generation, create/alter forms with DDL preview,
   destructive-operation confirmation.
 

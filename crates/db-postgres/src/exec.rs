@@ -10,7 +10,9 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use futures_util::{TryStreamExt, pin_mut};
-use quarry_db_core::{Cell, ColumnInfo, ExecOptions, StatementOutcome};
+use quarry_db_core::{Cell, ColumnInfo, Editability, ExecOptions, StatementOutcome};
+
+use crate::editability::{self, Origin};
 use tokio_postgres::{Client, SimpleQueryMessage};
 
 /// Open result cursors per session; the oldest is closed beyond this.
@@ -96,12 +98,19 @@ pub async fn run(
 ) -> Result<StatementOutcome, tokio_postgres::Error> {
     // Describe-only prepare for column types. It executes nothing; statements that cannot be
     // prepared (utility commands, some DDL) simply get untyped columns.
-    let types: Option<Vec<String>> = client.prepare(sql).await.ok().map(|st| {
+    let origins: Option<Vec<Origin>> = client.prepare(sql).await.ok().map(|st| {
         st.columns()
             .iter()
-            .map(|c| c.type_().name().to_owned())
+            .map(|c| Origin {
+                table_oid: c.table_oid(),
+                column_id: c.column_id(),
+                type_name: c.type_().name().to_owned(),
+            })
             .collect()
     });
+    let types: Option<Vec<String>> = origins
+        .as_ref()
+        .map(|o| o.iter().map(|c| c.type_name.clone()).collect());
 
     if cursor_eligible(sql) {
         let name = cursors.allocate();
@@ -114,7 +123,18 @@ pub async fn run(
                 if let Some(evicted) = cursors.register(name.clone()) {
                     let _ = client.batch_execute(&format!("CLOSE {evicted}")).await;
                 }
-                return first_page(client, &name, types, options).await;
+                // A catalog lookup failure only makes the result read-only; the query succeeded.
+                let edit = match &origins {
+                    Some(o) => editability::decide(client, o).await.unwrap_or_else(|e| {
+                        Editability::ReadOnly {
+                            reason: format!("Could not inspect the source table: {e}"),
+                        }
+                    }),
+                    None => Editability::ReadOnly {
+                        reason: "The result could not be described.".into(),
+                    },
+                };
+                return first_page(client, &name, types, Some(edit), options).await;
             }
             Err(e) if analysis_error(&e) => {} // e.g. data-modifying WITH, SELECT INTO: run directly
             Err(e) => return Err(e),
@@ -151,7 +171,7 @@ pub async fn run_refined(
         .iter()
         .map(|c| c.type_name.clone().unwrap_or_default())
         .collect();
-    match first_page(client, &name, Some(types), options).await? {
+    match first_page(client, &name, Some(types), None, options).await? {
         // The wrapper renames outputs c1…cn; show the original names.
         StatementOutcome::Rows {
             rows,
@@ -165,6 +185,8 @@ pub async fn run_refined(
             total_rows,
             truncated,
             cursor,
+            // The UI keeps the editability decided for the original statement.
+            edit: None,
         }),
         other => Ok(other),
     }
@@ -174,6 +196,7 @@ async fn first_page(
     client: &Client,
     name: &str,
     types: Option<Vec<String>>,
+    edit: Option<Editability>,
     options: &ExecOptions,
 ) -> Result<StatementOutcome, tokio_postgres::Error> {
     // The cursor is materialized, so counting is cheap and exact.
@@ -202,6 +225,7 @@ async fn first_page(
         total_rows,
         truncated,
         cursor: Some(name.to_owned()),
+        edit,
     })
 }
 
@@ -289,6 +313,7 @@ async fn run_direct(
                 total_rows,
                 truncated,
                 cursor: None,
+                edit: None,
             }
         }
         None => StatementOutcome::Command { rows_affected },

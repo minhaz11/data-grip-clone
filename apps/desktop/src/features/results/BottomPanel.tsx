@@ -7,6 +7,9 @@ import { activeEditor } from '../editor/editorHandle';
 import { caretPosition } from '../editor/TextareaSqlEditor';
 import { isRunning, useExec, type Run, type StatementRun } from '../exec/execStore';
 import { ResultGrid } from './ResultGrid';
+import { EditBar } from './EditBar';
+import { NO_EDITS, type PendingEdits } from './editsModel';
+import { useConnections } from '../connections/connectionsStore';
 
 /** Output log and result sets of the active console's latest run. */
 export function BottomPanel() {
@@ -208,22 +211,57 @@ function ResultView({ run, statement }: { run: Run; statement: StatementRun | un
   const consoleName = useWorkspace(
     (s) => s.tabs.find((t) => t.id === run.tabId)?.console ?? 'result',
   );
+  const source = useConnections((s) => s.items.find((c) => c.id === run.sourceId));
   const refine = useExec((s) => s.refine);
+  const updateEdits = useExec((s) => s.updateEdits);
+  const revertEdits = useExec((s) => s.revertEdits);
+  const submitEdits = useExec((s) => s.submitEdits);
   const o = statement?.outcome;
   if (!statement || !o || o.type !== 'rows') return null;
-  // Re-keyed per result (cursor), so each re-run starts with a fresh page cache and scroll position.
+
+  // Editing needs an editable target and a writable data source; otherwise say why not.
+  const target = o.edit?.status === 'editable' && !source?.readOnly ? o.edit.target : null;
+  const reason = source?.readOnly
+    ? `the data source "${source.name}" is read-only.`
+    : o.edit?.status === 'readOnly'
+      ? o.edit.reason
+      : 'only query results (SELECT …) can be edited.';
+  const edits = statement.edits ?? NO_EDITS;
+  const onChange = (f: (e: PendingEdits) => PendingEdits) =>
+    updateEdits(run.tabId, statement.index, f);
+
   return (
-    <ResultGrid
-      key={`${statement.index}:${o.cursor ?? 'capped'}:${run.startedAt}`}
-      sourceId={run.sourceId}
-      outcome={o}
-      exportName={`${consoleName}_result_${statement.index + 1}`}
-      // Only cursor-backed query results can be re-run with sort/filter.
-      onRefine={o.cursor ? (r) => void refine(run.tabId, statement.index, r) : undefined}
-      refinement={statement.refinement}
-      refining={statement.refining}
-      refineError={statement.refineError}
-      widthsKey={`${run.tabId}:${run.startedAt}:${statement.index}`}
-    />
+    <div className="flex h-full flex-col">
+      <EditBar
+        source={source}
+        target={target}
+        reason={reason}
+        edits={edits}
+        submitting={statement.submitting ?? false}
+        submitError={statement.submitError}
+        submitted={statement.submitted}
+        onChange={onChange}
+        onRevert={() => revertEdits(run.tabId, statement.index)}
+        onSubmit={() => submitEdits(run.tabId, statement.index)}
+      />
+      <div className="min-h-0 flex-1">
+        {/* Re-keyed per result (cursor), so each re-run starts with a fresh page cache and scroll position. */}
+        <ResultGrid
+          key={`${statement.index}:${o.cursor ?? 'capped'}:${run.startedAt}`}
+          sourceId={run.sourceId}
+          outcome={o}
+          exportName={`${consoleName}_result_${statement.index + 1}`}
+          // Only cursor-backed query results can be re-run with sort/filter.
+          onRefine={o.cursor ? (r) => void refine(run.tabId, statement.index, r) : undefined}
+          refinement={statement.refinement}
+          refining={statement.refining}
+          refineError={statement.refineError}
+          widthsKey={`${run.tabId}:${run.startedAt}:${statement.index}`}
+          editing={
+            target ? { target, edits, busy: statement.submitting ?? false, onChange } : undefined
+          }
+        />
+      </div>
+    </div>
   );
 }

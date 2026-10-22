@@ -10,6 +10,7 @@ import type {
 } from '../../ipc/types';
 import { toAppError } from '../../lib/errors';
 import { useWorkspace } from '../../app/workspaceStore';
+import { NO_EDITS, toChanges, type PendingEdits } from '../results/editsModel';
 
 export interface StatementRun {
   index: number;
@@ -23,6 +24,12 @@ export interface StatementRun {
   refinement?: Refinement;
   refining?: boolean;
   refineError?: string;
+  /** Unsubmitted row edits. */
+  edits?: PendingEdits;
+  submitting?: boolean;
+  submitError?: string;
+  /** Shown after a successful submit until the next edit. */
+  submitted?: number;
 }
 
 export interface Run {
@@ -57,6 +64,10 @@ interface ExecState {
   setView(tabId: string, view: ResultView): void;
   /** Re-runs one result with sort/filter; keeps the current result if that fails. */
   refine(tabId: string, index: number, refinement: Refinement): Promise<void>;
+  updateEdits(tabId: string, index: number, f: (e: PendingEdits) => PendingEdits): void;
+  revertEdits(tabId: string, index: number): void;
+  /** Applies pending edits (all or nothing), then re-reads the result. */
+  submitEdits(tabId: string, index: number): Promise<void>;
 }
 
 export const useExec = create<ExecState>((set, get) => {
@@ -167,6 +178,41 @@ export const useExec = create<ExecState>((set, get) => {
 
     setView: (tabId, view) => set((s) => ({ view: { ...s.view, [tabId]: view } })),
 
+    updateEdits(tabId, index, f) {
+      const st = get().runs[tabId]?.statements.find((x) => x.index === index);
+      if (!st || st.submitting) return;
+      patchStatement(tabId, index, {
+        edits: f(st.edits ?? NO_EDITS),
+        submitError: undefined,
+        submitted: undefined,
+      });
+    },
+
+    revertEdits: (tabId, index) =>
+      patchStatement(tabId, index, { edits: NO_EDITS, submitError: undefined }),
+
+    async submitEdits(tabId, index) {
+      const run = get().runs[tabId];
+      const st = run?.statements.find((x) => x.index === index);
+      const edit = st?.outcome?.type === 'rows' ? st.outcome.edit : undefined;
+      if (!run || !st || st.submitting || edit?.status !== 'editable') return;
+      const changes = toChanges(st.edits ?? NO_EDITS);
+      if (changes.length === 0) return;
+      patchStatement(tabId, index, { submitting: true, submitError: undefined });
+      try {
+        const applied = await backend.resultApplyEdits(run.sourceId, edit.target, changes);
+        patchStatement(tabId, index, { submitting: false, edits: NO_EDITS, submitted: applied });
+        // Show what the server now holds (same sort/filter, fresh cursor).
+        await get().refine(tabId, index, st.refinement ?? { sort: [], filters: [] });
+      } catch (e) {
+        const err = toAppError(e);
+        patchStatement(tabId, index, {
+          submitting: false,
+          submitError: [err.message, err.hint].filter(Boolean).join(' '),
+        });
+      }
+    },
+
     async refine(tabId, index, refinement) {
       const run = get().runs[tabId];
       const st = run?.statements.find((x) => x.index === index);
@@ -181,7 +227,13 @@ export const useExec = create<ExecState>((set, get) => {
           refinement,
           cursor,
         );
-        patchStatement(tabId, index, { outcome, refinement, refining: false });
+        // Sorting/filtering wraps the same query, so the rows' source table (editability) is unchanged.
+        const previous = st.outcome.edit;
+        const next =
+          outcome.type === 'rows' && !outcome.edit && previous
+            ? { ...outcome, edit: previous }
+            : outcome;
+        patchStatement(tabId, index, { outcome: next, refinement, refining: false });
       } catch (e) {
         patchStatement(tabId, index, { refining: false, refineError: toAppError(e).message });
       }

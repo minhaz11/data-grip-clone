@@ -52,6 +52,9 @@ pub enum StatementOutcome {
         /// most `max_rows` rows.
         #[serde(skip_serializing_if = "Option::is_none")]
         cursor: Option<String>,
+        /// Whether rows can be edited (only computed for cursor-backed query results).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        edit: Option<Editability>,
     },
     /// No result set: DML/DDL/utility. `rows_affected` is 0 for statements without a count.
     Command { rows_affected: u64 },
@@ -76,6 +79,7 @@ mod tests {
             total_rows: 10,
             truncated: true,
             cursor: Some("c".into()),
+            edit: None,
         };
         assert_eq!(
             serde_json::to_value(&rows).expect("encode"),
@@ -146,4 +150,76 @@ impl FilterOp {
     pub fn takes_value(self) -> bool {
         !matches!(self, FilterOp::IsNull | FilterOp::NotNull)
     }
+}
+
+/// Whether a result's rows can be edited, decided from the columns' source tables (as reported by
+/// the server), never from SQL text.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, Serialize)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "status"
+)]
+pub enum Editability {
+    Editable { target: EditTarget },
+    ReadOnly { reason: String },
+}
+
+/// The single base table a result's rows come from.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditTarget {
+    pub schema: String,
+    pub table: String,
+    /// Per result column: the base column it shows, or `None` if it cannot be edited
+    /// (computed, from another table, a repeat of an earlier column, or an unsupported type).
+    pub columns: Vec<Option<EditColumn>>,
+    /// Result-column positions of the primary key, in key order.
+    pub key: Vec<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditColumn {
+    pub name: String,
+    pub type_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ColumnValue {
+    /// Result-column position.
+    pub column: usize,
+    pub value: Cell,
+}
+
+/// One pending row change. Rows are identified by their primary-key values as last read.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, Serialize)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "kind"
+)]
+pub enum RowChange {
+    /// `original` holds the edited columns' values as read; the update applies only if they are
+    /// unchanged on the server (optimistic locking).
+    Update {
+        key: Vec<Cell>,
+        set: Vec<ColumnValue>,
+        original: Vec<ColumnValue>,
+    },
+    Delete {
+        key: Vec<Cell>,
+    },
+    Insert {
+        values: Vec<ColumnValue>,
+    },
+}
+
+/// A generated statement exactly as it will run: SQL with placeholders plus bound values.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditStatement {
+    pub sql: String,
+    pub params: Vec<Cell>,
 }

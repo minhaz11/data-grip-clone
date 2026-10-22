@@ -8,7 +8,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc;
 
-use quarry_db_core::{Cell, ColumnInfo, ExecOptions, Refinement, StatementOutcome};
+use quarry_db_core::{
+    Cell, ColumnInfo, EditStatement, EditTarget, ExecOptions, Refinement, RowChange,
+    StatementOutcome,
+};
 use quarry_io::{ExportWriter, Format};
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
@@ -75,6 +78,30 @@ pub async fn result_refine(
         let _ = session.close_cursor(&previous).await;
     }
     Ok(outcome)
+}
+
+/// The exact statements (SQL + bound values) that `result_apply_edits` would run.
+#[tauri::command]
+pub async fn result_preview_edits(
+    sessions: State<'_, Arc<Sessions>>,
+    source_id: String,
+    target: EditTarget,
+    changes: Vec<RowChange>,
+) -> Result<Vec<EditStatement>, AppError> {
+    let session = sessions.get(&source_id).await?;
+    Ok(session.preview_edits(&target, &changes)?)
+}
+
+/// Applies row changes in one transaction (all or nothing); returns how many were applied.
+#[tauri::command]
+pub async fn result_apply_edits(
+    sessions: State<'_, Arc<Sessions>>,
+    source_id: String,
+    target: EditTarget,
+    changes: Vec<RowChange>,
+) -> Result<usize, AppError> {
+    let session = sessions.get(&source_id).await?;
+    Ok(session.apply_edits(&target, &changes).await?)
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]

@@ -99,6 +99,8 @@ export function createMemoryBackend(): Backend {
     queryCancel: async () => null,
     resultPage: () => fail('unsupported', 'Result paging requires the Quarry desktop app.'),
     resultClose: async () => null,
+    resultPreviewEdits: () => fail('unsupported', 'Editing requires the Quarry desktop app.'),
+    resultApplyEdits: () => fail('unsupported', 'Editing requires the Quarry desktop app.'),
     resultRefine: () =>
       fail('unsupported', 'Sorting and filtering require the Quarry desktop app.'),
     resultExport: () => fail('unsupported', 'Export requires the Quarry desktop app.'),

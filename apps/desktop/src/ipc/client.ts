@@ -8,7 +8,10 @@ import type {
   ExecEvent,
   ExecRequest,
   ExportFormat,
+  EditStatement,
+  EditTarget,
   ExportSummary,
+  RowChange,
   Refinement,
   StatementOutcome,
   MetaNode,
@@ -69,6 +72,13 @@ export interface Backend {
     refinement: Refinement,
     previousCursor: string | null,
   ): Promise<StatementOutcome>;
+  resultPreviewEdits(
+    sourceId: string,
+    target: EditTarget,
+    changes: RowChange[],
+  ): Promise<EditStatement[]>;
+  /** All or nothing; resolves to the number of changes applied. */
+  resultApplyEdits(sourceId: string, target: EditTarget, changes: RowChange[]): Promise<number>;
   /** Native save dialog + streamed export in the backend; `null` if the user cancelled. */
   resultExport(
     sourceId: string,
@@ -120,6 +130,10 @@ const tauriBackend: Backend = {
       refinement,
       previousCursor,
     }),
+  resultPreviewEdits: (sourceId, target, changes) =>
+    invoke<EditStatement[]>('result_preview_edits', { sourceId, target, changes }),
+  resultApplyEdits: (sourceId, target, changes) =>
+    invoke<number>('result_apply_edits', { sourceId, target, changes }),
   resultExport: (sourceId, cursor, columns, format, fileName, onProgress) => {
     const channel = new Channel<number>();
     channel.onmessage = onProgress;
