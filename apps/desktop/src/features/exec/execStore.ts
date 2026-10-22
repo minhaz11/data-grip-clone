@@ -1,8 +1,10 @@
 import { create } from 'zustand';
 import { backend } from '../../ipc/client';
 import type {
+  Cell,
   ExecEvent,
   JobStatus,
+  Notice,
   Refinement,
   SessionKey,
   StatementError,
@@ -16,6 +18,15 @@ import { useMetadata } from '../explorer/metadataStore';
 import { useSettings } from '../../app/settingsStore';
 import { useWorkspace } from '../../app/workspaceStore';
 import { NO_EDITS, toChanges, type PendingEdits } from '../results/editsModel';
+import { useNotifications } from '../notifications/notifications';
+
+/** A statement to run, plus what the output log shows for it when it was bound. */
+export type RunStatement = StatementRequest & {
+  /** The statement as written (before parameters became `$n`). */
+  text?: string;
+  /** Parameter values it ran with, by name. */
+  paramValues?: [string, Cell][];
+};
 
 export interface StatementRun {
   index: number;
@@ -37,6 +48,10 @@ export interface StatementRun {
   submitted?: number;
   /** The result was moved to a kept result (pinned); its cursor belongs to that run now. */
   movedTo?: string;
+  /** Parameter values the statement ran with. */
+  params?: [string, Cell][];
+  /** Server notices raised while it ran, in order. */
+  notices?: Notice[];
 }
 
 export interface Run {
@@ -63,6 +78,8 @@ export interface Run {
   keptFrom?: string;
   label?: string;
   pinned?: boolean;
+  /** Still running after the long-query threshold. */
+  longRunning?: boolean;
 }
 
 /**
@@ -70,6 +87,9 @@ export interface Run {
  * (statement index), or a kept result (its run id).
  */
 export type ResultView = 'output' | number | string;
+
+/** Earlier runs kept in a console's output log. */
+export const MAX_HISTORY_RUNS = 50;
 
 /** Unpinned kept results per console ("new tab per run"); older ones are closed. */
 export const MAX_KEPT_RESULTS = 5;
@@ -84,11 +104,16 @@ interface ExecState {
   view: Record<string, ResultView | undefined>;
   /** Kept result run ids per console tab, oldest first. */
   kept: Record<string, string[] | undefined>;
+  /** Earlier runs per console for the output log (without rows or cursors), oldest first. */
+  history: Record<string, Run[] | undefined>;
+  /** When a console's output was cleared; lines of runs started before are hidden. */
+  clearedAt: Record<string, number | undefined>;
+  clearOutput(tabId: string): void;
   start(
     tabId: string,
     session: SessionKey,
     sourceName: string,
-    statements: StatementRequest[],
+    statements: RunStatement[],
     options: { schema: string | null; txMode?: TxMode },
     onError?: (s: StatementRun) => void,
   ): Promise<void>;
@@ -110,6 +135,34 @@ interface ExecState {
 }
 
 let keptCounter = 0;
+const longQueryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/** A finished run as the output log keeps it: no rows, cursors or edits. */
+function compact(run: Run): Run {
+  return {
+    ...run,
+    statements: run.statements.map((st) => ({
+      index: st.index,
+      offset: st.offset,
+      sql: st.sql,
+      state: st.state,
+      elapsedMs: st.elapsedMs,
+      error: st.error,
+      params: st.params,
+      notices: st.notices,
+      outcome:
+        st.outcome?.type === 'rows'
+          ? {
+              type: 'rows',
+              columns: st.outcome.columns,
+              rows: [],
+              totalRows: st.outcome.totalRows,
+              truncated: st.outcome.truncated,
+            }
+          : st.outcome,
+    })),
+  };
+}
 
 export const useExec = create<ExecState>((set, get) => {
   const patch = (tabId: string, f: (r: Run) => Run) =>
@@ -154,10 +207,32 @@ export const useExec = create<ExecState>((set, get) => {
     }));
   }
 
+  /** Moves the console's current run into its output history. */
+  function archive(tabId: string) {
+    const previous = get().runs[tabId];
+    if (previous && !previous.keptFrom) {
+      set((s) => ({
+        history: {
+          ...s.history,
+          [tabId]: [...(s.history[tabId] ?? []), compact(previous)].slice(-MAX_HISTORY_RUNS),
+        },
+      }));
+    }
+  }
+
   return {
     runs: {},
     view: {},
     kept: {},
+    history: {},
+    clearedAt: {},
+
+    clearOutput(tabId) {
+      set((s) => ({
+        history: { ...s.history, [tabId]: [] },
+        clearedAt: { ...s.clearedAt, [tabId]: Date.now() },
+      }));
+    },
 
     async start(tabId, session, sourceName, statements, options, onError) {
       // The previous results of this console are replaced, or kept as tabs when the setting
@@ -186,6 +261,7 @@ export const useExec = create<ExecState>((set, get) => {
         dropKept(id);
       }
       releaseCursors(previous);
+      archive(tabId);
       const run: Run = {
         tabId,
         sourceId: session.sourceId,
@@ -198,12 +274,29 @@ export const useExec = create<ExecState>((set, get) => {
         statements: statements.map((s, index) => ({
           index,
           offset: s.offset,
-          sql: s.sql,
+          sql: s.text ?? s.sql,
           state: 'pending',
+          ...(s.paramValues ? { params: s.paramValues } : {}),
         })),
         startedAt: Date.now(),
       };
       set((s) => ({ runs: { ...s.runs, [tabId]: run }, view: { ...s.view, [tabId]: 'output' } }));
+
+      // Long-query notice: marked while running, notified when it ends (REQ-EDIT-05, ERR-08).
+      const threshold = useSettings.getState().settings.longQuerySecs * 1000;
+      clearTimeout(longQueryTimers.get(tabId));
+      if (threshold > 0) {
+        longQueryTimers.set(
+          tabId,
+          setTimeout(() => {
+            if (get().runs[tabId] === run || isRunning(get().runs[tabId])) {
+              patch(tabId, (r) =>
+                r.startedAt === run.startedAt ? { ...r, longRunning: true } : r,
+              );
+            }
+          }, threshold),
+        );
+      }
 
       const onEvent = (e: ExecEvent) => {
         // Events can arrive before `queryExecute` resolves; they are keyed by tab, not job id.
@@ -238,8 +331,36 @@ export const useExec = create<ExecState>((set, get) => {
             get().setView(tabId, 'output');
             break;
           }
+          case 'notice':
+            patch(tabId, (r) => ({
+              ...r,
+              statements: r.statements.map((st) =>
+                st.index === e.index ? { ...st, notices: [...(st.notices ?? []), e.notice] } : st,
+              ),
+            }));
+            break;
           case 'finished': {
-            patch(tabId, (r) => ({ ...r, status: e.status, elapsedMs: e.elapsedMs }));
+            clearTimeout(longQueryTimers.get(tabId));
+            patch(tabId, (r) => ({
+              ...r,
+              status: e.status,
+              elapsedMs: e.elapsedMs,
+              longRunning: false,
+            }));
+            if (threshold > 0 && e.elapsedMs >= threshold) {
+              const outcome =
+                e.status === 'completed'
+                  ? 'finished'
+                  : e.status === 'failed'
+                    ? 'failed'
+                    : 'was cancelled';
+              useNotifications
+                .getState()
+                .notify(
+                  `Query on ${sourceName} ${outcome} after ${formatSeconds(e.elapsedMs)}.`,
+                  e.status === 'failed' ? 'error' : 'info',
+                );
+            }
             // DDL that reached the server may have changed what the explorer shows (REQ-EXPL-16).
             const ran = get().runs[tabId]?.statements.filter((st) => st.state !== 'pending') ?? [];
             if (ran.some((st) => classify(st.sql).kind === 'ddl')) {
@@ -250,9 +371,15 @@ export const useExec = create<ExecState>((set, get) => {
         }
       };
 
+      // Only what the backend takes: the bound SQL, its offset and parameter values.
+      const requests: StatementRequest[] = statements.map((s) =>
+        s.params && s.params.length > 0
+          ? { sql: s.sql, offset: s.offset, params: s.params }
+          : { sql: s.sql, offset: s.offset },
+      );
       try {
         const jobId = await backend.queryExecute(
-          { session, statements, ...(options.schema ? { schema: options.schema } : {}) },
+          { session, statements: requests, ...(options.schema ? { schema: options.schema } : {}) },
           onEvent,
         );
         patch(tabId, (r) => ({ ...r, jobId }));
@@ -262,6 +389,7 @@ export const useExec = create<ExecState>((set, get) => {
     },
 
     reject(tabId, sourceId, sourceName, error) {
+      archive(tabId);
       set((s) => ({
         runs: {
           ...s.runs,
@@ -376,6 +504,11 @@ export const useExec = create<ExecState>((set, get) => {
   };
 });
 
+export function formatSeconds(ms: number): string {
+  const s = Math.round(ms / 1000);
+  return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
+}
+
 export function isRunning(run: Run | undefined): boolean {
   return run?.status === 'starting' || run?.status === 'running';
 }
@@ -409,6 +542,8 @@ useWorkspace.subscribe((ws, prev) => {
         runs: { ...s.runs, [id]: undefined },
         view: { ...s.view, [id]: undefined },
         kept: { ...s.kept, [id]: undefined },
+        history: { ...s.history, [id]: undefined },
+        clearedAt: { ...s.clearedAt, [id]: undefined },
       }));
     }
   }

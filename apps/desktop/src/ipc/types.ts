@@ -10,6 +10,10 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
   editorFontSize: 13,
   resultTabs: 'reuse',
+  statementTimeoutSecs: 0,
+  longQuerySecs: 20,
+  runOutsideStatement: 'nearest',
+  runSelection: 'all',
 };
 
 /** Text form of a value as the server renders it; `null` is SQL NULL (Rust `quarry_db_core::Cell`). */
@@ -31,6 +35,8 @@ export interface ConsoleTabState {
   schema?: string | null;
   /** Column order and visibility of this tab's results, by column signature (M4.8). */
   gridLayouts?: Record<string, GridLayout>;
+  /** Last values given for statement parameters (`:name`, `$1`), by name (M4.7). */
+  params?: Record<string, string | null>;
 }
 
 /** Column order and visibility of a result: result-column indices. */

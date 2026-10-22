@@ -2,14 +2,22 @@ import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { App } from '../../app/App';
-import { useWorkspace } from '../../app/workspaceStore';
+import { useSettings } from '../../app/settingsStore';
+import { isConsole, useWorkspace } from '../../app/workspaceStore';
 import { backend, type Backend } from '../../ipc/client';
-import type { ConnectionDraft, ExecEvent, ExecRequest, ServerInfo } from '../../ipc/types';
+import {
+  DEFAULT_SETTINGS,
+  type ConnectionDraft,
+  type ExecEvent,
+  type ExecRequest,
+  type ServerInfo,
+} from '../../ipc/types';
 import { useConnections } from '../connections/connectionsStore';
 import { NEW_DRAFT } from '../connections/model';
 import { useSessions } from '../connections/sessionsStore';
 import { useExec } from './execStore';
-import { pickStatements } from './runQuery';
+import { useNotifications } from '../notifications/notifications';
+import { pickStatements, planRun } from './runQuery';
 
 const INFO: ServerInfo = {
   version: 'PostgreSQL 16.15',
@@ -231,5 +239,240 @@ describe('running queries', () => {
       'Choose a data source for this console',
     );
     expect(execute).not.toHaveBeenCalled();
+  });
+});
+
+const done = (index: number, offset: number): ExecEvent => ({
+  event: 'statementDone',
+  index,
+  offset,
+  elapsedMs: 2,
+  outcome: { type: 'command', rowsAffected: 1 },
+});
+const finished = (elapsedMs = 3): ExecEvent => ({
+  event: 'finished',
+  status: 'completed',
+  executed: 1,
+  elapsedMs,
+});
+
+describe('run target policy', () => {
+  const text = 'select 1;\n\nselect 2;\nselect 3';
+  it('runs a multi-statement selection or asks, per the setting', () => {
+    const all = planRun(text, { start: 0, end: text.length }, 0, 'current', {
+      runOutsideStatement: 'nearest',
+      runSelection: 'all',
+    });
+    expect(all.statements).toHaveLength(3);
+    expect(all.ask).toBeUndefined();
+    const ask = planRun(text, { start: 0, end: text.length }, 0, 'current', {
+      runOutsideStatement: 'nearest',
+      runSelection: 'ask',
+    });
+    expect(ask.ask).toMatchObject({ allowAll: true });
+    expect(ask.ask?.options).toHaveLength(3);
+  });
+
+  it('runs the nearest statement or asks when the caret is between statements', () => {
+    const blank = text.indexOf('\n\n') + 1; // the empty line after "select 1;"
+    // Right after the ";" still belongs to statement 1; the blank line below does not.
+    expect(
+      planRun(text, { start: blank, end: blank }, blank, 'current', {
+        runOutsideStatement: 'nearest',
+        runSelection: 'all',
+      }).statements.map((s) => s.sql),
+    ).toEqual(['select 1']);
+    const ask = planRun(text, { start: blank, end: blank }, blank, 'current', {
+      runOutsideStatement: 'ask',
+      runSelection: 'all',
+    });
+    expect(ask.ask).toMatchObject({ allowAll: false });
+    expect(ask.ask?.options.map((s) => s.sql)).toEqual(['select 1', 'select 2', 'select 3']);
+    // Inside a statement nothing is asked.
+    expect(
+      planRun(text, { start: 2, end: 2 }, 2, 'current', {
+        runOutsideStatement: 'ask',
+        runSelection: 'ask',
+      }).ask,
+    ).toBeUndefined();
+  });
+});
+
+describe('editor features', () => {
+  beforeEach(async () => {
+    await useSettings.getState().update(DEFAULT_SETTINGS);
+    useNotifications.setState({ items: [] });
+  });
+
+  /** Settings go through the backend: the app loads them again when it renders. */
+  const settings = (patch: Partial<typeof DEFAULT_SETTINGS>) =>
+    useSettings.getState().update({ ...DEFAULT_SETTINGS, ...patch });
+
+  it('prompts for :id once, binds the value and remembers it', async () => {
+    respondWith((req, emit) => {
+      emit(done(0, req.statements[0]?.offset ?? 0));
+      emit(finished());
+    });
+    const { user, editor } = await setup('select * from users where id = :id and a = :id');
+    await user.keyboard('{Control>}{Enter}{/Control}');
+    const dialog = await screen.findByRole('dialog', { name: 'Statement parameters' });
+    expect(within(dialog).getAllByRole('textbox')).toHaveLength(1); // one prompt per name
+    await user.type(within(dialog).getByLabelText(':id'), "7' or 1=1");
+    await user.click(within(dialog).getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    expect(statementsSent()).toEqual([
+      [
+        {
+          sql: 'select * from users where id = $1  and a = $1 ',
+          offset: 0,
+          params: ["7' or 1=1"],
+        },
+      ],
+    ]);
+    const ws = useWorkspace.getState();
+    const tab = ws.tabs.find((t) => t.id === ws.activeTabId);
+    expect(isConsole(tab) && tab.params).toEqual({ id: "7' or 1=1" });
+    // The output shows the statement as written, with its values.
+    await user.click(screen.getByRole('tab', { name: 'Output' }));
+    const output = screen.getByLabelText('Statement output');
+    expect(output).toHaveTextContent('where id = :id');
+    expect(output).toHaveTextContent(`Parameters: :id = '7' or 1=1'`);
+
+    // Next time the remembered value is offered; NULL sends SQL NULL.
+    editor.focus();
+    await user.keyboard('{Control>}{Enter}{/Control}');
+    const again = await screen.findByRole('dialog', { name: 'Statement parameters' });
+    expect(within(again).getByLabelText(':id')).toHaveValue("7' or 1=1");
+    await user.click(within(again).getByLabelText(':id is NULL'));
+    await user.click(within(again).getByRole('button', { name: 'Run' }));
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+    expect(statementsSent()[1]?.[0]?.params).toEqual([null]);
+  });
+
+  it('cancelling the prompt runs nothing', async () => {
+    const { user } = await setup('select :x');
+    await user.keyboard('{Control>}{Enter}{/Control}');
+    await screen.findByRole('dialog', { name: 'Statement parameters' });
+    await user.keyboard('{Escape}');
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('asks which statements to run from a selection when set to', async () => {
+    await settings({ runSelection: 'ask' });
+    respondWith((req, emit) => {
+      emit(done(0, req.statements[0]?.offset ?? 0));
+      emit(finished());
+    });
+    const { user, editor } = await setup('select 1;\nselect 2;');
+    editor.setSelectionRange(0, editor.value.length);
+    await user.keyboard('{Control>}{Enter}{/Control}');
+    const chooser = await screen.findByRole('dialog', { name: 'Run which statements?' });
+    await user.click(within(chooser).getByRole('button', { name: 'select 2' }));
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    expect(statementsSent()).toEqual([[{ sql: 'select 2', offset: 10 }]]);
+  });
+
+  it('shows notices in the output of the console that ran the statement', async () => {
+    respondWith((req, emit) => {
+      emit({ event: 'statementStarted', index: 0, offset: 0 });
+      emit({
+        event: 'notice',
+        index: 0,
+        notice: {
+          severity: 'NOTICE',
+          message: 'hello from plpgsql',
+          detail: null,
+          hint: 'a hint',
+          sqlstate: '00000',
+        },
+      });
+      emit(done(0, req.statements[0]?.offset ?? 0));
+      emit(finished());
+    });
+    const { user, profile } = await setup("do $$ begin raise notice 'hello'; end $$");
+    await user.keyboard('{Control>}{Enter}{/Control}');
+    const output = await screen.findByLabelText('Statement output');
+    await waitFor(() =>
+      expect(output).toHaveTextContent('NOTICE: hello from plpgsql Hint: a hint'),
+    );
+    // Another console has its own (empty) output.
+    await act(async () => {
+      const id = await useWorkspace.getState().newConsole(profile.id);
+      useWorkspace.getState().setSource(id, profile.id);
+    });
+    expect(screen.queryByText(/hello from plpgsql/)).not.toBeInTheDocument();
+  });
+
+  it('keeps earlier runs in the output, searchable and clearable', async () => {
+    respondWith((req, emit) => {
+      emit(done(0, req.statements[0]?.offset ?? 0));
+      emit(finished());
+    });
+    const { user, editor } = await setup('select 1;\nselect 22;');
+    editor.setSelectionRange(1, 1);
+    await user.keyboard('{Control>}{Enter}{/Control}');
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    editor.setSelectionRange(12, 12);
+    await user.keyboard('{Control>}{Enter}{/Control}');
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+    const output = screen.getByLabelText('Statement output');
+    await waitFor(() => expect(within(output).getAllByText(/^select \d+$/)).toHaveLength(2));
+    expect(output).toHaveTextContent('auto-commit');
+
+    // Focus, then type: in jsdom the panel resize handle would take a click.
+    screen.getByLabelText('Search output').focus();
+    await user.keyboard('22');
+    expect(
+      within(output)
+        .getAllByText(/^select \d+$/)
+        .map((e) => e.textContent),
+    ).toEqual(['select 22']);
+    await user.keyboard('{Backspace}{Backspace}');
+    await user.click(screen.getByRole('button', { name: 'Clear output' }));
+    expect(within(output).queryAllByText(/^select \d+$/)).toHaveLength(0);
+  });
+
+  it('notifies when a query ran longer than the long-query threshold', async () => {
+    await settings({ longQuerySecs: 1 });
+    respondWith((req, emit) => {
+      emit(done(0, req.statements[0]?.offset ?? 0));
+      emit(finished(65_000));
+    });
+    const { user } = await setup('select pg_sleep(65)');
+    await user.keyboard('{Control>}{Enter}{/Control}');
+    const toasts = await screen.findByRole('status', { name: 'Notifications' });
+    await waitFor(() => expect(toasts).toHaveTextContent('Query on Dev finished after 1 min 5 s.'));
+    expect(screen.getByRole('button', { name: 'Notifications (1)' })).toBeInTheDocument();
+  });
+
+  it('jumps to the error with F8 and Shift+F8', async () => {
+    respondWith((req, emit) => {
+      emit({
+        event: 'statementFailed',
+        index: 0,
+        offset: req.statements[0]?.offset ?? 0,
+        elapsedMs: 1,
+        error: {
+          message: 'syntax error at or near "form"',
+          detail: null,
+          hint: null,
+          sqlstate: '42601',
+          position: 10,
+          cancelled: false,
+          connectionLost: false,
+        },
+      });
+      emit({ event: 'finished', status: 'failed', executed: 1, elapsedMs: 1 });
+    });
+    const { user, editor } = await setup('select 1 form t');
+    await user.keyboard('{Control>}{Enter}{/Control}');
+    await waitFor(() => expect(editor).toHaveAttribute('data-error', '9-13'));
+    expect(editor).toHaveAttribute('title', 'syntax error at or near "form"');
+    editor.setSelectionRange(0, 0);
+    await user.keyboard('{F8}');
+    expect(editor.selectionStart).toBe(9);
+    editor.setSelectionRange(15, 15);
+    await user.keyboard('{Shift>}{F8}{/Shift}');
+    expect(editor.selectionStart).toBe(9);
   });
 });

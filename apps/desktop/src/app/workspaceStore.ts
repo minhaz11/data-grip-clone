@@ -34,6 +34,9 @@ export function isConsole(tab: EditorTab | undefined): tab is ConsoleTab {
 /** Tabs that show result grids, and so keep column layouts. */
 export type GridTab = ConsoleTab | DataTab;
 
+/** Parameter values remembered per console. */
+export const MAX_PARAMS = 50;
+
 /** Column layouts kept per tab; the oldest go first. */
 export const MAX_GRID_LAYOUTS = 20;
 
@@ -71,6 +74,8 @@ interface WorkspaceStore {
   setSource(id: string, sourceId: string | null): void;
   setOwnSession(id: string, own: boolean): void;
   setSchema(id: string, schema: string | null): void;
+  /** Remembers parameter values given for a console's statements. */
+  setParams(id: string, values: Record<string, string | null>): void;
   /** Writes every unsaved console now (tab close, app hide). */
   flushAll(): Promise<void>;
   setCaret(caret: { line: number; column: number } | null): void;
@@ -297,6 +302,15 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => {
     setSource: (id, sourceId) => patchTab(id, { sourceId, schema: null }),
     setOwnSession: (id, ownSession) => patchTab(id, { ownSession }),
     setSchema: (id, schema) => patchTab(id, { schema }),
+    setParams(id, values) {
+      const tab = get().tabs.find((t) => t.id === id);
+      if (isConsole(tab)) {
+        // Newest last; a console keeps a bounded number of names.
+        const kept = Object.entries(tab.params ?? {}).filter(([name]) => !(name in values));
+        const merged = [...kept, ...Object.entries(values)].slice(-MAX_PARAMS);
+        patchTab(id, { params: Object.fromEntries(merged) });
+      }
+    },
 
     async flushAll() {
       await Promise.all(
@@ -339,6 +353,7 @@ export function snapshot(
             ...(t.ownSession ? { ownSession: t.ownSession } : {}),
             ...(t.schema ? { schema: t.schema } : {}),
             ...layouts(t),
+            ...(t.params && Object.keys(t.params).length > 0 ? { params: t.params } : {}),
           }
         : t.kind === 'object'
           ? { id: t.id, kind: 'object' as const, sourceId: t.sourceId, object: t.object }

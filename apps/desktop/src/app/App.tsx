@@ -6,11 +6,12 @@ import { useAppliedTheme, useKeybindings, useWorkspacePersistence } from './hook
 import { useWorkspace } from './workspaceStore';
 import { SettingsDialog } from '../features/settings/SettingsDialog';
 import { useConnections } from '../features/connections/connectionsStore';
-import { activeEditor } from '../features/editor/editorHandle';
+import { activeEditor, goToError } from '../features/editor/editorHandle';
 import { useExec } from '../features/exec/execStore';
 import { runFromEditor } from '../features/exec/runQuery';
 import { closeConsole } from '../features/exec/txGuards';
 import { DialogHost } from './dialogs';
+import { Toasts } from '../features/notifications/notifications';
 import { ConnectionDialog } from '../features/connections/ConnectionDialog';
 import type { ConnectionProfile } from '../ipc/types';
 
@@ -38,6 +39,8 @@ export function App() {
       'settings.open': () => setSettingsOpen(true),
       'datasource.new': () => setConnectionDialog('new'),
       'editor.format': () => activeEditor()?.format(),
+      'editor.nextError': () => goToError(1),
+      'editor.previousError': () => goToError(-1),
       'query.run': () => void runFromEditor('current'),
       'query.runScript': () => void runFromEditor('script'),
       'query.cancel': () => {
@@ -82,6 +85,7 @@ export function App() {
       />
       <StatusBar theme={theme} />
       <DialogHost />
+      <Toasts />
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
       {connectionDialog && (
         <ConnectionDialog

@@ -39,6 +39,8 @@ mod tests {
             // Settings (quarry-store)
             decl::<quarry_store::ThemePreference>(&cfg),
             decl::<quarry_store::ResultTabs>(&cfg),
+            decl::<quarry_store::OutsideStatement>(&cfg),
+            decl::<quarry_store::SelectionRun>(&cfg),
             decl::<quarry_store::Settings>(&cfg),
             // Errors
             decl::<crate::error::AppError>(&cfg),
@@ -107,6 +109,7 @@ mod tests {
             decl::<quarry_db_core::ColumnValue>(&cfg),
             decl::<quarry_db_core::RowChange>(&cfg),
             decl::<quarry_db_core::EditStatement>(&cfg),
+            decl::<quarry_db_core::Notice>(&cfg),
             decl::<crate::results::ExportFormat>(&cfg),
             decl::<crate::results::ExportColumn>(&cfg),
             decl::<crate::results::ExportSummary>(&cfg),

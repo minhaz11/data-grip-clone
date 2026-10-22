@@ -120,8 +120,8 @@ listed tests run green in CI.
       confirmation, with Cancel focused. The same path will serve AI-generated SQL.
     - Integration tests (disposable server): typed exact values, cap and count, affected rows,
       error positions, cancel < 1 s with the session reusable, read-only rejection.
-  - Not yet: NOTICE messages, per-console sessions (done in M4.6), transaction mode controls (done in M4.6),
-    query history (Phase 5), statement timeouts as a setting.
+  - Later: per-console sessions and transaction mode controls came in M4.6; NOTICE messages
+    and the statement timeout setting in M4.7. Not yet: query history (Phase 5).
 - **M3.3 Grid + export** ✅: virtualized paged grid; multiple result tabs; CSV/JSON export streamed from
   the backend.
   - **AC**: a 1M-row result never sends more than 2 pages over IPC at once; it scrolls smoothly in
@@ -289,6 +289,37 @@ listed tests run green in CI.
     from version 2; classifier; UI (session/schema sent, guards for close/disconnect/quit,
     failed commit, mode switch); E2E (Manual mode to Commit).
   - Not yet: savepoint UI; refresh of results after Commit/Rollback.
+- **M4.7 Editor** ✅ (plan: `docs/plans/08-editor.md`)
+  - **Parameters**: `:name`, `${name}` and `$1` are found by the same scanner as statements, so
+    strings, comments, quoted names, dollar-quoted bodies, `::` casts, `:=` and array slices
+    are skipped, and `PREPARE` keeps its own `$n`. One prompt per name per run (with NULL), the
+    values remembered per console. They are bound as text-format parameters (the server parses
+    each for the type it infers), through the cursor path too (`DECLARE … CURSOR` with binds);
+    placeholders keep the original length so error positions still match the console.
+  - **What Run runs**: settings for a caret between statements (the nearest one, or ask) and a
+    selection of several statements (all, or ask), with a chooser.
+  - **Notices**: the connection task is driven by messages, so `RAISE NOTICE` and warnings reach
+    the running job in order and appear under their statement in that console's Output.
+  - **Output log** keeps earlier runs per console (time, data source, transaction mode, status,
+    parameter values, notices), with search and Clear.
+  - **Long queries**: a marker past the threshold (default 20 s) and a notification when they
+    end; a notification center in the status bar.
+  - **Statement timeout** setting (0 = no limit). Enforced by the session with the
+    out-of-band cancel: PostgreSQL switches `statement_timeout` off before the commit that
+    materializes a `WITH HOLD` cursor, so the server setting never applied to queries.
+  - **Errors**: F8 / Shift+F8 go to the next and previous error marker; markers show their
+    message on hover.
+  - **Completion**: functions (user schemas, and built-ins without type I/O, operator, cast or
+    internal ones) with signatures and overload counts; `JOIN … ON` suggestions from foreign
+    keys in both directions with generated aliases; fuzzy matching (prefix, initials, word
+    starts, letters in order); names resolve through the console's schema, then `public`.
+  - Tests: integration (bound types, an injection attempt stays a value, notices in order,
+    timeouts with and without a cursor, the function catalog); unit (parameter scanning and
+    binding, run policy, fuzzy ranking, joins, search path); UI (prompt and memory, chooser,
+    notices per console, output search and clear, long-query notification, F8); E2E (prompt
+    scan, bound values, notice in Output).
+  - Not yet: configurable parameter patterns (the three forms are built in), rows returned by
+    bound statements outside a cursor (`INSERT … RETURNING` shows its row count).
 - **M4.8 Result grid and table browsing** ✅ (plan: `docs/plans/07-result-grid.md`)
   - **Range selection**: mouse drag, Shift+click, row numbers, Shift+arrows, Ctrl+A. A status
     line sums the selection: count, and for numeric columns sum, average, min and max, exact for

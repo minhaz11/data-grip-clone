@@ -74,6 +74,10 @@ pub enum MetadataRequest {
     /// Every table and view the user can see, flat, for completion. Nodes carry the schema in
     /// `detail` and `key = "schema.name"`.
     Relations,
+    /// Functions callable from SQL, flat, for completion: user schemas and the useful
+    /// `pg_catalog` ones (not type I/O, operator or internal-argument functions). Nodes carry
+    /// the signature in `detail` and `key = "schema\u{1f}name(arguments)"`.
+    Functions,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

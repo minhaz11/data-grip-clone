@@ -6,7 +6,7 @@ use tauri::State;
 use crate::error::AppError;
 
 /// Runs a store call on the blocking pool so SQLite I/O never stalls the main (UI event) thread.
-async fn with_store<T, F>(store: &Arc<Store>, f: F) -> Result<T, AppError>
+pub(crate) async fn with_store<T, F>(store: &Arc<Store>, f: F) -> Result<T, AppError>
 where
     T: Send + 'static,
     F: FnOnce(&Store) -> Result<T, StoreError> + Send + 'static,

@@ -14,19 +14,19 @@ mod txctl;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use quarry_db_core::{
     Cell, ColumnInfo, ConnectError, ConnectErrorKind, ConnectParams, DatabaseAdapter, DbError,
     DdlObject, DdlOptions, EditStatement, EditTarget, ExecOptions, MetaNode, MetadataRequest,
-    ObjectDetails, ObjectRef, OnClose, Refinement, RowChange, SchemaChange, ServerInfo, Session,
-    StatementOutcome, TableModel, TlsMode, TxMode, TxSettings, TxStatus,
+    Notice, NoticeSink, ObjectDetails, ObjectRef, OnClose, Refinement, RowChange, SchemaChange,
+    ServerInfo, Session, StatementOutcome, TableModel, TlsMode, TxMode, TxSettings, TxStatus,
 };
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tokio_postgres::config::SslMode;
-use tokio_postgres::{CancelToken, Client};
+use tokio_postgres::{AsyncMessage, CancelToken, Client};
 use tokio_postgres_rustls::MakeRustlsConnect;
 
 /// Resolved addresses tried per host; libpq also tries every address a name resolves to.
@@ -93,6 +93,12 @@ pub struct PgSession {
     /// Kept to open the short-lived connection that applies edits, and for `fork`.
     params: ConnectParams,
     tx: std::sync::Mutex<TxState>,
+    /// Where the connection task delivers notices (the running job), if anywhere.
+    notices: Arc<std::sync::Mutex<Option<NoticeSink>>>,
+    /// User statements running longer than this are cancelled; 0 = no limit. Enforced here
+    /// rather than with `SET statement_timeout`, which PostgreSQL switches off before the
+    /// commit that materializes a `WITH HOLD` cursor (where queries do their work).
+    statement_timeout_ms: AtomicU64,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -213,6 +219,7 @@ impl PgSession {
         &self,
         client: &Client,
         sql: &str,
+        params: &[Cell],
         options: &ExecOptions,
     ) -> Result<StatementOutcome, DbError> {
         let kind = txctl::kind(sql);
@@ -239,9 +246,7 @@ impl PgSession {
             }
         }
 
-        let result = exec::run(client, &self.cursors, sql, options)
-            .await
-            .map_err(|e| errors::db_error(&e));
+        let result = self.run_with_timeout(client, sql, params, options).await;
 
         if kind != txctl::Kind::Other || (result.is_err() && self.tx().status != TxStatus::Idle) {
             self.set_tx_status(probe_tx(client).await);
@@ -256,6 +261,46 @@ impl PgSession {
             return Err(errors::read_only_violation());
         }
         result
+    }
+
+    /// `exec::run`, cancelled through the out-of-band cancel once the statement timeout passes.
+    async fn run_with_timeout(
+        &self,
+        client: &Client,
+        sql: &str,
+        params: &[Cell],
+        options: &ExecOptions,
+    ) -> Result<StatementOutcome, DbError> {
+        let ms = self.statement_timeout_ms.load(Ordering::Relaxed);
+        let run = exec::run(client, &self.cursors, sql, params, options);
+        if ms == 0 {
+            return run.await.map_err(|e| errors::db_error(&e));
+        }
+        tokio::pin!(run);
+        let result = tokio::select! {
+            r = &mut run => return r.map_err(|e| errors::db_error(&e)),
+            () = tokio::time::sleep(Duration::from_millis(ms)) => {
+                let _ = self.cancel_token.cancel_query(self.tls.clone()).await;
+                run.await
+            }
+        };
+        result.map_err(|e| {
+            let mut e = errors::db_error(&e);
+            if e.sqlstate.as_deref() == Some("57014") {
+                e.message = format!(
+                    "Cancelled by the statement timeout after {}.",
+                    if ms.is_multiple_of(1000) {
+                        format!("{} s", ms / 1000)
+                    } else {
+                        format!("{ms} ms")
+                    }
+                );
+                e.hint = Some("Change the limit in Settings (0 means no limit).".into());
+                // Shown as an error with its reason, not as a user cancel.
+                e.cancelled = false;
+            }
+            e
+        })
     }
 
     async fn with_client<T>(
@@ -285,7 +330,27 @@ impl Session for PgSession {
     async fn execute(&self, sql: &str, options: &ExecOptions) -> Result<StatementOutcome, DbError> {
         let guard = self.client.read().await;
         let client = guard.as_ref().ok_or_else(errors::session_closed)?;
-        self.execute_in_tx(client, sql, options).await
+        self.execute_in_tx(client, sql, &[], options).await
+    }
+
+    async fn execute_params(
+        &self,
+        sql: &str,
+        params: &[Cell],
+        options: &ExecOptions,
+    ) -> Result<StatementOutcome, DbError> {
+        let guard = self.client.read().await;
+        let client = guard.as_ref().ok_or_else(errors::session_closed)?;
+        self.execute_in_tx(client, sql, params, options).await
+    }
+
+    fn set_notice_sink(&self, sink: Option<NoticeSink>) {
+        *self.notices.lock().unwrap_or_else(|p| p.into_inner()) = sink;
+    }
+
+    async fn set_statement_timeout(&self, ms: u64) -> Result<(), DbError> {
+        self.statement_timeout_ms.store(ms, Ordering::Relaxed);
+        Ok(())
     }
 
     async fn fetch(
@@ -579,10 +644,33 @@ async fn open(
         };
 
     let closed = Arc::new(AtomicBool::new(false));
+    let notices: Arc<std::sync::Mutex<Option<NoticeSink>>> = Arc::default();
     let task = {
         let closed = Arc::clone(&closed);
+        let notices = Arc::clone(&notices);
+        let mut connection = connection;
         tokio::spawn(async move {
-            let result = connection.await;
+            // Driving the connection by messages (rather than awaiting it) surfaces notices,
+            // which are handed to the current sink in the order the server sent them.
+            let result = loop {
+                match std::future::poll_fn(|cx| connection.poll_message(cx)).await {
+                    Some(Ok(AsyncMessage::Notice(n))) => {
+                        let sink = notices.lock().unwrap_or_else(|p| p.into_inner()).clone();
+                        if let Some(sink) = sink {
+                            sink(Notice {
+                                severity: n.severity().to_owned(),
+                                message: n.message().to_owned(),
+                                detail: n.detail().map(str::to_owned),
+                                hint: n.hint().map(str::to_owned),
+                                sqlstate: n.code().code().to_owned(),
+                            });
+                        }
+                    }
+                    Some(Ok(_)) => {}
+                    Some(Err(e)) => break Err(e),
+                    None => break Ok(()),
+                }
+            };
             let deliberate = closed.swap(true, Ordering::SeqCst);
             if let Some(cb) = on_close {
                 cb(match result {
@@ -631,6 +719,8 @@ async fn open(
         cursors: exec::Cursors::default(),
         params: params.clone(),
         tx: std::sync::Mutex::new(TxState::default()),
+        notices,
+        statement_timeout_ms: AtomicU64::new(0),
         client: RwLock::new(Some(client)),
         info,
         closed,

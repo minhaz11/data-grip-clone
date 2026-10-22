@@ -3,10 +3,11 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Instant;
 
-use quarry_db_core::{DbError, ExecOptions, Session, StatementOutcome};
+use quarry_db_core::{Cell, DbError, ExecOptions, Notice, Session, StatementOutcome};
+use quarry_store::Store;
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, State};
@@ -25,6 +26,10 @@ pub struct StatementRequest {
     pub sql: String,
     /// Where the statement starts in the console text; echoed back so the UI can map positions.
     pub offset: u32,
+    /// Values for `$1…$n` (text; `null` is NULL), bound rather than spliced into the SQL.
+    #[serde(default)]
+    #[cfg_attr(test, ts(optional))]
+    pub params: Option<Vec<Cell>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -103,6 +108,11 @@ pub enum ExecEvent {
         elapsed_ms: u64,
         error: StatementError,
     },
+    /// A server notice (`RAISE NOTICE`, warnings) raised while statement `index` ran.
+    Notice {
+        index: usize,
+        notice: Notice,
+    },
     Finished {
         status: JobStatus,
         executed: usize,
@@ -131,6 +141,7 @@ impl Jobs {
         app: &AppHandle,
         sessions: &Arc<Sessions>,
         request: ExecRequest,
+        timeout_ms: u64,
         channel: Channel<ExecEvent>,
     ) -> Result<String, AppError> {
         if request.statements.is_empty() {
@@ -164,10 +175,14 @@ impl Jobs {
             );
         }
         // After the busy check, so it never runs between another job's statements.
-        if let Err(e) = sessions
+        let prepared = match sessions
             .apply_schema(&key, &session, request.schema.as_deref())
             .await
         {
+            Ok(()) => sessions.apply_timeout(&key, &session, timeout_ms).await,
+            Err(e) => Err(e),
+        };
+        if let Err(e) = prepared {
             self.running.lock().await.remove(&job_id);
             return Err(e);
         }
@@ -213,7 +228,18 @@ impl Jobs {
         let started = Instant::now();
         let mut status = JobStatus::Completed;
         let mut executed = 0;
+        // Notices go to this job's channel, tagged with the statement running when they came.
+        let current = Arc::new(AtomicUsize::new(0));
+        {
+            let current = Arc::clone(&current);
+            let channel = channel.clone();
+            job.session.set_notice_sink(Some(Arc::new(move |notice| {
+                let index = current.load(Ordering::SeqCst);
+                let _ = channel.send(ExecEvent::Notice { index, notice });
+            })));
+        }
         for (index, statement) in statements.iter().enumerate() {
+            current.store(index, Ordering::SeqCst);
             if job.cancel_requested.load(Ordering::SeqCst) {
                 status = JobStatus::Cancelled;
                 break;
@@ -222,7 +248,14 @@ impl Jobs {
             let _ = channel.send(ExecEvent::StatementStarted { index, offset });
             let at = Instant::now();
             let tx_before = job.session.tx_status();
-            let result = job.session.execute(&statement.sql, &options).await;
+            let result = match &statement.params {
+                Some(params) if !params.is_empty() => {
+                    job.session
+                        .execute_params(&statement.sql, params, &options)
+                        .await
+                }
+                _ => job.session.execute(&statement.sql, &options).await,
+            };
             executed += 1;
             if job.session.tx_status() != tx_before {
                 sessions.emit_state(app, &job.key).await;
@@ -261,6 +294,7 @@ impl Jobs {
                 }
             }
         }
+        job.session.set_notice_sink(None);
         let elapsed_ms = millis(started);
         tracing::info!(job = %job_id, ?status, executed, elapsed_ms, "query job finished");
         let _ = channel.send(ExecEvent::Finished {
@@ -285,11 +319,14 @@ pub async fn query_execute(
     app: AppHandle,
     jobs: State<'_, Arc<Jobs>>,
     sessions: State<'_, Arc<Sessions>>,
+    store: State<'_, Arc<Store>>,
     request: ExecRequest,
     on_event: Channel<ExecEvent>,
 ) -> Result<String, AppError> {
+    let settings = crate::commands::with_store(&store, |s| s.settings()).await?;
+    let timeout_ms = u64::from(settings.statement_timeout_secs) * 1000;
     jobs.inner()
-        .start(&app, sessions.inner(), request, on_event)
+        .start(&app, sessions.inner(), request, timeout_ms, on_event)
         .await
 }
 
@@ -337,6 +374,20 @@ mod tests {
                 connection_lost: false,
             },
         };
+        let notice = ExecEvent::Notice {
+            index: 2,
+            notice: Notice {
+                severity: "NOTICE".into(),
+                message: "hello".into(),
+                detail: None,
+                hint: None,
+                sqlstate: "00000".into(),
+            },
+        };
+        assert_eq!(
+            serde_json::to_value(&notice).expect("encode"),
+            serde_json::json!({ "event": "notice", "index": 2, "notice": { "severity": "NOTICE", "message": "hello", "detail": null, "hint": null, "sqlstate": "00000" } })
+        );
         let json = serde_json::to_value(&failed).expect("encode");
         assert_eq!(json["elapsedMs"], 1);
         assert_eq!(json["error"]["connectionLost"], false);

@@ -3270,6 +3270,7 @@ name = "quarry-db-postgres"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bytes",
  "csv",
  "futures-util",
  "quarry-db-core",

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { MetaNode } from '../../ipc/types';
+import type { ForeignKeyDetail, MetaNode } from '../../ipc/types';
 import { completionContextAt, tablesInStatement } from '../../lib/sql/completionContext';
 import { resolveRelation } from './catalog';
-import { buildSuggestions, quoteIdent, type CatalogAccess } from './suggestions';
+import { buildSuggestions, fuzzyScore, quoteIdent, type CatalogAccess } from './suggestions';
 
 const rel = (schema: string, name: string, kind: MetaNode['kind'] = 'table'): MetaNode => ({
   key: `${schema}.${name}`,
@@ -100,5 +100,135 @@ describe('completion suggestions', () => {
     expect(resolveRelation(RELATIONS, { table: 'users' })?.detail).toBe('public');
     expect(resolveRelation(RELATIONS, { schema: 'shop', table: 'users' })?.detail).toBe('shop');
     expect(resolveRelation(RELATIONS, { table: 'nope' })).toBeUndefined();
+  });
+
+  it('ranks an exact prefix first, then initials, word starts and letters in order', () => {
+    expect(fuzzyScore('ord', 'orders')).toBe(0);
+    expect(fuzzyScore('oi', 'order_items')).toBe(1);
+    expect(fuzzyScore('it', 'order_items')).toBe(2);
+    expect(fuzzyScore('odr', 'orders')).toBe(3);
+    expect(fuzzyScore('xyz', 'orders')).toBeNull();
+    expect(fuzzyScore('ci', 'customerId')).toBe(1);
+  });
+});
+
+const fk = (
+  from: [string, string, string[]],
+  to: [string, string, string[]],
+  name: string,
+): ForeignKeyDetail => ({
+  name,
+  fromSchema: from[0],
+  fromTable: from[1],
+  fromColumns: from[2],
+  toSchema: to[0],
+  toTable: to[1],
+  toColumns: to[2],
+  onUpdate: 'NO ACTION',
+  onDelete: 'NO ACTION',
+  deferrable: false,
+});
+
+const SHOP = [
+  rel('shop', 'customers'),
+  rel('shop', 'orders'),
+  rel('shop', 'order_items'),
+  rel('public', 'users'),
+];
+const LINKS: Record<string, ForeignKeyDetail[]> = {
+  'shop.orders': [
+    fk(
+      ['shop', 'orders', ['customer_id']],
+      ['shop', 'customers', ['id']],
+      'orders_customer_id_fkey',
+    ),
+    fk(
+      ['shop', 'order_items', ['order_id']],
+      ['shop', 'orders', ['id']],
+      'order_items_order_id_fkey',
+    ),
+  ],
+};
+const fn = (
+  schema: string,
+  name: string,
+  args: string,
+  result: string,
+  flags?: string[],
+): MetaNode => ({
+  key: `${schema}\u001f${name}(${args})`,
+  kind: 'routine',
+  name,
+  detail: `(${args}) → ${result}`,
+  ...(flags ? { flags } : {}),
+});
+const shopCatalog = (searchPath?: string[]): CatalogAccess => ({
+  relations: SHOP,
+  columnsOf: async () => [],
+  linksOf: async (r) => LINKS[r.key] ?? [],
+  functions: [
+    fn('shop', 'order_total', 'order_id bigint', 'numeric'),
+    fn('pg_catalog', 'count', '"any"', 'bigint', ['aggregate']),
+    fn('pg_catalog', 'lower', 'text', 'text'),
+    fn('pg_catalog', 'lower', 'anymultirange', 'anyelement'),
+  ],
+  ...(searchPath ? { searchPath } : {}),
+});
+
+async function suggestIn(sqlWithCaret: string, access: CatalogAccess) {
+  const offset = sqlWithCaret.indexOf('|');
+  const sql = sqlWithCaret.replace('|', '');
+  const { context, statement } = completionContextAt(sql, offset);
+  return buildSuggestions(context, tablesInStatement(statement), access);
+}
+
+describe('functions, joins and the search path', () => {
+  it('suggests JOIN … ON from foreign keys in both directions', async () => {
+    const items = await suggestIn('select * from shop.orders o join |', shopCatalog());
+    const joins = items.filter((i) => i.kind === 'join');
+    expect(joins.map((j) => j.insertText)).toEqual([
+      'shop.customers c ON c.id = o.customer_id',
+      'shop.order_items oi ON oi.order_id = o.id',
+    ]);
+    expect(items[0]?.kind).toBe('join'); // joins come first
+    expect(joins[0]?.detail).toBe('foreign key orders_customer_id_fkey');
+    // No joins outside JOIN position.
+    expect(
+      (await suggestIn('select * from shop.orders o, |', shopCatalog())).some(
+        (i) => i.kind === 'join',
+      ),
+    ).toBe(false);
+  });
+
+  it('offers functions with signatures, one per name, qualified outside the search path', async () => {
+    const items = await suggestIn('select lo|', shopCatalog());
+    const lower = items.find((i) => i.kind === 'function' && i.label === 'lower');
+    expect(lower).toMatchObject({ insertText: 'lower($0)', snippet: true });
+    expect(lower?.detail).toBe('(text) → text (+1 more)');
+    const all = await suggestIn('select |', shopCatalog());
+    expect(all.find((i) => i.label === 'order_total')?.insertText).toBe('shop.order_total($0)');
+    expect(
+      (await suggestIn('select |', shopCatalog(['shop', 'public']))).find(
+        (i) => i.label === 'order_total',
+      )?.insertText,
+    ).toBe('order_total($0)');
+  });
+
+  it('resolves unqualified names through the console schema', async () => {
+    // With the console schema "shop", `orders` needs no qualifier and its columns resolve.
+    // `users` exists in public and shop: the console schema decides.
+    expect(resolveRelation(RELATIONS, { table: 'users' })?.detail).toBe('public');
+    expect(resolveRelation(RELATIONS, { table: 'users' }, ['shop', 'public'])?.detail).toBe('shop');
+    const items = await suggestIn('select * from or|', shopCatalog(['shop', 'public']));
+    expect(items.find((i) => i.label === 'orders')?.insertText).toBe('orders');
+    const joins = await suggestIn('select * from orders o join |', shopCatalog(['shop', 'public']));
+    expect(joins[0]?.insertText).toBe('customers c ON c.id = o.customer_id');
+  });
+
+  it('filters by the typed word, exact prefix first', async () => {
+    const items = await suggestIn('select * from oi|', shopCatalog());
+    expect(items.map((i) => i.label)).toEqual(['order_items']);
+    const ord = (await suggestIn('select * from or|', shopCatalog())).map((i) => i.label);
+    expect(ord.slice(0, 2)).toEqual(['orders', 'order_items']);
   });
 });

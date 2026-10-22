@@ -90,6 +90,8 @@ pub struct Sessions {
     defaults: Mutex<HashMap<String, TxSettings>>,
     /// The schema this app last put first in each live session's search path.
     schemas: Mutex<HashMap<SessionKey, Option<String>>>,
+    /// Statement timeout (ms) applied per session, so it is only set again when it changes.
+    timeouts: Mutex<HashMap<SessionKey, u64>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -105,6 +107,7 @@ impl Sessions {
             chosen: Default::default(),
             defaults: Default::default(),
             schemas: Default::default(),
+            timeouts: Default::default(),
         }
     }
 
@@ -168,6 +171,7 @@ impl Sessions {
         lock(&self.defaults).insert(id.to_owned(), defaults);
         session.set_tx_settings(self.settings_for(&key));
         lock(&self.schemas).remove(&key);
+        lock(&self.timeouts).remove(&key);
         let stale = self.live.lock().await.insert(key.clone(), session);
         if let Some(stale) = stale {
             stale.close().await;
@@ -218,6 +222,7 @@ impl Sessions {
         let session = shared.fork(self.on_close(app, key)).await?;
         session.set_tx_settings(self.settings_for(key));
         lock(&self.schemas).remove(key);
+        lock(&self.timeouts).remove(key);
         tracing::info!(source = %key.source_id, console = ?key.console, "console session opened");
         let stale = self.live.lock().await.insert(key.clone(), session.clone());
         if let Some(stale) = stale {
@@ -242,6 +247,23 @@ impl Sessions {
         }
         session.set_schema(schema).await?;
         lock(&self.schemas).insert(key.clone(), schema.map(str::to_owned));
+        Ok(())
+    }
+
+    /// Sets the session's statement timeout unless it already has `ms`.
+    pub async fn apply_timeout(
+        &self,
+        key: &SessionKey,
+        session: &Arc<dyn Session>,
+        ms: u64,
+    ) -> Result<(), AppError> {
+        // A new session starts with the server default (normally no limit).
+        let current = lock(&self.timeouts).get(key).copied().unwrap_or(0);
+        if current == ms {
+            return Ok(());
+        }
+        session.set_statement_timeout(ms).await?;
+        lock(&self.timeouts).insert(key.clone(), ms);
         Ok(())
     }
 
@@ -329,6 +351,7 @@ impl Sessions {
         }
         let session = self.live.lock().await.remove(key);
         lock(&self.schemas).remove(key);
+        lock(&self.timeouts).remove(key);
         if let Some(s) = session {
             s.close().await; // on_close emits the closed state
         }
@@ -339,6 +362,7 @@ impl Sessions {
     pub async fn drop_session(&self, app: &AppHandle, key: &SessionKey) {
         let session = self.live.lock().await.remove(key);
         lock(&self.schemas).remove(key);
+        lock(&self.timeouts).remove(key);
         let Some(session) = session else { return };
         session.abort();
         tracing::warn!(source = %key.source_id, console = ?key.console, "session dropped");
@@ -379,6 +403,7 @@ impl Sessions {
         };
         for (key, session) in sessions {
             lock(&self.schemas).remove(&key);
+            lock(&self.timeouts).remove(&key);
             session.close().await; // on_close emits `Disconnected` / the closed state
         }
     }

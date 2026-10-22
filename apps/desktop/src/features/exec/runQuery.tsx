@@ -1,13 +1,16 @@
 import { isConsole, useWorkspace } from '../../app/workspaceStore';
-import { askConfirm, askPasswordAndConnect } from '../../app/dialogs';
-import type { StatementRequest } from '../../ipc/types';
+import { askConfirm, askCustom, askPasswordAndConnect } from '../../app/dialogs';
+import { useSettings } from '../../app/settingsStore';
+import type { Cell, Settings, StatementRequest } from '../../ipc/types';
 import { blockedOnReadOnly, classify, modifies } from '../../lib/sql/classify';
-import { splitStatements, statementAt } from '../../lib/sql/statements';
+import { bindParameters, findParameters, parameterNames } from '../../lib/sql/params';
+import { splitStatements, statementAt, statementContaining } from '../../lib/sql/statements';
 import { useConnections } from '../connections/connectionsStore';
 import { effectiveColor } from '../connections/model';
 import { useSessions } from '../connections/sessionsStore';
 import { activeEditor } from '../editor/editorHandle';
-import { isRunning, useExec } from './execStore';
+import { isRunning, useExec, type RunStatement } from './execStore';
+import { ParamsDialog, StatementChooser, type ChoosableStatement } from './RunDialogs';
 import { keyOf, sessionOf, useTx } from './txStore';
 
 export type RunMode = 'current' | 'script';
@@ -32,6 +35,41 @@ export function pickStatements(
   return span ? [{ sql: text.slice(span.start, span.end), offset: span.start }] : [];
 }
 
+export interface RunPlan {
+  statements: StatementRequest[];
+  /** The user picks from these first (the chooser settings). */
+  ask?: { title: string; options: StatementRequest[]; allowAll: boolean };
+}
+
+/**
+ * What Run executes, following the settings (REQ-EDIT-04): a selection of several statements
+ * runs them all or asks; a caret outside every statement runs the nearest one or asks.
+ */
+export function planRun(
+  text: string,
+  selection: { start: number; end: number },
+  caret: number,
+  mode: RunMode,
+  policy: Pick<Settings, 'runOutsideStatement' | 'runSelection'>,
+): RunPlan {
+  const statements = pickStatements(text, selection, caret, mode);
+  if (selection.end > selection.start) {
+    return statements.length > 1 && policy.runSelection === 'ask'
+      ? {
+          statements,
+          ask: { title: 'Run which statements?', options: statements, allowAll: true },
+        }
+      : { statements };
+  }
+  if (mode === 'current' && !statementContaining(text, caret)) {
+    const all = pickStatements(text, selection, caret, 'script');
+    if (all.length > 1 && policy.runOutsideStatement === 'ask') {
+      return { statements, ask: { title: 'Run which statement?', options: all, allowAll: false } };
+    }
+  }
+  return { statements };
+}
+
 const firstLine = (sql: string) => {
   const line = sql.split('\n').find((l) => l.trim() && !l.trim().startsWith('--')) ?? sql;
   return line.length > 80 ? `${line.slice(0, 80)}…` : line;
@@ -53,12 +91,29 @@ export async function runFromEditor(mode: RunMode): Promise<void> {
     return;
   }
 
-  const statements = pickStatements(
+  const plan = planRun(
     editor.getText(),
     editor.getSelection(),
     editor.getCaret(),
     mode,
+    useSettings.getState().settings,
   );
+  let statements: StatementRequest[] = plan.statements;
+  const ask = plan.ask;
+  if (ask) {
+    const chosen = await askCustom<ChoosableStatement[]>((done) => (
+      <StatementChooser
+        title={ask.title}
+        statements={ask.options}
+        allowAll={ask.allowAll}
+        onDone={done}
+      />
+    ));
+    if (!chosen) {
+      return;
+    }
+    statements = chosen;
+  }
   if (statements.length === 0) return;
 
   // Guards: read-only blocks, destructive or production writes need explicit confirmation.
@@ -111,6 +166,33 @@ export async function runFromEditor(mode: RunMode): Promise<void> {
     if (!ok) return;
   }
 
+  // Parameters (`:name`, `${name}`, `$1`) are asked for once per run and bound, not spliced in.
+  let toRun: RunStatement[] = statements;
+  const names = parameterNames(statements.map((s) => s.sql));
+  if (names.length > 0) {
+    const values = await askCustom<Record<string, Cell>>((done) => (
+      <ParamsDialog names={names} initial={tab.params ?? {}} onDone={done} />
+    ));
+    if (!values) {
+      return;
+    }
+    ws.setParams(tab.id, values);
+    toRun = statements.map((s) => {
+      const own = [...new Set(findParameters(s.sql).map((p) => p.name))];
+      if (own.length === 0) {
+        return s;
+      }
+      const bound = bindParameters(s.sql, values);
+      return {
+        sql: bound.sql,
+        offset: s.offset,
+        params: bound.params,
+        text: s.sql,
+        paramValues: own.map((n) => [n, values[n] ?? null] as [string, Cell]),
+      };
+    });
+  }
+
   if (useSessions.getState().byId[source.id]?.state !== 'connected') {
     const error = await useSessions.getState().connect(source.id);
     if (error?.connectKind === 'password_required') {
@@ -133,7 +215,7 @@ export async function runFromEditor(mode: RunMode): Promise<void> {
   editor.clearMarkers();
   ws.setBottomCollapsed(false);
   const options = { schema: tab.schema ?? null, txMode };
-  await exec.start(tab.id, session, source.name, statements, options, (failed) => {
+  await exec.start(tab.id, session, source.name, toRun, options, (failed) => {
     const e = failed.error;
     if (!e) return;
     // Server positions are 1-based characters within the statement; underline the next word.

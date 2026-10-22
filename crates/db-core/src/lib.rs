@@ -22,7 +22,8 @@ pub use details::{
 };
 pub use exec::{
     Cell, ColumnInfo, ColumnValue, EditColumn, EditStatement, EditTarget, Editability,
-    ErrorPosition, ExecOptions, Filter, FilterOp, Refinement, RowChange, SortKey, StatementOutcome,
+    ErrorPosition, ExecOptions, Filter, FilterOp, Notice, NoticeSink, Refinement, RowChange,
+    SortKey, StatementOutcome,
 };
 pub use metadata::{MetaKind, MetaNode, MetadataRequest, ObjectType};
 pub use schema::{
@@ -196,6 +197,34 @@ pub trait Session: Send + Sync {
     async fn apply_schema(&self, statements: &[String]) -> Result<(), DbError>;
     /// Runs one statement exactly as given (no parameters, no rewriting).
     async fn execute(&self, sql: &str, options: &ExecOptions) -> Result<StatementOutcome, DbError>;
+    /// Runs one statement with `$1…$n` bound to `params` (text values the server converts to
+    /// the types it infers; `None` is NULL). Values never become part of the SQL text.
+    async fn execute_params(
+        &self,
+        sql: &str,
+        params: &[Cell],
+        options: &ExecOptions,
+    ) -> Result<StatementOutcome, DbError> {
+        if params.is_empty() {
+            self.execute(sql, options).await
+        } else {
+            Err(DbError {
+                message: "This data source does not support statement parameters.".into(),
+                detail: None,
+                hint: None,
+                sqlstate: None,
+                position: None,
+                connection_lost: false,
+                cancelled: false,
+            })
+        }
+    }
+    /// Delivers notices raised from now on to `sink` (or drops them with `None`).
+    fn set_notice_sink(&self, _sink: Option<NoticeSink>) {}
+    /// Cancels statements running longer than `ms` milliseconds (0 = no limit), for this session.
+    async fn set_statement_timeout(&self, _ms: u64) -> Result<(), DbError> {
+        Ok(())
+    }
     /// Asks the server to cancel whatever this session is running. Returns once the request is
     /// delivered; the running `execute` then fails with `cancelled = true`.
     async fn cancel(&self) -> Result<(), DbError>;

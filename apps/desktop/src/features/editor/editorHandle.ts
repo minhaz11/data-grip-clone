@@ -11,6 +11,8 @@ export interface EditorHandle {
   /** Underlines `[start, end)` as an error with `message`; replaces any previous marker. */
   markError(start: number, end: number, message: string): void;
   clearMarkers(): void;
+  /** Error markers in the text, in order. */
+  errors(): { start: number; end: number; message: string }[];
 }
 
 let active: EditorHandle | null = null;
@@ -36,4 +38,26 @@ export interface SqlEditorProps {
   onFormatError(message: string): void;
   /** Shows text that cannot be edited (generated DDL); Format does nothing. */
   readOnly?: boolean;
+}
+
+/**
+ * Moves the caret to the next (or previous) error marker after (or before) it, wrapping around
+ * (REQ-ERR-02). Returns the marker's message, or `null` when there are no errors.
+ */
+export function goToError(direction: 1 | -1): string | null {
+  const editor = active;
+  const errors = editor?.errors() ?? [];
+  if (!editor || errors.length === 0) {
+    return null;
+  }
+  const caret = editor.getCaret();
+  const target =
+    direction === 1
+      ? (errors.find((e) => e.start > caret) ?? errors[0])
+      : ([...errors].reverse().find((e) => e.start < caret) ?? errors[errors.length - 1]);
+  if (!target) {
+    return null;
+  }
+  editor.revealOffset(target.start);
+  return target.message;
 }

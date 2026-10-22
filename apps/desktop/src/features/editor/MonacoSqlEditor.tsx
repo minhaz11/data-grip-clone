@@ -3,9 +3,15 @@ import EditorWorker from 'monaco-esm/editor/editor.worker.js?worker';
 import * as monaco from './monaco/entry';
 import { completionContextAt, tablesInStatement } from '../../lib/sql/completionContext';
 import { formatSql } from '../../lib/sql/format';
-import { useWorkspace } from '../../app/workspaceStore';
+import { isConsole, useWorkspace } from '../../app/workspaceStore';
 import { useSessions } from '../connections/sessionsStore';
-import { catalogColumns, catalogRelations } from './catalog';
+import {
+  catalogColumns,
+  catalogFunctions,
+  catalogLinks,
+  catalogRelations,
+  searchPathOf,
+} from './catalog';
 import { setActiveEditor, type SqlEditorProps } from './editorHandle';
 import { buildSuggestions, type SuggestionKind } from './suggestions';
 
@@ -77,6 +83,8 @@ const KIND: Record<SuggestionKind, monaco.languages.CompletionItemKind> = {
   table: monaco.languages.CompletionItemKind.Struct,
   view: monaco.languages.CompletionItemKind.Interface,
   column: monaco.languages.CompletionItemKind.Field,
+  function: monaco.languages.CompletionItemKind.Function,
+  join: monaco.languages.CompletionItemKind.Reference,
 };
 
 monaco.languages.registerCompletionItemProvider('pgsql', {
@@ -88,11 +96,18 @@ monaco.languages.registerCompletionItemProvider('pgsql', {
     const sourceId = tab?.sourceId ?? null;
     // Completion never connects on its own; without a live session it offers keywords only.
     const live = sourceId !== null && useSessions.getState().byId[sourceId]?.state === 'connected';
-    const relations = live ? await catalogRelations(sourceId) : [];
+    const [relations, functions] = live
+      ? await Promise.all([catalogRelations(sourceId), catalogFunctions(sourceId)])
+      : [[], []];
     const items = await buildSuggestions(context, tablesInStatement(statement), {
       relations,
+      functions,
       columnsOf: (r) =>
         live && r.detail ? catalogColumns(sourceId, r.detail, r.name) : Promise.resolve([]),
+      linksOf: (r) =>
+        live && r.detail ? catalogLinks(sourceId, r.detail, r.name) : Promise.resolve([]),
+      // Unqualified names resolve through the console's schema first (REQ-EDIT-11).
+      searchPath: searchPathOf(isConsole(tab) ? tab.schema : null),
     });
     const word = model.getWordUntilPosition(position);
     const range = new monaco.Range(
@@ -101,13 +116,20 @@ monaco.languages.registerCompletionItemProvider('pgsql', {
       position.lineNumber,
       word.endColumn,
     );
+    // The list is already filtered and ranked (fuzzy, REQ-EDIT-07): Monaco keeps that order,
+    // matches everything against the typed word, and asks again as typing continues.
     return {
-      suggestions: items.map((s) => ({
+      incomplete: true,
+      suggestions: items.map((s, i) => ({
         label: s.label,
         kind: KIND[s.kind],
         insertText: s.insertText,
+        insertTextRules: s.snippet
+          ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
+          : undefined,
         detail: s.detail,
-        sortText: `${s.rank}${s.label.toLowerCase()}`,
+        sortText: String(i).padStart(6, '0'),
+        filterText: word.word || s.label,
         range,
       })),
     };
@@ -211,6 +233,20 @@ export default function MonacoSqlEditor({
       clearMarkers: () => {
         const m = model();
         if (m) monaco.editor.setModelMarkers(m, 'quarry-exec', []);
+      },
+      errors: () => {
+        const m = model();
+        if (!m) {
+          return [];
+        }
+        return monaco.editor
+          .getModelMarkers({ owner: 'quarry-exec', resource: m.uri })
+          .map((k) => ({
+            start: m.getOffsetAt({ lineNumber: k.startLineNumber, column: k.startColumn }),
+            end: m.getOffsetAt({ lineNumber: k.endLineNumber, column: k.endColumn }),
+            message: k.message,
+          }))
+          .sort((a, b) => a.start - b.start);
       },
     });
 

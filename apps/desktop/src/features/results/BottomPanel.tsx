@@ -69,7 +69,7 @@ export function BottomPanel() {
             No query has been run.
           </div>
         ) : view === 'output' || typeof view === 'string' || results.length === 0 ? (
-          <OutputLog run={run} />
+          <OutputLog tabId={tabId ?? ''} run={run} />
         ) : (
           <ResultView
             run={run}
@@ -135,8 +135,44 @@ function RunSummary({ run }: { run: Run }) {
     <span className="ml-auto flex items-center gap-2 px-3 text-muted" aria-live="polite">
       {label}
       {run.status !== 'rejected' && <span className="tabular-nums">{formatMs(elapsed)}</span>}
+      {run.longRunning && <span className="font-semibold text-fg">· long-running query</span>}
     </span>
   );
+}
+
+function modeText(run: Run): string {
+  return run.txMode === 'manual' ? 'manual transaction' : run.txMode ? 'auto-commit' : '';
+}
+
+function statusText(run: Run): string {
+  switch (run.status) {
+    case 'starting':
+    case 'running':
+      return 'Running';
+    case 'rejected':
+      return 'Not run';
+    case 'completed':
+      return 'Completed';
+    case 'cancelled':
+      return 'Cancelled';
+    default:
+      return 'Failed';
+  }
+}
+
+/** Whether a statement line matches the output search (statement, error, notices, summary). */
+function matches(st: StatementRun, query: string): boolean {
+  if (!query) {
+    return true;
+  }
+  const q = query.toLowerCase();
+  const texts = [
+    st.sql,
+    st.error?.message,
+    st.outcome ? summary(st.outcome) : undefined,
+    ...(st.notices ?? []).map((n) => n.message),
+  ];
+  return texts.some((t) => t?.toLowerCase().includes(q));
 }
 
 export function formatMs(ms: number): string {
@@ -154,27 +190,85 @@ function summary(o: StatementOutcome): string {
     : `${n} ${o.totalRows === 1 ? 'row' : 'rows'}`;
 }
 
-function OutputLog({ run }: { run: Run }) {
-  if (run.status === 'rejected') {
-    return (
-      <p role="alert" className="m-3 text-danger select-text">
-        {run.error}
-      </p>
-    );
-  }
+/**
+ * The console's output log (REQ-ERR-01): every run since the last Clear, each with its time,
+ * data source, transaction mode and status, then its statements with timings, outcomes,
+ * parameter values, notices and errors. Searchable.
+ */
+function OutputLog({ tabId, run }: { tabId: string; run: Run }) {
+  const history = useExec((s) => s.history[tabId]);
+  const clearedAt = useExec((s) => s.clearedAt[tabId]) ?? 0;
+  const clearOutput = useExec((s) => s.clearOutput);
+  const [query, setQuery] = useState('');
+  const runs = [...(history ?? []), run].filter((r) => r.startedAt > clearedAt);
+
   return (
-    <ol
-      className="divide-y divide-border font-mono text-[12px] select-text"
-      aria-label="Statement output"
-    >
-      {run.statements.map((st) => (
-        <OutputLine key={st.index} st={st} />
-      ))}
-    </ol>
+    <div className="flex h-full flex-col">
+      <div className="flex shrink-0 items-center gap-2 border-b border-border px-2 py-1">
+        <input
+          type="search"
+          aria-label="Search output"
+          placeholder="Search output"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          className="w-64 rounded border border-border bg-bg px-2 py-0.5 text-[12px]"
+        />
+        <button
+          type="button"
+          onClick={() => clearOutput(tabId)}
+          disabled={runs.length === 0}
+          className="rounded px-1.5 py-0.5 text-[12px] hover:bg-hover disabled:opacity-40"
+        >
+          Clear output
+        </button>
+      </div>
+      <ol
+        className="min-h-0 flex-1 divide-y divide-border overflow-auto font-mono text-[12px] select-text"
+        aria-label="Statement output"
+      >
+        {runs.map((r) => {
+          const current = r === run;
+          const lines = r.statements.filter((st) => matches(st, query));
+          if (
+            query &&
+            lines.length === 0 &&
+            !(r.error ?? '').toLowerCase().includes(query.toLowerCase())
+          ) {
+            return null;
+          }
+          return (
+            <li key={`${r.startedAt}:${r.tabId}`}>
+              <p className="bg-panel px-3 py-0.5 font-sans text-[11px] text-muted">
+                <time>{new Date(r.startedAt).toLocaleTimeString()}</time>
+                {' · '}
+                {r.sourceName || 'no data source'}
+                {modeText(r) && ` · ${modeText(r)}`}
+                {' · '}
+                {statusText(r)}
+                {r.elapsedMs !== undefined && ` in ${formatMs(r.elapsedMs)}`}
+              </p>
+              {r.status === 'rejected' && r.error && (
+                <p
+                  role={current ? 'alert' : undefined}
+                  className="px-3 py-1.5 font-sans text-danger"
+                >
+                  {r.error}
+                </p>
+              )}
+              <ol>
+                {lines.map((st) => (
+                  <OutputLine key={st.index} st={st} current={current} />
+                ))}
+              </ol>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
   );
 }
 
-function OutputLine({ st }: { st: StatementRun }) {
+function OutputLine({ st, current }: { st: StatementRun; current: boolean }) {
   const Icon = {
     pending: Circle,
     running: LoaderCircle,
@@ -185,7 +279,8 @@ function OutputLine({ st }: { st: StatementRun }) {
   const e = st.error;
   // Where the error is in the console text, as editor line:column.
   const errorOffset = e?.position ? st.offset + e.position - 1 : null;
-  const editor = activeEditor();
+  // Positions point into the console text only for the current run (it may have changed since).
+  const editor = current ? activeEditor() : null;
   const where =
     errorOffset !== null && editor ? caretPosition(editor.getText(), errorOffset) : null;
 
@@ -207,6 +302,27 @@ function OutputLine({ st }: { st: StatementRun }) {
           {firstLine}
           {st.sql.includes('\n') && ' …'}
         </p>
+        {st.params && st.params.length > 0 && (
+          <p className="font-sans text-muted">
+            Parameters:{' '}
+            {st.params
+              .map(
+                ([name, value]) =>
+                  `${/^\d+$/.test(name) ? '$' : ':'}${name} = ${value === null ? 'NULL' : `'${value}'`}`,
+              )
+              .join(', ')}
+          </p>
+        )}
+        {st.notices?.map((n, i) => (
+          <p key={i} className="font-sans">
+            <span className={n.severity === 'WARNING' ? 'font-semibold' : 'text-muted'}>
+              {n.severity}:
+            </span>{' '}
+            {n.message}
+            {n.detail && <span className="text-muted"> ({n.detail})</span>}
+            {n.hint && <span className="text-muted"> Hint: {n.hint}</span>}
+          </p>
+        ))}
         {st.outcome && <p className="font-sans text-muted">{summary(st.outcome)}</p>}
         {e && (
           <div className="font-sans">

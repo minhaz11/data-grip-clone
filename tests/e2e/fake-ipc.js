@@ -11,7 +11,15 @@
   const state = {
     calls: [],
     unhandled: [],
-    settings: { theme: 'light', editorFontSize: 13, resultTabs: 'reuse' },
+    settings: {
+      theme: 'light',
+      editorFontSize: 13,
+      resultTabs: 'reuse',
+      statementTimeoutSecs: 0,
+      longQuerySecs: 20,
+      runOutsideStatement: 'nearest',
+      runSelection: 'all',
+    },
     workspace: null,
     connections: [],
     consoles: new Map(),
@@ -240,6 +248,20 @@
           ? ROWS
           : { type: 'command', rowsAffected: 1 };
         messages.push({ event: 'statementStarted', index, offset: statement.offset });
+        const notice = /raise notice '([^']*)'/i.exec(statement.sql);
+        if (notice) {
+          messages.push({
+            event: 'notice',
+            index,
+            notice: {
+              severity: 'NOTICE',
+              message: notice[1],
+              detail: null,
+              hint: null,
+              sqlstate: '00000',
+            },
+          });
+        }
         messages.push({
           event: 'statementDone',
           index,

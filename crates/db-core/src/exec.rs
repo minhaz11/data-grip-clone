@@ -241,3 +241,20 @@ pub struct EditStatement {
     pub sql: String,
     pub params: Vec<Cell>,
 }
+
+/// A server message that is not an error (`RAISE NOTICE`, warnings), reported while a statement
+/// runs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct Notice {
+    /// `NOTICE`, `WARNING`, `INFO`, `LOG` or `DEBUG`.
+    pub severity: String,
+    pub message: String,
+    pub detail: Option<String>,
+    pub hint: Option<String>,
+    pub sqlstate: String,
+}
+
+/// Where a session delivers notices; set by whoever runs statements on it.
+pub type NoticeSink = std::sync::Arc<dyn Fn(Notice) + Send + Sync>;

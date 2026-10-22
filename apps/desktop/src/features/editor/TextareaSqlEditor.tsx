@@ -39,10 +39,24 @@ export default function TextareaSqlEditor({
       markError: (start, end, message) => {
         el()?.setAttribute('data-error', `${start}-${end}`);
         el()?.setAttribute('aria-description', message);
+        el()?.setAttribute('title', message);
       },
       clearMarkers: () => {
         el()?.removeAttribute('data-error');
         el()?.removeAttribute('aria-description');
+        el()?.removeAttribute('title');
+      },
+      errors: () => {
+        const range = /^(\d+)-(\d+)$/.exec(el()?.getAttribute('data-error') ?? '');
+        return range
+          ? [
+              {
+                start: Number(range[1]),
+                end: Number(range[2]),
+                message: el()?.getAttribute('aria-description') ?? '',
+              },
+            ]
+          : [];
       },
       format: () => {
         if (readOnly) {

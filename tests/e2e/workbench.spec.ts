@@ -170,6 +170,9 @@ test.describe('accessibility', () => {
     await editor.click();
     await app.keyboard.type('xyz');
     await expect(editor).not.toContainText('xyz');
+    // Monaco fades in a "read-only editor" message; scanning mid-fade measures blended colors.
+    await app.keyboard.press('Escape');
+    await expect(app.locator('.monaco-editor-overlaymessage')).toHaveCount(0);
     await expectNoA11yViolations(app);
   });
 
@@ -244,6 +247,29 @@ test.describe('accessibility', () => {
     await expect.poll(() => ipcCalls(app, 'result_format')).toHaveLength(1);
     const [formatted] = await ipcCalls(app, 'result_format');
     expect(formatted?.args).toMatchObject({ format: 'markdown' });
+  });
+
+  test('parameter prompt binds values and notices reach the output', async ({ app }) => {
+    await createDataSource(app, 'Dev');
+    await consoleWith(app, 'Dev', 'select * from shop.customers where id = :id');
+    await app.keyboard.press('ControlOrMeta+Enter');
+    const dialog = app.getByRole('dialog', { name: 'Statement parameters' });
+    await dialog.getByLabel(':id', { exact: true }).fill('42');
+    await expectNoA11yViolations(app, '[role="dialog"]');
+    await dialog.getByRole('button', { name: 'Run' }).click();
+    await expect.poll(() => ipcCalls(app, 'query_execute')).toHaveLength(1);
+    const [run] = await ipcCalls(app, 'query_execute');
+    expect(run?.args).toMatchObject({
+      request: {
+        statements: [{ sql: 'select * from shop.customers where id = $1 ', params: ['42'] }],
+      },
+    });
+
+    await consoleWith(app, 'Dev', "do $$ begin raise notice 'hello there'; end $$");
+    await app.keyboard.press('ControlOrMeta+Enter');
+    const output = app.getByLabel('Statement output');
+    await expect(output).toContainText('NOTICE: hello there');
+    await expectNoA11yViolations(app);
   });
 
   test('connection dialog has no WCAG A/AA violations', async ({ app }) => {

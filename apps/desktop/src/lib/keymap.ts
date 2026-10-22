@@ -8,6 +8,8 @@ export type CommandId =
   | 'settings.open'
   | 'datasource.new'
   | 'editor.format'
+  | 'editor.nextError'
+  | 'editor.previousError'
   | 'query.run'
   | 'query.runScript'
   | 'query.cancel';
@@ -23,6 +25,8 @@ export const DEFAULT_KEYMAP: Record<CommandId, string[]> = {
   'settings.open': ['Ctrl+Alt+S'],
   'datasource.new': ['Alt+Insert'],
   'editor.format': ['Ctrl+Alt+L'],
+  'editor.nextError': ['F8'],
+  'editor.previousError': ['Shift+F8'],
   'query.run': ['Ctrl+Enter'],
   'query.runScript': ['Ctrl+Shift+F10'],
   'query.cancel': ['Ctrl+F2'],

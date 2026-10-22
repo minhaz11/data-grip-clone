@@ -56,6 +56,30 @@ pub enum ResultTabs {
     New,
 }
 
+/// What Run does when the caret is outside every statement (blank lines, trailing comments).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "lowercase")]
+pub enum OutsideStatement {
+    /// Run the statement before the caret (or the first one).
+    #[default]
+    Nearest,
+    /// Ask which statement to run.
+    Ask,
+}
+
+/// What Run does with a selection that holds several statements.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "lowercase")]
+pub enum SelectionRun {
+    /// Run all of them, in order.
+    #[default]
+    All,
+    /// Ask: one of them, or all.
+    Ask,
+}
+
 /// Application preferences. Unknown or missing fields fall back to defaults so older/newer
 /// settings rows never block startup.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,10 +89,18 @@ pub struct Settings {
     pub theme: ThemePreference,
     pub editor_font_size: u8,
     pub result_tabs: ResultTabs,
+    /// Statements running longer than this are cancelled; 0 = no limit.
+    pub statement_timeout_secs: u32,
+    /// Runs longer than this show a notice and notify when done; 0 = never.
+    pub long_query_secs: u32,
+    pub run_outside_statement: OutsideStatement,
+    pub run_selection: SelectionRun,
 }
 
 impl Settings {
     pub const FONT_SIZE_RANGE: std::ops::RangeInclusive<u8> = 9..=32;
+    /// Upper bound for the timeout and long-query thresholds (one day).
+    pub const MAX_SECONDS: u32 = 86_400;
 
     pub fn validate(&self) -> Result<(), StoreError> {
         if !Self::FONT_SIZE_RANGE.contains(&self.editor_font_size) {
@@ -76,6 +108,14 @@ impl Settings {
                 "editor font size must be between {} and {}",
                 Self::FONT_SIZE_RANGE.start(),
                 Self::FONT_SIZE_RANGE.end()
+            )));
+        }
+        if self.statement_timeout_secs > Self::MAX_SECONDS
+            || self.long_query_secs > Self::MAX_SECONDS
+        {
+            return Err(StoreError::Invalid(format!(
+                "time limits must be between 0 and {} seconds",
+                Self::MAX_SECONDS
             )));
         }
         Ok(())
@@ -88,6 +128,10 @@ impl Default for Settings {
             theme: ThemePreference::System,
             editor_font_size: 13,
             result_tabs: ResultTabs::Reuse,
+            statement_timeout_secs: 0,
+            long_query_secs: 20,
+            run_outside_statement: OutsideStatement::Nearest,
+            run_selection: SelectionRun::All,
         }
     }
 }
@@ -286,11 +330,39 @@ mod tests {
     }
 
     #[test]
+    fn time_limits_are_validated() {
+        let store = Store::open_in_memory().expect("open");
+        let ok = Settings {
+            statement_timeout_secs: 30,
+            long_query_secs: 0,
+            ..Settings::default()
+        };
+        assert_eq!(store.set_settings(&ok).expect("save"), ok);
+        let bad = Settings {
+            statement_timeout_secs: Settings::MAX_SECONDS + 1,
+            ..Settings::default()
+        };
+        assert!(matches!(
+            store.set_settings(&bad),
+            Err(StoreError::Invalid(_))
+        ));
+        assert_eq!(store.settings().expect("load"), ok);
+    }
+
+    #[test]
     fn settings_json_uses_frontend_field_names() {
         let json = serde_json::to_value(Settings::default()).expect("encode");
         assert_eq!(
             json,
-            json!({ "theme": "system", "editorFontSize": 13, "resultTabs": "reuse" })
+            json!({
+                "theme": "system",
+                "editorFontSize": 13,
+                "resultTabs": "reuse",
+                "statementTimeoutSecs": 0,
+                "longQuerySecs": 20,
+                "runOutsideStatement": "nearest",
+                "runSelection": "all"
+            })
         );
     }
 

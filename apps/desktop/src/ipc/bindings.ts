@@ -5,7 +5,19 @@ export type ThemePreference = "system" | "light" | "dark";
 
 export type ResultTabs = "reuse" | "new";
 
-export type Settings = { theme: ThemePreference, editorFontSize: number, resultTabs: ResultTabs, };
+export type OutsideStatement = "nearest" | "ask";
+
+export type SelectionRun = "all" | "ask";
+
+export type Settings = { theme: ThemePreference, editorFontSize: number, resultTabs: ResultTabs, 
+/**
+ * Statements running longer than this are cancelled; 0 = no limit.
+ */
+statementTimeoutSecs: number, 
+/**
+ * Runs longer than this show a notice and notify when done; 0 = never.
+ */
+longQuerySecs: number, runOutsideStatement: OutsideStatement, runSelection: SelectionRun, };
 
 export type AppError = { kind: string, message: string, hint?: string, sqlstate?: string, 
 /**
@@ -87,7 +99,7 @@ export type QuitResolution = "commit" | "rollback";
 
 export type ObjectType = "table" | "view" | "materialized_view";
 
-export type MetadataRequest = { "level": "schemas" } | { "level": "schemaGroups", schema: string, } | { "level": "objects", schema: string, types: Array<ObjectType>, } | { "level": "objectGroups", schema: string, name: string, objectType: ObjectType, } | { "level": "columns", schema: string, table: string, } | { "level": "indexes", schema: string, table: string, } | { "level": "keys", schema: string, table: string, } | { "level": "foreignKeys", schema: string, table: string, } | { "level": "checks", schema: string, table: string, } | { "level": "triggers", schema: string, table: string, } | { "level": "routines", schema: string, } | { "level": "sequences", schema: string, } | { "level": "relations" };
+export type MetadataRequest = { "level": "schemas" } | { "level": "schemaGroups", schema: string, } | { "level": "objects", schema: string, types: Array<ObjectType>, } | { "level": "objectGroups", schema: string, name: string, objectType: ObjectType, } | { "level": "columns", schema: string, table: string, } | { "level": "indexes", schema: string, table: string, } | { "level": "keys", schema: string, table: string, } | { "level": "foreignKeys", schema: string, table: string, } | { "level": "checks", schema: string, table: string, } | { "level": "triggers", schema: string, table: string, } | { "level": "routines", schema: string, } | { "level": "sequences", schema: string, } | { "level": "relations" } | { "level": "functions" };
 
 export type MetaKind = "schema" | "group" | "table" | "view" | "materialized_view" | "column" | "index" | "key" | "foreign_key" | "check" | "trigger" | "routine" | "sequence";
 
@@ -279,7 +291,11 @@ export type StatementRequest = { sql: string,
 /**
  * Where the statement starts in the console text; echoed back so the UI can map positions.
  */
-offset: number, };
+offset: number, 
+/**
+ * Values for `$1…$n` (text; `null` is NULL), bound rather than spliced into the SQL.
+ */
+params?: Array<string | null>, };
 
 export type ExecRequest = { session: SessionKey, statements: Array<StatementRequest>, maxRows?: number, 
 /**
@@ -290,7 +306,7 @@ schema?: string, };
 
 export type JobStatus = "completed" | "failed" | "cancelled";
 
-export type ExecEvent = { "event": "statementStarted", index: number, offset: number, } | { "event": "statementDone", index: number, offset: number, elapsedMs: number, outcome: StatementOutcome, } | { "event": "statementFailed", index: number, offset: number, elapsedMs: number, error: StatementError, } | { "event": "finished", status: JobStatus, executed: number, elapsedMs: number, };
+export type ExecEvent = { "event": "statementStarted", index: number, offset: number, } | { "event": "statementDone", index: number, offset: number, elapsedMs: number, outcome: StatementOutcome, } | { "event": "statementFailed", index: number, offset: number, elapsedMs: number, error: StatementError, } | { "event": "notice", index: number, notice: Notice, } | { "event": "finished", status: JobStatus, executed: number, elapsedMs: number, };
 
 export type SortKey = { column: number, descending: boolean, };
 
@@ -340,6 +356,12 @@ export type RowChange = { "kind": "update", key: Array<string | null>, set: Arra
 defaults: Array<number>, } | { "kind": "delete", key: Array<string | null>, } | { "kind": "insert", values: Array<ColumnValue>, };
 
 export type EditStatement = { sql: string, params: Array<string | null>, };
+
+export type Notice = { 
+/**
+ * `NOTICE`, `WARNING`, `INFO`, `LOG` or `DEBUG`.
+ */
+severity: string, message: string, detail: string | null, hint: string | null, sqlstate: string, };
 
 export type ExportFormat = "csv" | "tsv" | "json" | "sql" | "markdown";
 

@@ -164,6 +164,26 @@ const RELATIONS: &str = "
       AND has_schema_privilege(n.oid, 'USAGE')
     ORDER BY n.nspname, c.relname";
 
+/// Callable functions for completion. Built-ins that only serve the system (type input/output,
+/// operator implementations, `internal` arguments or results, trigger functions) are left out.
+pub const FUNCTIONS: &str = "
+    SELECT n.nspname, p.proname, pg_get_function_arguments(p.oid),
+           pg_get_function_result(p.oid), p.prokind::text
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE p.prokind IN ('f', 'a', 'w', 'p')
+      AND n.nspname <> 'information_schema' AND n.nspname !~ '^pg_(toast|temp)'
+      AND has_schema_privilege(n.oid, 'USAGE')
+      AND p.prorettype NOT IN ('internal'::regtype, 'trigger'::regtype,
+                               'event_trigger'::regtype, 'cstring'::regtype)
+      AND NOT 'internal'::regtype = ANY (p.proargtypes::oid[])
+      AND NOT 'cstring'::regtype = ANY (p.proargtypes::oid[])
+      AND (n.nspname <> 'pg_catalog' OR (
+            p.proname !~ '^(_|binary_upgrade)'
+        AND NOT EXISTS (SELECT 1 FROM pg_operator o WHERE o.oprcode = p.oid)
+        AND NOT EXISTS (SELECT 1 FROM pg_cast c WHERE c.castfunc = p.oid)))
+    ORDER BY n.nspname = 'pg_catalog', n.nspname, p.proname, 3
+    LIMIT 5000";
+
 const INDEXES: &str = "
     SELECT i.relname, pg_get_indexdef(x.indexrelid), x.indisunique, x.indisprimary
     FROM pg_index x
@@ -623,6 +643,32 @@ pub async fn load(client: &Client, req: &Req) -> Result<Vec<MetaNode>, tokio_pos
                     _ => MetaKind::Table,
                 };
                 MetaNode::new(format!("{schema}.{name}"), kind, name).detail(Some(schema))
+            })
+            .collect(),
+
+        Req::Functions => client
+            .query(FUNCTIONS, &[])
+            .await?
+            .iter()
+            .map(|r| {
+                let schema: String = r.get(0);
+                let name: String = r.get(1);
+                let args: String = r.get(2);
+                let result: Option<String> = r.get(3);
+                let prokind: String = r.get(4);
+                let signature = match &result {
+                    Some(result) => format!("({args}) → {result}"),
+                    None => format!("({args})"),
+                };
+                MetaNode::new(
+                    format!("{schema}\u{1f}{name}({args})"),
+                    MetaKind::Routine,
+                    &name,
+                )
+                .detail(Some(signature))
+                .flag(prokind == "p", "procedure")
+                .flag(prokind == "a", "aggregate")
+                .flag(prokind == "w", "window")
             })
             .collect(),
 

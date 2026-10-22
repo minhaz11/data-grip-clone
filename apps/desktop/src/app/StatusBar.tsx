@@ -3,6 +3,7 @@ import { useConnections } from '../features/connections/connectionsStore';
 import { effectiveColor } from '../features/connections/model';
 import { useSessions, type SessionState } from '../features/connections/sessionsStore';
 import { keyOf, sessionOf, useTx } from '../features/exec/txStore';
+import { NotificationButton } from '../features/notifications/notifications';
 
 function sessionText(s: SessionState | undefined): string {
   switch (s?.state) {
@@ -69,6 +70,7 @@ export function StatusBar({ theme }: { theme: 'light' | 'dark' }) {
         </span>
       )}
       <span>{theme === 'dark' ? 'Dark' : 'Light'}</span>
+      <NotificationButton />
     </footer>
   );
 }

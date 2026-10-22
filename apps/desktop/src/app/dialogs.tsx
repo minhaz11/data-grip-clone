@@ -20,13 +20,24 @@ interface ChoiceRequest {
   resolve(chosen: boolean): void;
 }
 
+interface CustomRequest {
+  render(done: (value: unknown) => void): ReactNode;
+  resolve(value: unknown): void;
+}
+
 interface DialogState {
   confirm: ConfirmRequest | null;
   choice: ChoiceRequest | null;
   password: { profile: ConnectionProfile; resolve(connected: boolean): void } | null;
+  custom: CustomRequest | null;
 }
 
-const useDialogs = create<DialogState>(() => ({ confirm: null, choice: null, password: null }));
+const useDialogs = create<DialogState>(() => ({
+  confirm: null,
+  choice: null,
+  password: null,
+  custom: null,
+}));
 
 /** Resolves true when the user confirms, false when they cancel or close the dialog. */
 export function askConfirm(request: Omit<ConfirmRequest, 'resolve'>): Promise<boolean> {
@@ -43,9 +54,26 @@ export function askPasswordAndConnect(profile: ConnectionProfile): Promise<boole
   return new Promise((resolve) => useDialogs.setState({ password: { profile, resolve } }));
 }
 
+/**
+ * Shows a dialog rendered by `render`; resolves with what it passes to `done` (`null` when it
+ * was cancelled).
+ */
+export function askCustom<T>(
+  render: (done: (value: T | null) => void) => ReactNode,
+): Promise<T | null> {
+  return new Promise((resolve) =>
+    useDialogs.setState({
+      custom: {
+        render: (done) => render((value) => done(value)),
+        resolve: (value) => resolve(value as T | null),
+      },
+    }),
+  );
+}
+
 /** Renders whichever app-level dialog is pending. Mounted once in App. */
 export function DialogHost() {
-  const { confirm, choice, password } = useDialogs();
+  const { confirm, choice, password, custom } = useDialogs();
   return (
     <>
       {confirm && (
@@ -80,6 +108,10 @@ export function DialogHost() {
           {choice.body}
         </ChoiceDialog>
       )}
+      {custom?.render((value) => {
+        custom.resolve(value);
+        useDialogs.setState({ custom: null });
+      })}
       {password && (
         <PasswordPrompt
           profile={password.profile}
