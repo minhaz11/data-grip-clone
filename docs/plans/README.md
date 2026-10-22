@@ -37,7 +37,7 @@ is the human summary; refresh its Progress column from the script output when yo
 | 01  | [Generated IPC bindings and docs alignment](01-ipc-bindings.md)   | M0.1             | -          | Done        | 100%     |
 | 02  | [Quality and safety infrastructure](02-quality-infrastructure.md) | M0.2             | -          | In progress | 86%      |
 | 03  | [Transactions and sessions](03-transactions-sessions.md)          | M4.6             | 01         | In progress | 97%      |
-| 04  | [Table viewer and richer metadata](04-table-viewer-metadata.md)   | M4.3             | 01         | Not started | 0%       |
+| 04  | [Table viewer and richer metadata](04-table-viewer-metadata.md)   | M4.3             | 01         | Done        | 100%     |
 | 05  | [DDL generation](05-ddl-generation.md)                            | M4.4             | 04         | Not started | 0%       |
 | 06  | [Schema change tools](06-schema-change-tools.md)                  | M4.5             | 03, 05     | Not started | 0%       |
 | 07  | [Result grid gaps and table browsing](07-result-grid.md)          | M4.8             | 03, 04     | Not started | 0%       |

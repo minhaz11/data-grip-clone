@@ -176,6 +176,43 @@
     },
     sessions_list: () => [],
     metadata_children: ({ request }) => catalog(request),
+    object_details: ({ object }) => ({
+      object,
+      comment: 'Fake table for UI tests',
+      columns: [
+        {
+          name: 'id',
+          typeName: 'integer',
+          nullable: false,
+          default: null,
+          primaryKey: true,
+          identity: 'always',
+          generated: null,
+          comment: null,
+        },
+        {
+          name: 'email',
+          typeName: 'text',
+          nullable: true,
+          default: null,
+          primaryKey: false,
+          identity: null,
+          generated: null,
+          comment: 'Login name',
+        },
+      ],
+      indexes: [
+        { name: `${object.name}_pkey`, definition: 'btree (id)', unique: true, primary: true },
+      ],
+      constraints: [
+        { name: `${object.name}_pkey`, kind: 'primary key', definition: 'PRIMARY KEY (id)' },
+      ],
+      references: [],
+      referencedBy: [],
+      triggers: [],
+      rowEstimate: 2,
+      totalBytes: 16384,
+    }),
     console_list: () => [...state.consoles.keys()].sort(),
     console_create: ({ preferred }) => {
       let name = preferred && !state.consoles.has(preferred) ? preferred : 'console';

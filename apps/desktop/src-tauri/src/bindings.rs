@@ -66,6 +66,13 @@ mod tests {
             decl::<quarry_db_core::MetadataRequest>(&cfg),
             decl::<quarry_db_core::MetaKind>(&cfg),
             decl::<quarry_db_core::MetaNode>(&cfg),
+            decl::<quarry_db_core::ObjectRef>(&cfg),
+            decl::<quarry_db_core::ObjectDetails>(&cfg),
+            decl::<quarry_db_core::ColumnDetail>(&cfg),
+            decl::<quarry_db_core::IndexDetail>(&cfg),
+            decl::<quarry_db_core::ConstraintDetail>(&cfg),
+            decl::<quarry_db_core::ForeignKeyDetail>(&cfg),
+            decl::<quarry_db_core::TriggerDetail>(&cfg),
             // Query execution
             decl::<quarry_db_core::ColumnInfo>(&cfg),
             decl::<quarry_db_core::StatementOutcome>(&cfg),

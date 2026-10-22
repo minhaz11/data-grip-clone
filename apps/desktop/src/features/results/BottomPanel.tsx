@@ -1,7 +1,7 @@
 import clsx from 'clsx';
 import { CircleCheck, CircleX, LoaderCircle, Ban, Circle } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { useWorkspace } from '../../app/workspaceStore';
+import { isConsole, useWorkspace } from '../../app/workspaceStore';
 import type { StatementOutcome } from '../../ipc/types';
 import { activeEditor } from '../editor/editorHandle';
 import { caretPosition } from '../editor/TextareaSqlEditor';
@@ -211,9 +211,10 @@ function OutputLine({ st }: { st: StatementRun }) {
 }
 
 function ResultView({ run, statement }: { run: Run; statement: StatementRun | undefined }) {
-  const consoleName = useWorkspace(
-    (s) => s.tabs.find((t) => t.id === run.tabId)?.console ?? 'result',
-  );
+  const consoleName = useWorkspace((s) => {
+    const tab = s.tabs.find((t) => t.id === run.tabId);
+    return isConsole(tab) ? tab.console : 'result';
+  });
   const source = useConnections((s) => s.items.find((c) => c.id === run.sourceId));
   const refine = useExec((s) => s.refine);
   const updateEdits = useExec((s) => s.updateEdits);

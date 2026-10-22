@@ -74,7 +74,7 @@ listed tests run green in CI.
     (Ctrl+F5) keeps expansion and reloads visible levels; filter searches loaded nodes and reveals
     their ancestors; a lost or closed session clears that source's tree. Keyboard: ↑/↓/Home/End,
     → expand/enter, ← collapse/parent, Enter, Shift+F10.
-  - Not yet: keys/foreign keys, routines, sequences, DDL view (Phase 4), tree virtualization (not
+  - Not yet: DDL view (Phase 4; keys, foreign keys, routines and sequences came in M4.3), tree virtualization (not
     needed at 1,000 rows; revisit with the WebKitGTK budget test in Phase 3).
 
 ### Phase 3 — SQL execution
@@ -195,6 +195,24 @@ listed tests run green in CI.
   - Tests: builder unit tests (no values in SQL, unsafe types, key checks) and integration tests
     (editability reasons, apply/conflict/rollback, per-change errors, isolation from an open
     console transaction, read-only rejection).
+- **M4.3 Table viewer and richer metadata** ✅ (plan: `docs/plans/04-table-viewer-metadata.md`)
+  - **Tree**: under a table, Columns plus Keys, Foreign keys, Checks, Indexes and Triggers; under
+    a schema, Routines (user functions and procedures, overloads apart by their identity
+    arguments; extension members left out) and Sequences (type, increment, owning column).
+    Empty groups are hidden, except Columns. Details come from the server's own definitions
+    (`pg_get_constraintdef`, `pg_get_triggerdef`, `pg_get_function_identity_arguments`).
+  - **Table viewer**: Enter or double-click on a table, view or materialized view opens a
+    read-only tab (editor tabs are now consoles or objects, both restored on restart) with
+    columns (type, nullability, default, identity or generation, comment, primary key),
+    indexes, constraints, foreign keys in both directions, triggers, row estimate and size, and
+    Refresh. Offline it offers Connect; a dropped object says so.
+  - **Quick info** (Ctrl+Q or the context menu) for tables, views and columns.
+  - One `object_details` command reads the whole object by OID with parameterized catalog
+    queries; checked field by field against `psql \d+` on the seeded `shop.orders`.
+  - Tests: integration (every new kind, overloads, owned sequences, both FK directions, identity
+    and generated columns, comments, estimates, a missing object); UI (viewer sections, Connect,
+    quick info, tab de-duplication and restore); E2E axe scan of the viewer.
+  - Not yet: Show DDL (M4.4), Open data (M4.8), partitions as children of their parent.
 - **M4.6 Transactions and sessions** ✅ (plan: `docs/plans/03-transactions-sessions.md`)
   - **Transaction state comes from the server.** `tokio-postgres` drops the ReadyForQuery
     status, so after any statement that can change it (BEGIN/COMMIT/…, CALL, DO, or an error

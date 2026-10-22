@@ -8,10 +8,15 @@ import {
   FolderClosed,
   KeyRound,
   Layers,
+  Link2,
+  ListOrdered,
   LoaderCircle,
   Lock,
   Rows3,
+  ShieldCheck,
+  SquareFunction,
   Table2,
+  Workflow,
   Zap,
 } from 'lucide-react';
 import type { MetaKind } from '../../ipc/types';
@@ -29,6 +34,12 @@ const KIND_ICON: Record<MetaKind, typeof Table2> = {
   materialized_view: Rows3,
   column: Columns3,
   index: Zap,
+  key: KeyRound,
+  foreign_key: Link2,
+  check: ShieldCheck,
+  trigger: Workflow,
+  routine: SquareFunction,
+  sequence: ListOrdered,
 };
 
 const KIND_LABEL: Record<MetaKind, string> = {
@@ -39,6 +50,12 @@ const KIND_LABEL: Record<MetaKind, string> = {
   materialized_view: 'materialized view',
   column: 'column',
   index: 'index',
+  key: 'key',
+  foreign_key: 'foreign key',
+  check: 'check constraint',
+  trigger: 'trigger',
+  routine: 'routine',
+  sequence: 'sequence',
 };
 
 interface Props {

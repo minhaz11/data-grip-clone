@@ -5,8 +5,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use quarry_db_core::{
-    ConnectParams, DatabaseAdapter, MetaKind, MetaNode, MetadataRequest as Req, ObjectType,
-    Session, TlsMode,
+    ConnectParams, DatabaseAdapter, MetaKind, MetaNode, MetadataRequest as Req, ObjectRef,
+    ObjectType, Session, TlsMode,
 };
 use quarry_db_postgres::PostgresAdapter;
 use quarry_secrets::SecretString;
@@ -100,10 +100,14 @@ async fn walks_schema_tables_views_columns_and_indexes() {
         .metadata(&child(&schemas, "it_walk").children.expect("groups"))
         .await
         .expect("groups");
-    assert_eq!(names(&groups), ["Tables", "Views", "Materialized views"]);
+    // `id serial` brings a sequence along.
+    assert_eq!(
+        names(&groups),
+        ["Tables", "Views", "Materialized views", "Sequences"]
+    );
     assert_eq!(
         groups.iter().map(|g| g.count).collect::<Vec<_>>(),
-        [Some(2), Some(1), Some(1)]
+        [Some(2), Some(1), Some(1), Some(1)]
     );
 
     let tables = s
@@ -135,10 +139,11 @@ async fn walks_schema_tables_views_columns_and_indexes() {
         .metadata(&child(&tables, "accounts").children.expect("tg"))
         .await
         .expect("tg");
-    assert_eq!(names(&table_groups), ["Columns", "Indexes"]);
+    // Empty groups are hidden: accounts has keys and indexes but no FKs, checks or triggers.
+    assert_eq!(names(&table_groups), ["Columns", "Keys", "Indexes"]);
     assert_eq!(
         table_groups.iter().map(|g| g.count).collect::<Vec<_>>(),
-        [Some(3), Some(3)]
+        [Some(3), Some(2), Some(3)]
     );
 
     let columns = s
@@ -263,4 +268,245 @@ async fn dropped_object_yields_no_children_and_closed_session_errors() {
     let err = s.metadata(&Req::Schemas).await.expect_err("closed");
     assert!(err.connection_lost, "{err:?}");
     assert!(s.is_closed());
+}
+
+#[tokio::test]
+#[ignore = "needs scripts/test-pg.sh up"]
+async fn shows_keys_foreign_keys_checks_triggers_routines_and_sequences() {
+    let db = admin().await;
+    db.batch_execute(
+        r#"DROP SCHEMA IF EXISTS it_kinds CASCADE;
+        CREATE SCHEMA it_kinds;
+        CREATE TABLE it_kinds.customers (id serial PRIMARY KEY, name text);
+        COMMENT ON TABLE it_kinds.customers IS 'People who buy';
+        CREATE TABLE it_kinds.orders (
+            id int GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            code text NOT NULL,
+            customer_id int REFERENCES it_kinds.customers (id) ON DELETE CASCADE
+                DEFERRABLE INITIALLY DEFERRED,
+            qty int NOT NULL DEFAULT 1 CONSTRAINT qty_positive CHECK (qty > 0),
+            doubled int GENERATED ALWAYS AS (qty * 2) STORED,
+            CONSTRAINT orders_code_key UNIQUE (code)
+        );
+        COMMENT ON COLUMN it_kinds.orders.code IS 'Shown on invoices';
+        CREATE TABLE it_kinds.lines (
+            order_id int, line int, PRIMARY KEY (order_id, line),
+            FOREIGN KEY (order_id) REFERENCES it_kinds.orders (id)
+        );
+        CREATE FUNCTION it_kinds.touch() RETURNS trigger LANGUAGE plpgsql
+            AS $$ BEGIN RETURN NEW; END $$;
+        CREATE TRIGGER orders_touch BEFORE INSERT OR UPDATE ON it_kinds.orders
+            FOR EACH ROW EXECUTE FUNCTION it_kinds.touch();
+        CREATE TRIGGER "Odd trigger" AFTER DELETE ON it_kinds.orders
+            FOR EACH STATEMENT EXECUTE FUNCTION it_kinds.touch();
+        ALTER TABLE it_kinds.orders DISABLE TRIGGER "Odd trigger";
+        CREATE FUNCTION it_kinds.price(qty int) RETURNS numeric LANGUAGE sql AS 'SELECT 1.0';
+        CREATE FUNCTION it_kinds.price(code text) RETURNS numeric LANGUAGE sql AS 'SELECT 2.0';
+        CREATE PROCEDURE it_kinds.archive() LANGUAGE sql AS 'SELECT 1';
+        CREATE SEQUENCE it_kinds.invoice_no AS bigint INCREMENT BY 5;
+        INSERT INTO it_kinds.customers (name) VALUES ('a'), ('b');
+        ANALYZE it_kinds.customers;"#,
+    )
+    .await
+    .expect("fixture");
+    let s = session().await;
+    let schema = "it_kinds".to_owned();
+
+    let groups = s
+        .metadata(&Req::SchemaGroups {
+            schema: schema.clone(),
+        })
+        .await
+        .expect("groups");
+    assert_eq!(names(&groups), ["Tables", "Views", "Routines", "Sequences"]);
+    // touch, price x2, archive; the serial and identity sequences, and invoice_no.
+    assert_eq!(child(&groups, "Routines").count, Some(4));
+    assert_eq!(child(&groups, "Sequences").count, Some(3));
+
+    let object_groups = s
+        .metadata(&Req::ObjectGroups {
+            schema: schema.clone(),
+            name: "orders".into(),
+            object_type: ObjectType::Table,
+        })
+        .await
+        .expect("object groups");
+    assert_eq!(
+        names(&object_groups),
+        [
+            "Columns",
+            "Keys",
+            "Foreign keys",
+            "Checks",
+            "Indexes",
+            "Triggers"
+        ]
+    );
+    let load = |name: &str| child(&object_groups, name).children.expect("children");
+
+    let keys = s.metadata(&load("Keys")).await.expect("keys");
+    assert_eq!(names(&keys), ["orders_pkey", "orders_code_key"]);
+    assert_eq!(keys[0].kind, MetaKind::Key);
+    assert_eq!(keys[0].detail.as_deref(), Some("PRIMARY KEY (id)"));
+    assert_eq!(keys[0].flags, ["primary"]);
+    assert_eq!(keys[1].flags, ["unique"]);
+
+    let fks = s.metadata(&load("Foreign keys")).await.expect("fks");
+    assert_eq!(fks.len(), 1);
+    let fk = fks[0].detail.as_deref().unwrap_or_default();
+    assert!(
+        fk.contains("REFERENCES it_kinds.customers(id) ON DELETE CASCADE DEFERRABLE"),
+        "{fk}"
+    );
+
+    let checks = s.metadata(&load("Checks")).await.expect("checks");
+    assert_eq!(names(&checks), ["qty_positive"]);
+    assert_eq!(checks[0].detail.as_deref(), Some("CHECK (qty > 0)"));
+
+    let triggers = s.metadata(&load("Triggers")).await.expect("triggers");
+    assert_eq!(names(&triggers), ["Odd trigger", "orders_touch"]);
+    assert!(
+        triggers[1]
+            .detail
+            .as_deref()
+            .is_some_and(|d| d.starts_with("BEFORE INSERT OR UPDATE ON it_kinds.orders")),
+        "{:?}",
+        triggers[1].detail
+    );
+    assert_eq!(triggers[0].flags, ["disabled"]);
+    assert!(
+        triggers[0]
+            .detail
+            .as_deref()
+            .is_some_and(|d| d.starts_with("AFTER DELETE")),
+        "quoted names are stripped too: {:?}",
+        triggers[0].detail
+    );
+
+    let routines = s
+        .metadata(&child(&groups, "Routines").children.expect("routines"))
+        .await
+        .expect("routines");
+    let signatures: Vec<(&str, &str)> = routines
+        .iter()
+        .map(|r| (r.name.as_str(), r.detail.as_deref().unwrap_or_default()))
+        .collect();
+    assert_eq!(
+        signatures,
+        [
+            ("archive", "()"),
+            ("price", "(code text) → numeric"),
+            ("price", "(qty integer) → numeric"),
+            ("touch", "() → trigger"),
+        ]
+    );
+    assert_eq!(routines[0].flags, ["procedure"]);
+    let keys: std::collections::HashSet<&str> = routines.iter().map(|r| r.key.as_str()).collect();
+    assert_eq!(keys.len(), 4, "overloads have distinct keys");
+
+    let sequences = s
+        .metadata(&child(&groups, "Sequences").children.expect("sequences"))
+        .await
+        .expect("sequences");
+    let seqs: Vec<(&str, &str)> = sequences
+        .iter()
+        .map(|r| (r.name.as_str(), r.detail.as_deref().unwrap_or_default()))
+        .collect();
+    assert_eq!(
+        seqs,
+        [
+            (
+                "customers_id_seq",
+                "integer, owned by it_kinds.customers.id"
+            ),
+            ("invoice_no", "bigint, increment 5"),
+            ("orders_id_seq", "integer, owned by it_kinds.orders.id"),
+        ]
+    );
+
+    // The table viewer reads everything about one object at once.
+    let orders = s
+        .object_details(&ObjectRef {
+            schema: schema.clone(),
+            name: "orders".into(),
+            object_type: ObjectType::Table,
+        })
+        .await
+        .expect("details")
+        .expect("exists");
+    let cols: Vec<&str> = orders.columns.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(cols, ["id", "code", "customer_id", "qty", "doubled"]);
+    let id = &orders.columns[0];
+    assert!(id.primary_key && !id.nullable);
+    assert_eq!(id.identity.as_deref(), Some("always"));
+    assert_eq!(
+        orders.columns[1].comment.as_deref(),
+        Some("Shown on invoices")
+    );
+    assert_eq!(orders.columns[3].default.as_deref(), Some("1"));
+    assert_eq!(orders.columns[4].generated.as_deref(), Some("(qty * 2)"));
+    assert_eq!(
+        orders.columns[4].default, None,
+        "generation is not a default"
+    );
+    let constraint_kinds: Vec<(&str, &str)> = orders
+        .constraints
+        .iter()
+        .map(|c| (c.name.as_str(), c.kind.as_str()))
+        .collect();
+    assert_eq!(
+        constraint_kinds,
+        [
+            ("orders_pkey", "primary key"),
+            ("orders_code_key", "unique"),
+            ("qty_positive", "check")
+        ]
+    );
+    assert_eq!(orders.indexes.len(), 2);
+    assert_eq!(orders.references.len(), 1);
+    let out = &orders.references[0];
+    assert_eq!(
+        (
+            out.to_table.as_str(),
+            out.to_columns.clone(),
+            out.on_delete.as_str(),
+            out.deferrable
+        ),
+        ("customers", vec!["id".to_owned()], "CASCADE", true)
+    );
+    let incoming: Vec<(&str, Vec<String>)> = orders
+        .referenced_by
+        .iter()
+        .map(|k| (k.from_table.as_str(), k.from_columns.clone()))
+        .collect();
+    assert_eq!(incoming, [("lines", vec!["order_id".to_owned()])]);
+    assert_eq!(orders.triggers.len(), 2);
+    assert!(orders.total_bytes.is_some_and(|b| b > 0));
+
+    let customers = s
+        .object_details(&ObjectRef {
+            schema: schema.clone(),
+            name: "customers".into(),
+            object_type: ObjectType::Table,
+        })
+        .await
+        .expect("details")
+        .expect("exists");
+    assert_eq!(customers.comment.as_deref(), Some("People who buy"));
+    assert_eq!(customers.row_estimate, Some(2), "analyzed");
+    assert_eq!(customers.referenced_by.len(), 1);
+
+    let missing = s
+        .object_details(&ObjectRef {
+            schema: schema.clone(),
+            name: "nope".into(),
+            object_type: ObjectType::Table,
+        })
+        .await
+        .expect("details");
+    assert!(missing.is_none());
+
+    db.batch_execute("DROP SCHEMA it_kinds CASCADE")
+        .await
+        .expect("cleanup");
 }

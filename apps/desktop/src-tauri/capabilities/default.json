@@ -21,6 +21,7 @@
     "allow-connection-disconnect",
     "allow-sessions-list",
     "allow-metadata-children",
+    "allow-object-details",
     "allow-console-list",
     "allow-console-create",
     "allow-console-read",

@@ -81,7 +81,8 @@ async function setup(
     if (tab.ownSession) useWorkspace.getState().setOwnSession(id, true);
     if (tab.schema) useWorkspace.getState().setSchema(id, tab.schema);
   });
-  const console = useWorkspace.getState().tabs.find((t) => t.id === id)?.console ?? '';
+  const tab0 = useWorkspace.getState().tabs.find((t) => t.id === id);
+  const console = tab0 && 'console' in tab0 ? tab0.console : '';
   const editor = (await screen.findByRole('textbox', { name: /SQL$/ })) as HTMLTextAreaElement;
   editor.focus();
   if (text) {

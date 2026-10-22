@@ -16,6 +16,7 @@ fn main() {
         "connection_disconnect",
         "sessions_list",
         "metadata_children",
+        "object_details",
         "console_list",
         "console_create",
         "console_read",

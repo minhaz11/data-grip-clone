@@ -85,9 +85,9 @@ export type QuitResolution = "commit" | "rollback";
 
 export type ObjectType = "table" | "view" | "materialized_view";
 
-export type MetadataRequest = { "level": "schemas" } | { "level": "schemaGroups", schema: string, } | { "level": "objects", schema: string, types: Array<ObjectType>, } | { "level": "objectGroups", schema: string, name: string, objectType: ObjectType, } | { "level": "columns", schema: string, table: string, } | { "level": "indexes", schema: string, table: string, } | { "level": "relations" };
+export type MetadataRequest = { "level": "schemas" } | { "level": "schemaGroups", schema: string, } | { "level": "objects", schema: string, types: Array<ObjectType>, } | { "level": "objectGroups", schema: string, name: string, objectType: ObjectType, } | { "level": "columns", schema: string, table: string, } | { "level": "indexes", schema: string, table: string, } | { "level": "keys", schema: string, table: string, } | { "level": "foreignKeys", schema: string, table: string, } | { "level": "checks", schema: string, table: string, } | { "level": "triggers", schema: string, table: string, } | { "level": "routines", schema: string, } | { "level": "sequences", schema: string, } | { "level": "relations" };
 
-export type MetaKind = "schema" | "group" | "table" | "view" | "materialized_view" | "column" | "index";
+export type MetaKind = "schema" | "group" | "table" | "view" | "materialized_view" | "column" | "index" | "key" | "foreign_key" | "check" | "trigger" | "routine" | "sequence";
 
 export type MetaNode = { 
 /**
@@ -110,6 +110,72 @@ flags?: Array<string>,
  * `None` for leaves.
  */
 children?: MetadataRequest, };
+
+export type ObjectRef = { schema: string, name: string, objectType: ObjectType, };
+
+export type ObjectDetails = { object: ObjectRef, comment: string | null, columns: Array<ColumnDetail>, indexes: Array<IndexDetail>, 
+/**
+ * Primary key, unique, check and exclusion constraints (foreign keys are below).
+ */
+constraints: Array<ConstraintDetail>, 
+/**
+ * Foreign keys this object declares.
+ */
+references: Array<ForeignKeyDetail>, 
+/**
+ * Foreign keys in other tables that point at this one.
+ */
+referencedBy: Array<ForeignKeyDetail>, triggers: Array<TriggerDetail>, 
+/**
+ * The planner's row estimate; absent until the table has been analyzed.
+ */
+rowEstimate: number | null, 
+/**
+ * Table plus indexes and TOAST, in bytes (absent for views).
+ */
+totalBytes: number | null, };
+
+export type ColumnDetail = { name: string, 
+/**
+ * Full type, e.g. `character varying(80)`.
+ */
+typeName: string, nullable: boolean, default: string | null, primaryKey: boolean, 
+/**
+ * `always` / `by default` for identity columns.
+ */
+identity: string | null, 
+/**
+ * Expression of a generated column.
+ */
+generated: string | null, comment: string | null, };
+
+export type IndexDetail = { name: string, 
+/**
+ * The server's definition after `USING`, e.g. `btree (email)`.
+ */
+definition: string, unique: boolean, primary: boolean, };
+
+export type ConstraintDetail = { name: string, 
+/**
+ * `primary key`, `unique`, `check`, `exclusion`, `foreign key`.
+ */
+kind: string, 
+/**
+ * The server's definition, e.g. `CHECK ((qty > 0))`.
+ */
+definition: string, };
+
+export type ForeignKeyDetail = { name: string, 
+/**
+ * The referencing table (for incoming keys) or this table (for outgoing ones).
+ */
+fromSchema: string, fromTable: string, fromColumns: Array<string>, toSchema: string, toTable: string, toColumns: Array<string>, onUpdate: string, onDelete: string, deferrable: boolean, };
+
+export type TriggerDetail = { name: string, 
+/**
+ * The definition without `CREATE TRIGGER name`, e.g. `AFTER INSERT ON s.t FOR EACH ROW …`.
+ */
+definition: string, enabled: boolean, };
 
 export type ColumnInfo = { name: string, 
 /**

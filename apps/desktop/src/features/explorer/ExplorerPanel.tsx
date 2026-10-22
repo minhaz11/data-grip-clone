@@ -14,7 +14,10 @@ import { disconnectSource, resolveTransactions } from '../exec/txGuards';
 import { openTransactions } from '../exec/txStore';
 import { useMetadata } from './metadataStore';
 import { TreeRow } from './TreeRow';
-import { flattenTree, type Row } from './treeModel';
+import { flattenTree, SEP, type Row } from './treeModel';
+import { useWorkspace } from '../../app/workspaceStore';
+import type { ObjectRef } from '../../ipc/types';
+import { QuickInfo, type QuickInfoTarget } from '../schema/QuickInfo';
 
 interface Props {
   onNew(): void;
@@ -44,6 +47,7 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
     }
   };
   const [actionError, setActionError] = useState<string | null>(null);
+  const [quickInfo, setQuickInfo] = useState<QuickInfoTarget | null>(null);
   const [connectError, setConnectError] = useState<{ name: string; error: AppError } | null>(null);
   const treeRef = useRef<HTMLUListElement>(null);
 
@@ -129,6 +133,42 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
     resetCatalog(row.profile.id); // completion re-reads the catalog too
   }
 
+  /** The table, view or materialized view a node stands for, if it is one. */
+  function objectOf(row: Row | undefined): ObjectRef | null {
+    if (row?.type !== 'node' || row.node.children?.level !== 'objectGroups') {
+      return null;
+    }
+    const { schema, name, objectType } = row.node.children;
+    return { schema, name, objectType };
+  }
+
+  /** What Quick info shows for a row: a table-like object, or a column with its table. */
+  function quickInfoOf(row: Row | undefined): QuickInfoTarget | null {
+    if (row?.type !== 'node') {
+      return null;
+    }
+    const object = objectOf(row);
+    if (object) {
+      return { sourceId: row.profile.id, object };
+    }
+    if (row.node.kind === 'column') {
+      // A column's parent is its table's "Columns" group.
+      const tableKey = row.parentKey.slice(0, row.parentKey.lastIndexOf(SEP));
+      const table = objectOf(rows.find((r) => r.key === tableKey));
+      return table ? { sourceId: row.profile.id, object: table, column: row.node.name } : null;
+    }
+    return null;
+  }
+
+  function openViewer(row: Row): boolean {
+    const object = objectOf(row);
+    if (!object) {
+      return false;
+    }
+    useWorkspace.getState().openObject(row.profile.id, object);
+    return true;
+  }
+
   function menuItems(row: Row): MenuItem[] {
     const refreshItem: MenuItem = {
       label: 'Refresh',
@@ -136,7 +176,14 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
       onSelect: () => refreshRow(row),
     };
     if (row.type === 'node') {
+      const info = quickInfoOf(row);
       return [
+        ...(objectOf(row)
+          ? [{ label: 'Open table viewer', shortcut: 'Enter', onSelect: () => openViewer(row) }]
+          : []),
+        ...(info
+          ? [{ label: 'Quick info', shortcut: 'Ctrl+Q', onSelect: () => setQuickInfo(info) }]
+          : []),
         refreshItem,
         { label: 'Copy name', onSelect: () => void navigator.clipboard?.writeText(row.node.name) },
       ];
@@ -171,7 +218,11 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
       else if (row.type !== 'source') select(rows.find((r) => r.key === row.parentKey));
     } else if (e.key === 'Enter') {
       if (row.type === 'source') onEdit(row.profile);
-      else void toggle(row);
+      else if (!openViewer(row)) void toggle(row);
+    } else if (e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'q') {
+      // Control only: Cmd+Q quits on macOS.
+      const info = quickInfoOf(row);
+      if (info) setQuickInfo(info);
     } else if (e.key === 'F5' && e.ctrlKey) refreshRow(row);
     else if (row.type === 'source' && e.key === 'Delete') void askDelete(row.profile);
     else if (row.type === 'source' && e.ctrlKey && e.key.toLowerCase() === 'd')
@@ -286,7 +337,10 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
               highlight={filter.trim()}
               onSelect={() => select(row)}
               onToggle={() => void toggle(row)}
-              onActivate={() => (row.type === 'source' ? onEdit(row.profile) : void toggle(row))}
+              onActivate={() => {
+                if (row.type === 'source') onEdit(row.profile);
+                else if (!openViewer(row)) void toggle(row);
+              }}
               onContextMenu={(x, y) => {
                 select(row);
                 if (row.type !== 'status') setMenu({ x, y, row });
@@ -309,6 +363,7 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
           onClose={() => setMenu(null)}
         />
       )}
+      {quickInfo && <QuickInfo target={quickInfo} onClose={() => setQuickInfo(null)} />}
       {pendingDelete && (
         <ConfirmDialog
           title="Delete Data Source"

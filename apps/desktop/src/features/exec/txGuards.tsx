@@ -1,5 +1,5 @@
 import { askChoice } from '../../app/dialogs';
-import { useWorkspace } from '../../app/workspaceStore';
+import { isConsole, useWorkspace } from '../../app/workspaceStore';
 import { backend } from '../../ipc/client';
 import type { SessionKey, SessionState } from '../../ipc/types';
 import { useConnections } from '../connections/connectionsStore';
@@ -65,6 +65,10 @@ export async function closeConsole(tabId: string): Promise<void> {
   if (!tab) {
     return;
   }
+  if (!isConsole(tab)) {
+    await ws.closeTab(tabId);
+    return;
+  }
   const own = tab.ownSession ? sessionOf(tab) : null;
   if (own) {
     const state = useTx.getState().states[keyOf(own)];
@@ -83,7 +87,7 @@ export async function closeConsole(tabId: string): Promise<void> {
 export async function setOwnSession(tabId: string, own: boolean): Promise<void> {
   const ws = useWorkspace.getState();
   const tab = ws.tabs.find((t) => t.id === tabId);
-  if (!tab || !!tab.ownSession === own) {
+  if (!isConsole(tab) || !!tab.ownSession === own) {
     return;
   }
   const previous = tab.ownSession ? sessionOf(tab) : null;
@@ -102,7 +106,7 @@ export async function setOwnSession(tabId: string, own: boolean): Promise<void> 
 export async function changeSource(tabId: string, sourceId: string | null): Promise<void> {
   const ws = useWorkspace.getState();
   const tab = ws.tabs.find((t) => t.id === tabId);
-  if (!tab || tab.sourceId === sourceId) {
+  if (!isConsole(tab) || tab.sourceId === sourceId) {
     return;
   }
   const own = tab.ownSession ? sessionOf(tab) : null;

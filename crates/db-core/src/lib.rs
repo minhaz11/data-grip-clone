@@ -1,6 +1,7 @@
 //! Engine-neutral adapter contract (ADR-0002). The UI and app layer only see these types; each
 //! engine crate (`quarry-db-postgres`, later MySQL/SQLite) implements [`DatabaseAdapter`].
 
+mod details;
 mod exec;
 mod metadata;
 mod tx;
@@ -12,6 +13,10 @@ use std::time::Duration;
 use quarry_secrets::SecretString;
 use serde::Serialize;
 
+pub use details::{
+    ColumnDetail, ConstraintDetail, ForeignKeyDetail, IndexDetail, ObjectDetails, ObjectRef,
+    TriggerDetail,
+};
 pub use exec::{
     Cell, ColumnInfo, ColumnValue, EditColumn, EditStatement, EditTarget, Editability,
     ErrorPosition, ExecOptions, Filter, FilterOp, Refinement, RowChange, SortKey, StatementOutcome,
@@ -169,6 +174,9 @@ pub trait Session: Send + Sync {
     fn is_closed(&self) -> bool;
     /// Children of one tree level. Every query is app-authored and parameterized.
     async fn metadata(&self, request: &MetadataRequest) -> Result<Vec<MetaNode>, DbError>;
+    /// Columns, indexes, constraints, foreign keys (both directions), triggers and size of one
+    /// object; `None` if it no longer exists.
+    async fn object_details(&self, object: &ObjectRef) -> Result<Option<ObjectDetails>, DbError>;
     /// Runs one statement exactly as given (no parameters, no rewriting).
     async fn execute(&self, sql: &str, options: &ExecOptions) -> Result<StatementOutcome, DbError>;
     /// Asks the server to cancel whatever this session is running. Returns once the request is

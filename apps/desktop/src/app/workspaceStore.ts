@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { backend } from '../ipc/client';
-import type { ConsoleTabState, WorkspaceState } from '../ipc/types';
+import type { ConsoleTabState, ObjectRef, ObjectTabState, WorkspaceState } from '../ipc/types';
 import { toAppError } from '../lib/errors';
 
 export type SaveState = 'saved' | 'pending' | 'saving' | 'error';
@@ -11,8 +11,21 @@ export interface ConsoleTab extends ConsoleTabState {
   saveError?: string;
 }
 
+export type ObjectTab = ObjectTabState;
+
+/** An editor tab: a SQL console or an object (table viewer). */
+export type EditorTab = ConsoleTab | ObjectTab;
+
+export function isConsole(tab: EditorTab | undefined): tab is ConsoleTab {
+  return !!tab && tab.kind !== 'object';
+}
+
+function sameObject(a: ObjectRef, b: ObjectRef): boolean {
+  return a.schema === b.schema && a.name === b.name && a.objectType === b.objectType;
+}
+
 interface WorkspaceStore {
-  tabs: ConsoleTab[];
+  tabs: EditorTab[];
   activeTabId: string | null;
   explorerCollapsed: boolean;
   bottomCollapsed: boolean;
@@ -24,6 +37,8 @@ interface WorkspaceStore {
 
   hydrate(state: WorkspaceState | null): Promise<void>;
   newConsole(sourceId?: string | null): Promise<string>;
+  /** Opens (or activates) the table viewer for `object`. */
+  openObject(sourceId: string, object: ObjectRef): string;
   closeTab(id: string): Promise<void>;
   activate(id: string): void;
   cycleTab(delta: 1 | -1): void;
@@ -58,21 +73,24 @@ export function resetHydrationForTests() {
 }
 
 export const useWorkspace = create<WorkspaceStore>((set, get) => {
+  // Only consoles carry text, save state and session settings.
   const patchTab = (id: string, patch: Partial<ConsoleTab>) =>
-    set((s) => ({ tabs: s.tabs.map((t) => (t.id === id ? { ...t, ...patch } : t)) }));
+    set((s) => ({
+      tabs: s.tabs.map((t) => (t.id === id && isConsole(t) ? { ...t, ...patch } : t)),
+    }));
 
   async function saveNow(id: string) {
     clearTimeout(timers.get(id));
     timers.delete(id);
     const tab = get().tabs.find((t) => t.id === id);
-    if (!tab || tab.save === 'saved') return;
+    if (!isConsole(tab) || tab.save === 'saved') return;
     const text = tab.text;
     patchTab(id, { save: 'saving' });
     try {
       await backend.consoleWrite(tab.console, text);
       // Edited again while writing? Stay pending; the newer text has its own timer.
       const now = get().tabs.find((t) => t.id === id);
-      if (now)
+      if (isConsole(now))
         patchTab(
           id,
           now.text === text ? { save: 'saved', saveError: undefined } : { save: 'pending' },
@@ -84,11 +102,13 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => {
 
   async function restore(state: WorkspaceState | null) {
     if (!state) return set({ hydrated: true });
-    const tabs: ConsoleTab[] = [];
+    const tabs: EditorTab[] = [];
     const notices: string[] = [];
     for (const t of state.tabs) {
       try {
-        if ('console' in t) {
+        if ('kind' in t && t.kind === 'object') {
+          tabs.push(t);
+        } else if ('console' in t) {
           tabs.push({ ...t, text: await backend.consoleRead(t.console), save: 'saved' });
         } else {
           // Legacy inline text: move it into a console file so nothing typed before is lost.
@@ -97,7 +117,7 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => {
           tabs.push({ id: t.id, console: name, sourceId: null, text: t.text, save: 'saved' });
         }
       } catch (e) {
-        const label = 'console' in t ? t.console : t.title;
+        const label = 'object' in t ? t.object.name : 'console' in t ? t.console : t.title;
         notices.push(`Could not reopen console "${label}": ${toAppError(e).message}`);
       }
     }
@@ -153,6 +173,23 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => {
       });
     },
 
+    openObject(sourceId, object) {
+      const existing = get().tabs.find(
+        (t) => !isConsole(t) && t.sourceId === sourceId && sameObject(t.object, object),
+      );
+      if (existing) {
+        set({ activeTabId: existing.id, caret: null });
+        return existing.id;
+      }
+      const id = newId();
+      set((s) => ({
+        tabs: [...s.tabs, { id, kind: 'object', sourceId, object }],
+        activeTabId: id,
+        caret: null,
+      }));
+      return id;
+    },
+
     activate(id) {
       if (get().activeTabId !== id && get().tabs.some((t) => t.id === id))
         set({ activeTabId: id, caret: null });
@@ -168,7 +205,7 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => {
 
     updateText(id, text) {
       const tab = get().tabs.find((t) => t.id === id);
-      if (!tab || tab.text === text) return;
+      if (!isConsole(tab) || tab.text === text) return;
       patchTab(id, { text, save: 'pending' });
       clearTimeout(timers.get(id));
       timers.set(
@@ -185,7 +222,7 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => {
     async flushAll() {
       await Promise.all(
         get()
-          .tabs.filter((t) => t.save !== 'saved')
+          .tabs.filter((t) => isConsole(t) && t.save !== 'saved')
           .map((t) => saveNow(t.id)),
       );
     },
@@ -214,13 +251,17 @@ export function snapshot(
   return {
     layout: s.layout,
     panels: { explorerCollapsed: s.explorerCollapsed, bottomCollapsed: s.bottomCollapsed },
-    tabs: s.tabs.map(({ id, console, sourceId, ownSession, schema }) => ({
-      id,
-      console,
-      sourceId,
-      ...(ownSession ? { ownSession } : {}),
-      ...(schema ? { schema } : {}),
-    })),
+    tabs: s.tabs.map((t) =>
+      isConsole(t)
+        ? {
+            id: t.id,
+            console: t.console,
+            sourceId: t.sourceId,
+            ...(t.ownSession ? { ownSession: t.ownSession } : {}),
+            ...(t.schema ? { schema: t.schema } : {}),
+          }
+        : { id: t.id, kind: 'object' as const, sourceId: t.sourceId, object: t.object },
+    ),
     activeTabId: s.activeTabId,
   };
 }

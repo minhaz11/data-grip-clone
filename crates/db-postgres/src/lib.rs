@@ -17,8 +17,9 @@ use std::time::{Duration, Instant};
 
 use quarry_db_core::{
     Cell, ColumnInfo, ConnectError, ConnectErrorKind, ConnectParams, DatabaseAdapter, DbError,
-    EditStatement, EditTarget, ExecOptions, MetaNode, MetadataRequest, OnClose, Refinement,
-    RowChange, ServerInfo, Session, StatementOutcome, TlsMode, TxMode, TxSettings, TxStatus,
+    EditStatement, EditTarget, ExecOptions, MetaNode, MetadataRequest, ObjectDetails, ObjectRef,
+    OnClose, Refinement, RowChange, ServerInfo, Session, StatementOutcome, TlsMode, TxMode,
+    TxSettings, TxStatus,
 };
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
@@ -349,6 +350,11 @@ impl Session for PgSession {
 
     async fn metadata(&self, request: &MetadataRequest) -> Result<Vec<MetaNode>, DbError> {
         self.with_client(async |client| metadata::load(client, request).await)
+            .await
+    }
+
+    async fn object_details(&self, object: &ObjectRef) -> Result<Option<ObjectDetails>, DbError> {
+        self.with_client(async |client| metadata::details(client, object).await)
             .await
     }
 

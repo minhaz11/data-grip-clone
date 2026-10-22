@@ -56,6 +56,7 @@ pub fn run() {
             connections::connection_disconnect,
             connections::sessions_list,
             connections::metadata_children,
+            connections::object_details,
             consoles::console_list,
             consoles::console_create,
             consoles::console_read,

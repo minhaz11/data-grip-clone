@@ -71,7 +71,7 @@ pub async fn connection_delete(
 
 // ---- Connectivity (M2.2) ----
 
-use quarry_db_core::{MetaNode, MetadataRequest, ServerInfo, TxSettings};
+use quarry_db_core::{MetaNode, MetadataRequest, ObjectDetails, ObjectRef, ServerInfo, TxSettings};
 use tauri::AppHandle;
 
 use crate::sessions::{SessionStatus, Sessions};
@@ -140,4 +140,18 @@ pub async fn metadata_children(
     request: MetadataRequest,
 ) -> Result<Vec<MetaNode>, AppError> {
     sessions.metadata(&id, &request).await
+}
+
+/// Everything the table viewer shows for one object; `None` if it no longer exists.
+#[tauri::command]
+pub async fn object_details(
+    sessions: Live<'_>,
+    id: String,
+    object: ObjectRef,
+) -> Result<Option<ObjectDetails>, AppError> {
+    Ok(sessions
+        .get(&crate::sessions::SessionKey::shared(&id))
+        .await?
+        .object_details(&object)
+        .await?)
 }

@@ -120,6 +120,26 @@ test.describe('accessibility', () => {
     await expectNoA11yViolations(app);
   });
 
+  test('table viewer has no WCAG A/AA violations', async ({ app }) => {
+    await createDataSource(app, 'Dev');
+    await app.getByRole('treeitem', { name: /^Dev/ }).click();
+    const tree = app.getByRole('tree', { name: 'Data sources' });
+    await tree.press('ArrowRight');
+    await expect(app.getByRole('treeitem', { name: 'shop, schema' })).toBeVisible();
+    await tree.press('ArrowDown');
+    await tree.press('ArrowRight');
+    await tree.press('ArrowDown');
+    await tree.press('ArrowRight');
+    await tree.press('ArrowDown');
+    await tree.press('Enter'); // customers: open the table viewer
+    await expect(app.getByRole('tab', { name: 'customers' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await expect(app.getByRole('region', { name: 'Columns' })).toBeVisible();
+    await expectNoA11yViolations(app);
+  });
+
   test('connection dialog has no WCAG A/AA violations', async ({ app }) => {
     await app.getByRole('button', { name: 'New data source', exact: true }).click();
     await expect(app.getByRole('dialog', { name: 'New PostgreSQL Data Source' })).toBeVisible();

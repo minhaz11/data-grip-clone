@@ -1,4 +1,4 @@
-import { useWorkspace } from '../../app/workspaceStore';
+import { isConsole, useWorkspace } from '../../app/workspaceStore';
 import { askConfirm, askPasswordAndConnect } from '../../app/dialogs';
 import type { StatementRequest } from '../../ipc/types';
 import { blockedOnReadOnly, classify, modifies } from '../../lib/sql/classify';
@@ -42,7 +42,7 @@ export async function runFromEditor(mode: RunMode): Promise<void> {
   const ws = useWorkspace.getState();
   const tab = ws.tabs.find((t) => t.id === ws.activeTabId);
   const editor = activeEditor();
-  if (!tab || !editor) return;
+  if (!isConsole(tab) || !editor) return;
   const exec = useExec.getState();
   if (isRunning(exec.runs[tab.id])) return;
 

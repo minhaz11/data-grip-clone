@@ -2,7 +2,7 @@
  * IPC types. Everything that crosses IPC is generated from the Rust types into `bindings.ts`
  * (regenerate with `npm run bindings`); this file re-exports it and adds the few types the UI owns.
  */
-import type { Settings } from './bindings';
+import type { ObjectRef, Settings } from './bindings';
 
 export type * from './bindings';
 
@@ -16,6 +16,7 @@ export type Cell = string | null;
 /** An open console tab as persisted; its text lives in the console's `.sql` file. */
 export interface ConsoleTabState {
   id: string;
+  kind?: 'console';
   /** Console file name (without `.sql`). */
   console: string;
   /** Data source the console runs against, if bound. */
@@ -24,6 +25,14 @@ export interface ConsoleTabState {
   ownSession?: boolean;
   /** Schema put first in the search path for this console's runs; absent = server default. */
   schema?: string | null;
+}
+
+/** A read-only structure view of one table, view or materialized view (M4.3). */
+export interface ObjectTabState {
+  id: string;
+  kind: 'object';
+  sourceId: string;
+  object: ObjectRef;
 }
 
 /** Pre-M3.1 tabs kept their text inline; migrated into console files on load. */
@@ -37,6 +46,6 @@ export interface LegacyTabState {
 export interface WorkspaceState {
   layout: Record<string, Record<string, number>>;
   panels: { explorerCollapsed: boolean; bottomCollapsed: boolean };
-  tabs: (ConsoleTabState | LegacyTabState)[];
+  tabs: (ConsoleTabState | LegacyTabState | ObjectTabState)[];
   activeTabId: string | null;
 }

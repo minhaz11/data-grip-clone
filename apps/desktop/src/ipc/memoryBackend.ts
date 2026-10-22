@@ -95,6 +95,7 @@ export function createMemoryBackend(): Backend {
     sessionsList: async () => [],
     onConnectionStatus: async () => () => {},
     metadataChildren: () => fail('not_connected', 'This data source is not connected.'),
+    objectDetails: () => fail('not_connected', 'This data source is not connected.'),
     queryExecute: () => fail('unsupported', 'Running queries requires the Quarry desktop app.'),
     queryCancel: async () => null,
     resultPage: () => fail('unsupported', 'Result paging requires the Quarry desktop app.'),

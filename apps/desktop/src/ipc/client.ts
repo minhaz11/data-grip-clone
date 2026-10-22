@@ -16,6 +16,8 @@ import type {
   StatementOutcome,
   MetaNode,
   MetadataRequest,
+  ObjectDetails,
+  ObjectRef,
   PasswordChange,
   QuitResolution,
   ServerInfo,
@@ -57,6 +59,8 @@ export interface Backend {
   onConnectionStatus(cb: (e: StatusEvent) => void): Promise<() => void>;
   /** One level of the explorer tree for a connected data source. */
   metadataChildren(id: string, request: MetadataRequest): Promise<MetaNode[]>;
+  /** Everything the table viewer shows; `null` if the object no longer exists. */
+  objectDetails(id: string, object: ObjectRef): Promise<ObjectDetails | null>;
   consoleList(): Promise<string[]>;
   /** Creates an empty console file; returns its name (`preferred` if free and valid). */
   consoleCreate(preferred: string | null): Promise<string>;
@@ -128,6 +132,7 @@ const tauriBackend: Backend = {
   sessionsList: () => invoke<SessionStatus[]>('sessions_list'),
   onConnectionStatus: (cb) => listen<StatusEvent>('connection-status', (e) => cb(e.payload)),
   metadataChildren: (id, request) => invoke<MetaNode[]>('metadata_children', { id, request }),
+  objectDetails: (id, object) => invoke<ObjectDetails | null>('object_details', { id, object }),
   consoleList: () => invoke<string[]>('console_list'),
   consoleCreate: (preferred) => invoke<string>('console_create', { preferred }),
   consoleRead: (name) => invoke<string>('console_read', { name }),

@@ -1,4 +1,4 @@
-import { useWorkspace } from './workspaceStore';
+import { isConsole, useWorkspace } from './workspaceStore';
 import { useConnections } from '../features/connections/connectionsStore';
 import { effectiveColor } from '../features/connections/model';
 import { useSessions, type SessionState } from '../features/connections/sessionsStore';
@@ -26,7 +26,7 @@ export function StatusBar({ theme }: { theme: 'light' | 'dark' }) {
   const session = useSessions((s) => (selected ? s.byId[selected.id] : undefined));
   const color = selected ? effectiveColor(selected) : null;
   const activeTab = useWorkspace((s) => s.tabs.find((t) => t.id === s.activeTabId));
-  const txSession = activeTab ? sessionOf(activeTab) : null;
+  const txSession = isConsole(activeTab) ? sessionOf(activeTab) : null;
   const tx = useTx((s) => (txSession ? s.states[keyOf(txSession)] : undefined));
 
   return (
@@ -59,7 +59,7 @@ export function StatusBar({ theme }: { theme: 'light' | 'dark' }) {
               : tx.settings.mode === 'manual'
                 ? 'Manual commit'
                 : 'Auto-commit'}
-          {activeTab?.ownSession ? ' · own session' : ''}
+          {isConsole(activeTab) && activeTab.ownSession ? ' · own session' : ''}
         </span>
       )}
       <div className="flex-1" />

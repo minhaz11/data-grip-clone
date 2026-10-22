@@ -46,6 +46,31 @@ pub enum MetadataRequest {
         schema: String,
         table: String,
     },
+    /// Primary key, unique and exclusion constraints of a table.
+    Keys {
+        schema: String,
+        table: String,
+    },
+    /// Foreign keys a table declares (references to other tables).
+    ForeignKeys {
+        schema: String,
+        table: String,
+    },
+    Checks {
+        schema: String,
+        table: String,
+    },
+    Triggers {
+        schema: String,
+        table: String,
+    },
+    /// Functions and procedures in a schema (overloads are separate nodes).
+    Routines {
+        schema: String,
+    },
+    Sequences {
+        schema: String,
+    },
     /// Every table and view the user can see, flat, for completion. Nodes carry the schema in
     /// `detail` and `key = "schema.name"`.
     Relations,
@@ -62,6 +87,12 @@ pub enum MetaKind {
     MaterializedView,
     Column,
     Index,
+    Key,
+    ForeignKey,
+    Check,
+    Trigger,
+    Routine,
+    Sequence,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

@@ -2,7 +2,8 @@ import clsx from 'clsx';
 import { AlignLeft, ListChecks, Play, Square, X } from 'lucide-react';
 import { useCallback, useState } from 'react';
 import { useSettings } from '../../app/settingsStore';
-import { useWorkspace, type ConsoleTab } from '../../app/workspaceStore';
+import { isConsole, useWorkspace, type ConsoleTab, type EditorTab } from '../../app/workspaceStore';
+import { ObjectViewer } from '../schema/ObjectViewer';
 import { shortcutLabel } from '../../lib/keymap';
 import { useConnections } from '../connections/connectionsStore';
 import { effectiveColor } from '../connections/model';
@@ -46,7 +47,7 @@ export function EditorArea({ theme }: { theme: 'light' | 'dark' }) {
     <section aria-label="Editor" className="flex h-full flex-col bg-bg">
       <div
         role="tablist"
-        aria-label="Open consoles"
+        aria-label="Open editors"
         className="flex h-8 shrink-0 overflow-x-auto border-b border-border bg-panel"
       >
         {tabs.map((tab) => {
@@ -75,26 +76,26 @@ export function EditorArea({ theme }: { theme: 'light' | 'dark' }) {
                 tabIndex={selected ? 0 : -1}
                 onClick={() => activate(tab.id)}
                 title={[
-                  `${tab.console}.sql`,
+                  tabTitle(tab),
                   source && `Data source: ${source.name}`,
-                  tab.saveError,
+                  isConsole(tab) && tab.saveError,
                 ]
                   .filter(Boolean)
                   .join('\n')}
                 className="h-full pl-3 pr-1 font-mono text-[12px]"
               >
-                {tab.console}.sql
-                {tab.save === 'error' && (
+                {tabLabel(tab)}
+                {isConsole(tab) && tab.save === 'error' && (
                   <span className="ml-1 text-danger" aria-label="save failed">
                     !
                   </span>
                 )}
-                {(tab.save === 'pending' || tab.save === 'saving') && (
+                {isConsole(tab) && (tab.save === 'pending' || tab.save === 'saving') && (
                   <span className="ml-1" aria-label="unsaved changes">
                     •
                   </span>
                 )}
-                <TabTxBadge tab={tab} />
+                {isConsole(tab) && <TabTxBadge tab={tab} />}
               </button>
               {/* Mouse affordance only: a tablist may contain only tabs, so keyboard and screen-reader
                   users close the active tab with the tab.close shortcut instead. */}
@@ -112,9 +113,27 @@ export function EditorArea({ theme }: { theme: 'light' | 'dark' }) {
           );
         })}
       </div>
-      {active && <ConsolePane key={active.id} tab={active} theme={theme} />}
+      {isConsole(active) && <ConsolePane key={active.id} tab={active} theme={theme} />}
+      {active && !isConsole(active) && (
+        <ObjectViewer
+          key={active.id}
+          tabId={active.id}
+          sourceId={active.sourceId}
+          object={active.object}
+        />
+      )}
     </section>
   );
+}
+
+function tabLabel(tab: EditorTab): string {
+  return isConsole(tab) ? `${tab.console}.sql` : tab.object.name;
+}
+
+function tabTitle(tab: EditorTab): string {
+  return isConsole(tab)
+    ? `${tab.console}.sql`
+    : `${tab.object.schema}.${tab.object.name} (${tab.object.objectType.replace('_', ' ')})`;
 }
 
 /** Marks a tab whose session has an open (or failed) transaction. */
