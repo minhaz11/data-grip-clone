@@ -11,7 +11,7 @@
   const state = {
     calls: [],
     unhandled: [],
-    settings: { theme: 'light', editorFontSize: 13 },
+    settings: { theme: 'light', editorFontSize: 13, resultTabs: 'reuse' },
     workspace: null,
     connections: [],
     consoles: new Map(),
@@ -264,6 +264,12 @@
       sendOnChannel(onProgress, [ROWS.rows.length]);
       return { path: '/tmp/quarry-e2e.csv', rows: ROWS.rows.length, bytes: 42 };
     },
+    result_copy: ({ onProgress }) => {
+      sendOnChannel(onProgress, [ROWS.rows.length]);
+      return { rows: ROWS.rows.length, bytes: 42 };
+    },
+    result_export_cancel: () => null,
+    result_format: ({ rows }) => rows.map((r) => r.map((v) => v ?? '').join('\t')).join('\n'),
     ddl_generate: ({ objects, options }) =>
       objects
         .map((o) =>

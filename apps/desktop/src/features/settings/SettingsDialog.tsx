@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Modal } from '../../components/ui/Modal';
 import { useSettings } from '../../app/settingsStore';
-import type { Settings, ThemePreference } from '../../ipc/types';
+import type { ResultTabs, Settings, ThemePreference } from '../../ipc/types';
 
 export const FONT_SIZE_RANGE = { min: 9, max: 32 } as const;
 
@@ -45,7 +45,7 @@ export function SettingsDialog({ onClose }: { onClose(): void }) {
         </>
       }
     >
-      <div className="grid grid-cols-[120px_1fr] items-center gap-x-3 gap-y-3">
+      <div className="grid grid-cols-[150px_1fr] items-center gap-x-3 gap-y-3">
         <label htmlFor="settings-theme">Theme</label>
         <select
           id="settings-theme"
@@ -78,6 +78,16 @@ export function SettingsDialog({ onClose }: { onClose(): void }) {
             {FONT_SIZE_RANGE.min}–{FONT_SIZE_RANGE.max} px
           </span>
         </div>
+        <label htmlFor="settings-result-tabs">Results of a new run</label>
+        <select
+          id="settings-result-tabs"
+          value={draft.resultTabs}
+          onChange={(e) => setDraft({ ...draft, resultTabs: e.target.value as ResultTabs })}
+          className="rounded border border-border bg-bg px-2 py-1"
+        >
+          <option value="reuse">Replace the previous results (pinned ones stay)</option>
+          <option value="new">Keep the previous results as tabs</option>
+        </select>
       </div>
       {error && (
         <p role="alert" className="mt-3 text-danger">

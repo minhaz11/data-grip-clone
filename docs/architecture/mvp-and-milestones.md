@@ -150,7 +150,8 @@ listed tests run green in CI.
     tags. `StatementOutcome`/`ExecEvent` fields went out snake_case, breaking M3.2's Output
     summaries and timings (the Result tab hid it). Fixed with `rename_all_fields`, plus
     Rust-side JSON contract tests.
-  - Not yet: sorting/filtering (Phase 4), export cancel, configurable CSV dialects (REQ in 07).
+  - Later: sorting/filtering came in M4.1; export cancel, TSV/SQL INSERT/Markdown, NULL text
+    and quoting options in M4.8.
 
 ### Phase 4 — Data and schema management
 
@@ -288,6 +289,34 @@ listed tests run green in CI.
     from version 2; classifier; UI (session/schema sent, guards for close/disconnect/quit,
     failed commit, mode switch); E2E (Manual mode to Commit).
   - Not yet: savepoint UI; refresh of results after Commit/Rollback.
+- **M4.8 Result grid and table browsing** ✅ (plan: `docs/plans/07-result-grid.md`)
+  - **Range selection**: mouse drag, Shift+click, row numbers, Shift+arrows, Ctrl+A. A status
+    line sums the selection: count, and for numeric columns sum, average, min and max, exact for
+    integers and numerics (BigInt decimals), marked "loaded rows only" when rows are not loaded.
+  - **Copy** in TSV, CSV, JSON, SQL INSERT or Markdown with NULL text, header and quoting
+    options, for the selection, the page or the entire result. Ctrl+C copies one cell as is and a
+    range as TSV for spreadsheets. Selections gather unloaded pages two at a time (tested); the
+    entire result is formatted and put on the clipboard by Rust (`result_copy`, 64 MB cap,
+    confirmed above 10,000 rows). One writer per format in `quarry-io` serves copy and export.
+  - **Export dialog**: the same formats and options, to a file or the clipboard, with Cancel. A
+    cancelled export stops between pages and removes its `.partial` file (integration-tested).
+  - **Columns**: hide, show all, reorder by drag or Move left/right, reset. Layouts are stored in
+    the tab by column signature, so they survive re-runs and restarts.
+  - **Edit bar**: Clone (primary key left to its default), Set DEFAULT (`SET col = DEFAULT`,
+    still with the optimistic check), Revert selected; Delete marks every selected row.
+  - **Result tabs**: Pin keeps a result (and its cursor) through later runs; a setting keeps
+    every run's results as tabs instead (5 unpinned at most).
+  - **Open data** on tables, views and materialized views: a data tab with free-form WHERE and
+    ORDER BY text (with history for the session), run through the console path in the shared
+    session, editable under the M4.2 rules. The text cannot end the statement or add one
+    (checked), and read-only sources reject writes in it on the server (`nextval()`: 25006).
+  - Round trips: CSV and TSV copies parse back with the `csv` crate, JSON with serde, and SQL
+    INSERT copies run against the server and reproduce the rows exactly (awkward values:
+    quotes, tabs, newlines, backslashes, Unicode, NaN, infinity, bytea, arrays, jsonb).
+  - Also fixed: the run summary sat inside the result tab list (axe), and a late export progress
+    message could overwrite the finished summary.
+  - Not yet: value editor panel, transpose, FK navigation (Later backlog); persistent filter
+    history (comes with query history, step 09).
 - Table viewer (columns/indexes/constraints/FKs), DDL generation, create/alter forms with DDL preview,
   destructive-operation confirmation.
 

@@ -3,7 +3,9 @@
 
 export type ThemePreference = "system" | "light" | "dark";
 
-export type Settings = { theme: ThemePreference, editorFontSize: number, };
+export type ResultTabs = "reuse" | "new";
+
+export type Settings = { theme: ThemePreference, editorFontSize: number, resultTabs: ResultTabs, };
 
 export type AppError = { kind: string, message: string, hint?: string, sqlstate?: string, 
 /**
@@ -331,12 +333,24 @@ export type ColumnValue = {
  */
 column: number, value: string | null, };
 
-export type RowChange = { "kind": "update", key: Array<string | null>, set: Array<ColumnValue>, original: Array<ColumnValue>, } | { "kind": "delete", key: Array<string | null>, } | { "kind": "insert", values: Array<ColumnValue>, };
+export type RowChange = { "kind": "update", key: Array<string | null>, set: Array<ColumnValue>, original: Array<ColumnValue>, 
+/**
+ * Result-column positions set to the column default (`SET col = DEFAULT`).
+ */
+defaults: Array<number>, } | { "kind": "delete", key: Array<string | null>, } | { "kind": "insert", values: Array<ColumnValue>, };
 
 export type EditStatement = { sql: string, params: Array<string | null>, };
 
-export type ExportFormat = "csv" | "json";
+export type ExportFormat = "csv" | "tsv" | "json" | "sql" | "markdown";
 
 export type ExportColumn = { name: string, typeName: string | null, };
 
 export type ExportSummary = { path: string, rows: number, bytes: number, };
+
+export type ExportOptions = { nullText?: string | null, quoteAll: boolean, header: boolean, 
+/**
+ * SQL INSERT target; absent uses a placeholder name.
+ */
+table?: TableName | null, };
+
+export type CopySummary = { rows: number, bytes: number, };

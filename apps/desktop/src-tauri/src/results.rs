@@ -2,27 +2,26 @@
 //! IPC message grows with the result; exports stream from the cursor to disk in Rust and never
 //! pass row data through the WebView.
 
-use std::fs::File;
-use std::io::BufWriter;
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use quarry_db_core::{
     Cell, ColumnInfo, EditStatement, EditTarget, ExecOptions, Refinement, RowChange,
-    StatementOutcome,
+    StatementOutcome, TableName,
 };
-use quarry_io::{ExportWriter, Format};
+use quarry_io::{CopyOutcome, ExportOutcome, Format, StreamError, WriteOptions};
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
+use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_dialog::DialogExt;
 
 use crate::error::AppError;
 use crate::sessions::{SessionKey, Sessions};
 
 pub const MAX_PAGE_ROWS: usize = 2_000;
-const EXPORT_PAGE_ROWS: usize = 5_000;
 
 #[tauri::command]
 pub async fn result_page(
@@ -69,13 +68,7 @@ pub async fn result_refine(
     sessions
         .apply_schema(&session, &live, schema.as_deref())
         .await?;
-    let columns: Vec<ColumnInfo> = columns
-        .into_iter()
-        .map(|c| ColumnInfo {
-            name: c.name,
-            type_name: c.type_name,
-        })
-        .collect();
+    let columns = column_infos(columns);
     let outcome = live
         .refine(&sql, &columns, &refinement, &ExecOptions::default())
         .await?;
@@ -125,10 +118,56 @@ pub async fn result_apply_edits(
 
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub enum ExportFormat {
     Csv,
+    Tsv,
     Json,
+    Sql,
+    Markdown,
+}
+
+impl From<ExportFormat> for Format {
+    fn from(format: ExportFormat) -> Self {
+        match format {
+            ExportFormat::Csv => Format::Csv,
+            ExportFormat::Tsv => Format::Tsv,
+            ExportFormat::Json => Format::Json,
+            ExportFormat::Sql => Format::SqlInsert,
+            ExportFormat::Markdown => Format::Markdown,
+        }
+    }
+}
+
+/// How values are written; see `quarry_io::WriteOptions`.
+#[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct ExportOptions {
+    #[cfg_attr(test, ts(optional = nullable))]
+    pub null_text: Option<String>,
+    #[serde(default)]
+    pub quote_all: bool,
+    #[serde(default = "yes")]
+    pub header: bool,
+    /// SQL INSERT target; absent uses a placeholder name.
+    #[cfg_attr(test, ts(optional = nullable))]
+    pub table: Option<TableName>,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl From<ExportOptions> for WriteOptions {
+    fn from(o: ExportOptions) -> Self {
+        WriteOptions {
+            null_text: o.null_text,
+            quote_all: o.quote_all,
+            header: o.header,
+            table: o.table,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -137,6 +176,16 @@ pub enum ExportFormat {
 pub struct ExportColumn {
     pub name: String,
     pub type_name: Option<String>,
+}
+
+fn column_infos(columns: Vec<ExportColumn>) -> Vec<ColumnInfo> {
+    columns
+        .into_iter()
+        .map(|c| ColumnInfo {
+            name: c.name,
+            type_name: c.type_name,
+        })
+        .collect()
 }
 
 #[derive(Debug, Serialize)]
@@ -148,25 +197,72 @@ pub struct ExportSummary {
     pub bytes: u64,
 }
 
+#[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct CopySummary {
+    pub rows: u64,
+    pub bytes: u64,
+}
+
+/// Running exports and whole-result copies, by the job id the UI chose, so they can be cancelled.
+#[derive(Default)]
+pub struct Exports {
+    running: Mutex<HashMap<String, Arc<AtomicBool>>>,
+}
+
+impl Exports {
+    fn start(&self, job: &str) -> Arc<AtomicBool> {
+        let flag = Arc::new(AtomicBool::new(false));
+        self.lock().insert(job.to_owned(), Arc::clone(&flag));
+        flag
+    }
+
+    fn finish(&self, job: &str) {
+        self.lock().remove(job);
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, Arc<AtomicBool>>> {
+        self.running.lock().unwrap_or_else(|p| p.into_inner())
+    }
+}
+
+/// Text copied from a whole result is capped; larger results should be exported to a file.
+const MAX_COPY_BYTES: usize = 64 * 1024 * 1024;
+
+fn stream_error(e: StreamError) -> AppError {
+    match e {
+        StreamError::Db(e) => e.into(),
+        StreamError::Io(message) => AppError::new("storage", message),
+        StreamError::TooLarge { limit } => AppError::new(
+            "invalid",
+            format!(
+                "The result is larger than {} MB as text, too large for the clipboard. Export it to a file instead.",
+                limit / (1024 * 1024)
+            ),
+        ),
+    }
+}
+
 /// Asks for a destination with the native save dialog, then streams the whole result to it.
-/// Resolves to `None` when the user cancels the dialog.
+/// Resolves to `None` when the user cancels the dialog or the export (`result_export_cancel`).
 #[tauri::command]
 #[allow(clippy::too_many_arguments)] // every argument is a distinct IPC field
 pub async fn result_export(
     app: AppHandle,
     sessions: State<'_, Arc<Sessions>>,
+    exports: State<'_, Arc<Exports>>,
     session: SessionKey,
     cursor: String,
     columns: Vec<ExportColumn>,
     format: ExportFormat,
+    options: ExportOptions,
     file_name: String,
+    job: String,
     on_progress: Channel<u64>,
 ) -> Result<Option<ExportSummary>, AppError> {
     let live = sessions.get(&session).await?;
-    let format = match format {
-        ExportFormat::Csv => Format::Csv,
-        ExportFormat::Json => Format::Json,
-    };
+    let format = Format::from(format);
     let ext = format.extension();
     let suggested = format!("{}.{ext}", sanitize(&file_name));
 
@@ -191,71 +287,23 @@ pub async fn result_export(
         .into_path()
         .map_err(|e| AppError::new("invalid", e.to_string()))?;
 
-    let columns: Vec<ColumnInfo> = columns
-        .into_iter()
-        .map(|c| ColumnInfo {
-            name: c.name,
-            type_name: c.type_name,
-        })
-        .collect();
-    let partial = path.with_extension(format!("{ext}.partial"));
-
-    // Writer thread with a small bounded queue: fetching never runs far ahead of the disk.
-    let (tx, rx) = mpsc::sync_channel::<Vec<Vec<Cell>>>(2);
-    let writer = {
-        let partial = partial.clone();
-        let columns = columns.clone();
-        std::thread::spawn(move || -> std::io::Result<u64> {
-            let mut w = ExportWriter::new(
-                BufWriter::with_capacity(256 * 1024, File::create(&partial)?),
-                format,
-                &columns,
-            )?;
-            for page in rx {
-                w.write_rows(&page)?;
-            }
-            Ok(w.finish()?.1)
-        })
-    };
-
-    // Full values for export: no cell clipping.
-    let options = ExecOptions {
-        max_cell_chars: usize::MAX,
-        ..ExecOptions::default()
-    };
-    let mut offset = 0u64;
-    let fetch_result: Result<(), AppError> = async {
-        loop {
-            let page = live
-                .fetch(&cursor, offset, EXPORT_PAGE_ROWS, &options)
-                .await?;
-            let n = page.len();
-            if n == 0 {
-                break;
-            }
-            offset += n as u64;
-            if tx.send(page).is_err() {
-                break; // writer failed; its error is reported below
-            }
-            let _ = on_progress.send(offset);
-            if n < EXPORT_PAGE_ROWS {
-                break;
-            }
-        }
-        Ok(())
-    }
+    let cancel = exports.start(&job);
+    let outcome = quarry_io::export_to_file(
+        live.as_ref(),
+        &cursor,
+        &column_infos(columns),
+        format,
+        &options.into(),
+        &path,
+        &cancel,
+        &|rows| {
+            let _ = on_progress.send(rows);
+        },
+    )
     .await;
-    drop(tx);
-    let written = writer
-        .join()
-        .map_err(|_| AppError::new("internal", "export writer panicked"))?;
-
-    match (fetch_result, written) {
-        (Ok(()), Ok(rows)) => {
-            std::fs::rename(&partial, &path).map_err(|e| {
-                AppError::new("storage", format!("could not save {}: {e}", path.display()))
-            })?;
-            let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    exports.finish(&job);
+    match outcome {
+        Ok(ExportOutcome::Written { rows, bytes }) => {
             // The destination path is the user's; counts are enough to diagnose.
             tracing::info!(source = %session.source_id, rows, bytes, "export finished");
             Ok(Some(ExportSummary {
@@ -264,20 +312,95 @@ pub async fn result_export(
                 bytes,
             }))
         }
-        (fetched, written) => {
-            let _ = std::fs::remove_file(&partial); // never leave a half-written export behind
+        Ok(ExportOutcome::Cancelled) => {
+            tracing::info!(source = %session.source_id, "export cancelled");
+            Ok(None)
+        }
+        Err(e) => {
             tracing::warn!(source = %session.source_id, "export failed");
-            fetched?;
-            let e = written
-                .err()
-                .map_or_else(|| "unknown error".to_owned(), |e| e.to_string());
-            Err(AppError::new(
-                "storage",
-                format!("could not write {}: {e}", path.display()),
-            ))
+            Err(stream_error(e))
         }
     }
 }
+
+/// Copies the whole result to the clipboard from Rust, so its text never passes through the
+/// WebView. Resolves to `None` when cancelled.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)] // every argument is a distinct IPC field
+pub async fn result_copy(
+    app: AppHandle,
+    sessions: State<'_, Arc<Sessions>>,
+    exports: State<'_, Arc<Exports>>,
+    session: SessionKey,
+    cursor: String,
+    columns: Vec<ExportColumn>,
+    format: ExportFormat,
+    options: ExportOptions,
+    job: String,
+    on_progress: Channel<u64>,
+) -> Result<Option<CopySummary>, AppError> {
+    let live = sessions.get(&session).await?;
+    let cancel = exports.start(&job);
+    let outcome = quarry_io::copy_to_string(
+        live.as_ref(),
+        &cursor,
+        &column_infos(columns),
+        format.into(),
+        &options.into(),
+        MAX_COPY_BYTES,
+        &cancel,
+        &|rows| {
+            let _ = on_progress.send(rows);
+        },
+    )
+    .await;
+    exports.finish(&job);
+    match outcome.map_err(stream_error)? {
+        CopyOutcome::Copied { text, rows } => {
+            let bytes = text.len() as u64;
+            app.clipboard()
+                .write_text(text)
+                .map_err(|e| AppError::new("internal", format!("clipboard: {e}")))?;
+            tracing::info!(source = %session.source_id, rows, bytes, "result copied");
+            Ok(Some(CopySummary { rows, bytes }))
+        }
+        CopyOutcome::Cancelled => Ok(None),
+    }
+}
+
+/// Stops a running export or copy between pages; unknown jobs are ignored.
+#[tauri::command]
+pub fn result_export_cancel(exports: State<'_, Arc<Exports>>, job: String) {
+    if let Some(flag) = exports.lock().get(&job) {
+        flag.store(true, Ordering::Relaxed);
+    }
+}
+
+/// Formats rows the UI already holds (a copied selection) with the export writers.
+#[tauri::command]
+pub fn result_format(
+    columns: Vec<ExportColumn>,
+    rows: Vec<Vec<Cell>>,
+    format: ExportFormat,
+    options: ExportOptions,
+) -> Result<String, AppError> {
+    if rows.len() > MAX_FORMAT_ROWS {
+        return Err(AppError::new(
+            "invalid",
+            format!("At most {MAX_FORMAT_ROWS} rows can be copied as a selection."),
+        ));
+    }
+    quarry_io::format_rows(
+        format.into(),
+        &column_infos(columns),
+        &rows,
+        &options.into(),
+    )
+    .map_err(|e| AppError::new("internal", e.to_string()))
+}
+
+/// Selections larger than this are copied with the whole-result copy instead.
+pub const MAX_FORMAT_ROWS: usize = 100_000;
 
 /// A file-name suggestion: letters, digits, `-`, `_`, `.`, at most 80 characters.
 pub(crate) fn sanitize(name: &str) -> String {

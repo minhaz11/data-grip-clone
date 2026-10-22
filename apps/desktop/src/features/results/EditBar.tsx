@@ -1,4 +1,4 @@
-import { Eye, Lock, Plus, RotateCcw, Save } from 'lucide-react';
+import { CopyPlus, Eye, Lock, Plus, RotateCcw, Save, Undo2 } from 'lucide-react';
 import { useState } from 'react';
 import { askConfirm } from '../../app/dialogs';
 import { Modal } from '../../components/ui/Modal';
@@ -6,6 +6,7 @@ import { backend } from '../../ipc/client';
 import type { ConnectionProfile, EditStatement, EditTarget, SessionKey } from '../../ipc/types';
 import { toAppError } from '../../lib/errors';
 import { addInsert, pendingCount, toChanges, type PendingEdits } from './editsModel';
+import type { SelectionActions } from './ResultGrid';
 
 interface Props {
   source: ConnectionProfile | undefined;
@@ -21,6 +22,10 @@ interface Props {
   onChange(f: (e: PendingEdits) => PendingEdits): void;
   onRevert(): void;
   onSubmit(): Promise<void>;
+  /** Actions over the grid's selected rows and cells. */
+  actions?: SelectionActions;
+  /** Shown first (result pinning). */
+  leading?: React.ReactNode;
 }
 
 /** Shows a value the way it will be bound: quoted text, or NULL. */
@@ -40,6 +45,8 @@ export function EditBar({
   onChange,
   onRevert,
   onSubmit,
+  actions,
+  leading,
 }: Props) {
   const [preview, setPreview] = useState<EditStatement[] | 'loading' | { error: string } | null>(
     null,
@@ -49,6 +56,7 @@ export function EditBar({
   if (!target) {
     return (
       <div className="flex h-7 shrink-0 items-center gap-1.5 border-b border-border bg-panel px-2 text-[12px] text-muted">
+        {leading}
         <Lock size={12} aria-hidden /> <span className="truncate">Read-only: {reason}</span>
       </div>
     );
@@ -106,6 +114,7 @@ export function EditBar({
       aria-label="Edit rows"
       className="flex h-7 shrink-0 items-center gap-1 border-b border-border bg-panel px-2 text-[12px]"
     >
+      {leading}
       <span
         className="truncate font-mono text-muted"
         title="Rows are edited in this table, identified by its primary key"
@@ -121,6 +130,37 @@ export function EditBar({
       >
         <Plus size={12} aria-hidden /> Row
       </button>
+      {actions && (
+        <>
+          <button
+            type="button"
+            disabled={submitting || actions.rows === 0}
+            onClick={actions.clone}
+            title="Add new rows copying the selected ones (primary key left to its default)"
+            className="flex items-center gap-0.5 rounded px-1.5 py-0.5 hover:bg-hover disabled:opacity-40"
+          >
+            <CopyPlus size={12} aria-hidden /> Clone
+          </button>
+          <button
+            type="button"
+            disabled={submitting || actions.rows === 0}
+            onClick={actions.setDefault}
+            title="Set the selected cells to their column default"
+            className="rounded px-1.5 py-0.5 hover:bg-hover disabled:opacity-40"
+          >
+            Set DEFAULT
+          </button>
+          <button
+            type="button"
+            disabled={submitting || actions.rows === 0 || count === 0}
+            onClick={actions.revert}
+            title="Drop pending changes of the selected rows"
+            className="flex items-center gap-0.5 rounded px-1.5 py-0.5 hover:bg-hover disabled:opacity-40"
+          >
+            <Undo2 size={12} aria-hidden /> Revert selected
+          </button>
+        </>
+      )}
       <span className="ml-auto text-muted" aria-live="polite">
         {submitError ? (
           <span role="alert" className="text-danger">

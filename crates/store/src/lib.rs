@@ -44,6 +44,18 @@ pub enum ThemePreference {
     Dark,
 }
 
+/// What a new run does with the previous run's result tabs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "lowercase")]
+pub enum ResultTabs {
+    /// Replace them (pinned results stay).
+    #[default]
+    Reuse,
+    /// Keep them as extra tabs, up to a limit.
+    New,
+}
+
 /// Application preferences. Unknown or missing fields fall back to defaults so older/newer
 /// settings rows never block startup.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -52,6 +64,7 @@ pub enum ThemePreference {
 pub struct Settings {
     pub theme: ThemePreference,
     pub editor_font_size: u8,
+    pub result_tabs: ResultTabs,
 }
 
 impl Settings {
@@ -74,6 +87,7 @@ impl Default for Settings {
         Self {
             theme: ThemePreference::System,
             editor_font_size: 13,
+            result_tabs: ResultTabs::Reuse,
         }
     }
 }
@@ -201,6 +215,7 @@ mod tests {
                 .set_settings(&Settings {
                     theme: ThemePreference::Dark,
                     editor_font_size: 15,
+                    ..Settings::default()
                 })
                 .expect("save");
         }
@@ -230,6 +245,7 @@ mod tests {
         let next = Settings {
             theme: ThemePreference::Light,
             editor_font_size: 20,
+            ..Settings::default()
         };
         assert_eq!(store.set_settings(&next).expect("save"), next);
         assert_eq!(store.settings().expect("load"), next);
@@ -241,6 +257,7 @@ mod tests {
         let bad = Settings {
             theme: ThemePreference::Dark,
             editor_font_size: 99,
+            ..Settings::default()
         };
         assert!(matches!(
             store.set_settings(&bad),
@@ -271,7 +288,10 @@ mod tests {
     #[test]
     fn settings_json_uses_frontend_field_names() {
         let json = serde_json::to_value(Settings::default()).expect("encode");
-        assert_eq!(json, json!({ "theme": "system", "editorFontSize": 13 }));
+        assert_eq!(
+            json,
+            json!({ "theme": "system", "editorFontSize": 13, "resultTabs": "reuse" })
+        );
     }
 
     #[test]

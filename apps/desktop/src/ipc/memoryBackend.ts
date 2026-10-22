@@ -111,6 +111,9 @@ export function createMemoryBackend(): Backend {
     resultRefine: () =>
       fail('unsupported', 'Sorting and filtering require the Quarry desktop app.'),
     resultExport: () => fail('unsupported', 'Export requires the Quarry desktop app.'),
+    resultCopy: () => fail('unsupported', 'Copy requires the Quarry desktop app.'),
+    resultExportCancel: async () => null,
+    resultFormat: () => fail('unsupported', 'Copy requires the Quarry desktop app.'),
     // No sessions exist in the browser: every session is closed and idle.
     sessionState: async (session) => ({
       session,

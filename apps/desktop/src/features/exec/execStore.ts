@@ -13,6 +13,7 @@ import type {
 import { toAppError } from '../../lib/errors';
 import { classify } from '../../lib/sql/classify';
 import { useMetadata } from '../explorer/metadataStore';
+import { useSettings } from '../../app/settingsStore';
 import { useWorkspace } from '../../app/workspaceStore';
 import { NO_EDITS, toChanges, type PendingEdits } from '../results/editsModel';
 
@@ -34,6 +35,8 @@ export interface StatementRun {
   submitError?: string;
   /** Shown after a successful submit until the next edit. */
   submitted?: number;
+  /** The result was moved to a kept result (pinned); its cursor belongs to that run now. */
+  movedTo?: string;
 }
 
 export interface Run {
@@ -56,14 +59,31 @@ export interface Run {
   error?: string;
   /** When Stop was pressed; after a while the UI offers to drop the connection. */
   cancelRequestedAt?: number;
+  /** Kept results (`<tabId>#<n>`): the console they belong to, a label, and whether pinned. */
+  keptFrom?: string;
+  label?: string;
+  pinned?: boolean;
 }
 
-/** Which bottom-panel view a console shows: the output log or one result set. */
-export type ResultView = 'output' | number;
+/**
+ * Which bottom-panel view a console shows: the output log, one result set of the current run
+ * (statement index), or a kept result (its run id).
+ */
+export type ResultView = 'output' | number | string;
+
+/** Unpinned kept results per console ("new tab per run"); older ones are closed. */
+export const MAX_KEPT_RESULTS = 5;
+
+/** The console a run belongs to (kept results carry `#<n>` after the console's tab id). */
+export function ownerTab(runId: string): string {
+  return runId.split('#')[0] ?? runId;
+}
 
 interface ExecState {
   runs: Record<string, Run | undefined>;
   view: Record<string, ResultView | undefined>;
+  /** Kept result run ids per console tab, oldest first. */
+  kept: Record<string, string[] | undefined>;
   start(
     tabId: string,
     session: SessionKey,
@@ -81,7 +101,15 @@ interface ExecState {
   revertEdits(tabId: string, index: number): void;
   /** Applies pending edits (all or nothing), then re-reads the result. */
   submitEdits(tabId: string, index: number): Promise<void>;
+  /** Pins a result of the current run: it stays (with its cursor) through later runs. */
+  pin(tabId: string, index: number): string | null;
+  /** Pins or unpins a kept result. */
+  setPinned(keptId: string, pinned: boolean): void;
+  /** Closes a kept result and releases its cursor. */
+  closeKept(keptId: string): void;
 }
+
+let keptCounter = 0;
 
 export const useExec = create<ExecState>((set, get) => {
   const patch = (tabId: string, f: (r: Run) => Run) =>
@@ -95,12 +123,69 @@ export const useExec = create<ExecState>((set, get) => {
       statements: r.statements.map((st) => (st.index === index ? { ...st, ...p } : st)),
     }));
 
+  /** Moves statement `st` of `run` into a new kept run and returns its id. */
+  function keep(run: Run, st: StatementRun, pinned: boolean): string {
+    keptCounter += 1;
+    const id = `${run.tabId}#${keptCounter}`;
+    const time = new Date(run.startedAt).toLocaleTimeString();
+    const kept: Run = {
+      ...run,
+      tabId: id,
+      statements: [st],
+      keptFrom: run.tabId,
+      label: `Result ${st.index + 1} · ${time}`,
+      pinned,
+    };
+    set((s) => ({
+      runs: { ...s.runs, [id]: kept },
+      kept: { ...s.kept, [run.tabId]: [...(s.kept[run.tabId] ?? []), id] },
+    }));
+    return id;
+  }
+
+  function dropKept(keptId: string) {
+    const run = get().runs[keptId];
+    releaseCursors(run);
+    const owner = ownerTab(keptId);
+    set((s) => ({
+      runs: { ...s.runs, [keptId]: undefined },
+      kept: { ...s.kept, [owner]: (s.kept[owner] ?? []).filter((k) => k !== keptId) },
+      view: s.view[owner] === keptId ? { ...s.view, [owner]: 'output' } : s.view,
+    }));
+  }
+
   return {
     runs: {},
     view: {},
+    kept: {},
 
     async start(tabId, session, sourceName, statements, options, onError) {
-      releaseCursors(get().runs[tabId]); // the previous results of this console are replaced
+      // The previous results of this console are replaced, or kept as tabs when the setting
+      // says so; pinned results always stay.
+      let previous = get().runs[tabId];
+      const keepPrevious = useSettings.getState().settings.resultTabs === 'new';
+      if (previous && keepPrevious) {
+        const run = previous;
+        previous = {
+          ...run,
+          statements: run.statements.map((st) =>
+            st.outcome?.type === 'rows' && !st.movedTo
+              ? { ...st, movedTo: keep(run, st, false) }
+              : st,
+          ),
+        };
+      }
+      for (const id of get().kept[tabId] ?? []) {
+        const k = get().runs[id];
+        if (k && !k.pinned && !keepPrevious) {
+          dropKept(id);
+        }
+      }
+      const unpinned = (get().kept[tabId] ?? []).filter((id) => !get().runs[id]?.pinned);
+      for (const id of unpinned.slice(0, Math.max(0, unpinned.length - MAX_KEPT_RESULTS))) {
+        dropKept(id);
+      }
+      releaseCursors(previous);
       const run: Run = {
         tabId,
         sourceId: session.sourceId,
@@ -242,6 +327,26 @@ export const useExec = create<ExecState>((set, get) => {
       }
     },
 
+    pin(tabId, index) {
+      const run = get().runs[tabId];
+      const st = run?.statements.find((x) => x.index === index);
+      if (!run || !st || st.outcome?.type !== 'rows' || st.movedTo || isRunning(run)) {
+        return null;
+      }
+      const id = keep(run, st, true);
+      patchStatement(tabId, index, { movedTo: id });
+      get().setView(tabId, id);
+      return id;
+    },
+
+    setPinned(keptId, pinned) {
+      patch(keptId, (r) => ({ ...r, pinned }));
+    },
+
+    closeKept(keptId) {
+      dropKept(keptId);
+    },
+
     async refine(tabId, index, refinement) {
       const run = get().runs[tabId];
       const st = run?.statements.find((x) => x.index === index);
@@ -275,26 +380,35 @@ export function isRunning(run: Run | undefined): boolean {
   return run?.status === 'starting' || run?.status === 'running';
 }
 
-/** Closes the server-side cursors a run holds (each keeps a materialized result on the server). */
+/**
+ * Closes the server-side cursors a run holds (each keeps a materialized result on the server).
+ * Results moved to a kept run are left to that run.
+ */
 function releaseCursors(run: Run | undefined) {
-  if (!run) return;
+  if (!run) {
+    return;
+  }
   for (const st of run.statements) {
-    if (st.outcome?.type === 'rows' && st.outcome.cursor)
+    if (st.outcome?.type === 'rows' && st.outcome.cursor && !st.movedTo) {
       void backend.resultClose(run.session, st.outcome.cursor).catch(() => {});
+    }
   }
 }
 
-// Closing a console releases its results.
+// Closing a console releases its results, kept ones included.
 useWorkspace.subscribe((ws, prev) => {
-  if (ws.tabs === prev.tabs) return;
+  if (ws.tabs === prev.tabs) {
+    return;
+  }
   const open = new Set(ws.tabs.map((t) => t.id));
   const runs = useExec.getState().runs;
   for (const id of Object.keys(runs)) {
-    if (!open.has(id)) {
+    if (runs[id] && !open.has(ownerTab(id))) {
       releaseCursors(runs[id]);
       useExec.setState((s) => ({
         runs: { ...s.runs, [id]: undefined },
         view: { ...s.view, [id]: undefined },
+        kept: { ...s.kept, [id]: undefined },
       }));
     }
   }

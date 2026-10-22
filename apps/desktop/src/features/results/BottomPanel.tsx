@@ -1,54 +1,81 @@
 import clsx from 'clsx';
-import { CircleCheck, CircleX, LoaderCircle, Ban, Circle } from 'lucide-react';
+import { CircleCheck, CircleX, LoaderCircle, Ban, Circle, Pin } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { isConsole, useWorkspace } from '../../app/workspaceStore';
+import { useShallow } from 'zustand/react/shallow';
+import { useWorkspace } from '../../app/workspaceStore';
 import type { StatementOutcome } from '../../ipc/types';
 import { activeEditor } from '../editor/editorHandle';
 import { caretPosition } from '../editor/TextareaSqlEditor';
 import { isRunning, useExec, type Run, type StatementRun } from '../exec/execStore';
-import { ResultGrid } from './ResultGrid';
-import { EditBar } from './EditBar';
-import { NO_EDITS, type PendingEdits } from './editsModel';
-import { useConnections } from '../connections/connectionsStore';
+import { ResultView } from './ResultView';
 
-/** Output log and result sets of the active console's latest run. */
+/**
+ * Output log and result sets of the active console's latest run, plus results kept from earlier
+ * runs (pinned, or every run with the "new tab per run" setting). Data tabs show their grid in
+ * the editor area, so here only their output log.
+ */
 export function BottomPanel() {
   const tabId = useWorkspace((s) => s.activeTabId);
+  const isData = useWorkspace((s) => s.tabs.find((t) => t.id === tabId)?.kind === 'data');
   const run = useExec((s) => (tabId ? s.runs[tabId] : undefined));
   const view = useExec((s) => (tabId ? s.view[tabId] : undefined)) ?? 'output';
   const setView = useExec((s) => s.setView);
-  const results = run?.statements.filter((st) => st.outcome?.type === 'rows') ?? [];
+  const kept = useExec(
+    useShallow((s) =>
+      (tabId ? (s.kept[tabId] ?? []) : [])
+        .map((id) => s.runs[id])
+        .filter((r): r is Run => r !== undefined),
+    ),
+  );
+  const results = isData
+    ? []
+    : (run?.statements.filter((st) => st.outcome?.type === 'rows' && !st.movedTo) ?? []);
+  const keptRun = typeof view === 'string' ? kept.find((k) => k.tabId === view) : undefined;
 
   return (
     <section aria-label="Results" className="flex h-full flex-col bg-panel">
-      <div
-        role="tablist"
-        aria-label="Result views"
-        className="flex h-8 shrink-0 items-stretch border-b border-border text-[12px]"
-      >
-        <ViewTab selected={view === 'output'} onClick={() => tabId && setView(tabId, 'output')}>
-          Output
-        </ViewTab>
-        {results.map((st, i) => (
-          <ViewTab
-            key={st.index}
-            selected={view === st.index}
-            onClick={() => tabId && setView(tabId, st.index)}
-          >
-            Result {i + 1}
+      <div className="flex h-8 shrink-0 items-stretch border-b border-border text-[12px]">
+        <div role="tablist" aria-label="Result views" className="flex min-w-0 items-stretch">
+          <ViewTab selected={view === 'output'} onClick={() => tabId && setView(tabId, 'output')}>
+            Output
           </ViewTab>
-        ))}
+          {results.map((st) => (
+            <ViewTab
+              key={st.index}
+              selected={view === st.index}
+              onClick={() => tabId && setView(tabId, st.index)}
+            >
+              Result {st.index + 1}
+            </ViewTab>
+          ))}
+          {kept.map((k) => (
+            <ViewTab
+              key={k.tabId}
+              selected={view === k.tabId}
+              onClick={() => tabId && setView(tabId, k.tabId)}
+            >
+              {k.pinned && <Pin size={11} aria-label="pinned" className="mr-1 inline" />}
+              {k.label}
+            </ViewTab>
+          ))}
+        </div>
         {run && <RunSummary run={run} />}
       </div>
       <div className="min-h-0 flex-1 overflow-auto bg-bg">
-        {!run ? (
+        {keptRun ? (
+          <ResultView run={keptRun} statement={keptRun.statements[0]} pinnable />
+        ) : !run ? (
           <div className="flex h-full items-center justify-center text-muted">
             No query has been run.
           </div>
-        ) : view === 'output' ? (
+        ) : view === 'output' || typeof view === 'string' || results.length === 0 ? (
           <OutputLog run={run} />
         ) : (
-          <ResultView run={run} statement={results.find((st) => st.index === view) ?? results[0]} />
+          <ResultView
+            run={run}
+            statement={results.find((st) => st.index === view) ?? results[0]}
+            pinnable
+          />
         )}
       </div>
     </section>
@@ -207,66 +234,5 @@ function OutputLine({ st }: { st: StatementRun }) {
         <span className="shrink-0 tabular-nums text-muted">{formatMs(st.elapsedMs)}</span>
       )}
     </li>
-  );
-}
-
-function ResultView({ run, statement }: { run: Run; statement: StatementRun | undefined }) {
-  const consoleName = useWorkspace((s) => {
-    const tab = s.tabs.find((t) => t.id === run.tabId);
-    return isConsole(tab) ? tab.console : 'result';
-  });
-  const source = useConnections((s) => s.items.find((c) => c.id === run.sourceId));
-  const refine = useExec((s) => s.refine);
-  const updateEdits = useExec((s) => s.updateEdits);
-  const revertEdits = useExec((s) => s.revertEdits);
-  const submitEdits = useExec((s) => s.submitEdits);
-  const o = statement?.outcome;
-  if (!statement || !o || o.type !== 'rows') return null;
-
-  // Editing needs an editable target and a writable data source; otherwise say why not.
-  const target = o.edit?.status === 'editable' && !source?.readOnly ? o.edit.target : null;
-  const reason = source?.readOnly
-    ? `the data source "${source.name}" is read-only.`
-    : o.edit?.status === 'readOnly'
-      ? o.edit.reason
-      : 'only query results (SELECT …) can be edited.';
-  const edits = statement.edits ?? NO_EDITS;
-  const onChange = (f: (e: PendingEdits) => PendingEdits) =>
-    updateEdits(run.tabId, statement.index, f);
-
-  return (
-    <div className="flex h-full flex-col">
-      <EditBar
-        source={source}
-        session={run.session}
-        target={target}
-        reason={reason}
-        edits={edits}
-        submitting={statement.submitting ?? false}
-        submitError={statement.submitError}
-        submitted={statement.submitted}
-        onChange={onChange}
-        onRevert={() => revertEdits(run.tabId, statement.index)}
-        onSubmit={() => submitEdits(run.tabId, statement.index)}
-      />
-      <div className="min-h-0 flex-1">
-        {/* Re-keyed per result (cursor), so each re-run starts with a fresh page cache and scroll position. */}
-        <ResultGrid
-          key={`${statement.index}:${o.cursor ?? 'capped'}:${run.startedAt}`}
-          session={run.session}
-          outcome={o}
-          exportName={`${consoleName}_result_${statement.index + 1}`}
-          // Only cursor-backed query results can be re-run with sort/filter.
-          onRefine={o.cursor ? (r) => void refine(run.tabId, statement.index, r) : undefined}
-          refinement={statement.refinement}
-          refining={statement.refining}
-          refineError={statement.refineError}
-          widthsKey={`${run.tabId}:${run.startedAt}:${statement.index}`}
-          editing={
-            target ? { target, edits, busy: statement.submitting ?? false, onChange } : undefined
-          }
-        />
-      </div>
-    </div>
   );
 }

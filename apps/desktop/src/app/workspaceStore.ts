@@ -2,8 +2,10 @@ import { create } from 'zustand';
 import { backend } from '../ipc/client';
 import type {
   ConsoleTabState,
+  DataTabState,
   DdlObject,
   DdlTabState,
+  GridLayout,
   ObjectRef,
   ObjectTabState,
   WorkspaceState,
@@ -20,13 +22,20 @@ export interface ConsoleTab extends ConsoleTabState {
 
 export type ObjectTab = ObjectTabState;
 export type DdlTab = DdlTabState;
+export type DataTab = DataTabState;
 
-/** An editor tab: a SQL console, an object (table viewer) or generated DDL. */
-export type EditorTab = ConsoleTab | ObjectTab | DdlTab;
+/** An editor tab: a SQL console, an object (table viewer), generated DDL or a table's data. */
+export type EditorTab = ConsoleTab | ObjectTab | DdlTab | DataTab;
 
 export function isConsole(tab: EditorTab | undefined): tab is ConsoleTab {
-  return !!tab && tab.kind !== 'object' && tab.kind !== 'ddl';
+  return !!tab && tab.kind !== 'object' && tab.kind !== 'ddl' && tab.kind !== 'data';
 }
+
+/** Tabs that show result grids, and so keep column layouts. */
+export type GridTab = ConsoleTab | DataTab;
+
+/** Column layouts kept per tab; the oldest go first. */
+export const MAX_GRID_LAYOUTS = 20;
 
 function sameObject(a: ObjectRef, b: ObjectRef): boolean {
   return a.schema === b.schema && a.name === b.name && a.objectType === b.objectType;
@@ -49,6 +58,12 @@ interface WorkspaceStore {
   openObject(sourceId: string, object: ObjectRef): string;
   /** Opens (or activates) a DDL tab for `objects`. */
   openDdl(sourceId: string, objects: DdlObject[], title: string): string;
+  /** Opens (or activates) the data of a table or view. */
+  openData(sourceId: string, object: ObjectRef): string;
+  /** The WHERE and ORDER BY text of a data tab. */
+  setDataFilter(id: string, where: string, orderBy: string): void;
+  /** Stores (or with `null` forgets) a result's column layout in its tab. */
+  setGridLayout(id: string, signature: string, layout: GridLayout | null): void;
   closeTab(id: string): Promise<void>;
   activate(id: string): void;
   cycleTab(delta: 1 | -1): void;
@@ -116,7 +131,7 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => {
     const notices: string[] = [];
     for (const t of state.tabs) {
       try {
-        if ('kind' in t && (t.kind === 'object' || t.kind === 'ddl')) {
+        if ('kind' in t && (t.kind === 'object' || t.kind === 'ddl' || t.kind === 'data')) {
           tabs.push(t);
         } else if ('console' in t) {
           tabs.push({ ...t, text: await backend.consoleRead(t.console), save: 'saved' });
@@ -218,6 +233,42 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => {
       return id;
     },
 
+    openData(sourceId, object) {
+      const existing = get().tabs.find(
+        (t) => t.kind === 'data' && t.sourceId === sourceId && sameObject(t.object, object),
+      );
+      if (existing) {
+        set({ activeTabId: existing.id, caret: null });
+        return existing.id;
+      }
+      const id = newId();
+      set((s) => ({
+        tabs: [...s.tabs, { id, kind: 'data', sourceId, object }],
+        activeTabId: id,
+        caret: null,
+      }));
+      return id;
+    },
+
+    setDataFilter(id, where, orderBy) {
+      set((s) => ({
+        tabs: s.tabs.map((t) => (t.id === id && t.kind === 'data' ? { ...t, where, orderBy } : t)),
+      }));
+    },
+
+    setGridLayout(id, signature, layout) {
+      set((s) => ({
+        tabs: s.tabs.map((t) => {
+          if (t.id !== id || !(isConsole(t) || t.kind === 'data')) {
+            return t;
+          }
+          const rest = Object.entries(t.gridLayouts ?? {}).filter(([k]) => k !== signature);
+          const kept = layout ? [...rest, [signature, layout] as const] : rest;
+          return { ...t, gridLayouts: Object.fromEntries(kept.slice(-MAX_GRID_LAYOUTS)) };
+        }),
+      }));
+    },
+
     activate(id) {
       if (get().activeTabId !== id && get().tabs.some((t) => t.id === id))
         set({ activeTabId: id, caret: null });
@@ -287,17 +338,34 @@ export function snapshot(
             sourceId: t.sourceId,
             ...(t.ownSession ? { ownSession: t.ownSession } : {}),
             ...(t.schema ? { schema: t.schema } : {}),
+            ...layouts(t),
           }
         : t.kind === 'object'
           ? { id: t.id, kind: 'object' as const, sourceId: t.sourceId, object: t.object }
-          : {
-              id: t.id,
-              kind: 'ddl' as const,
-              sourceId: t.sourceId,
-              objects: t.objects,
-              title: t.title,
-            },
+          : t.kind === 'data'
+            ? {
+                id: t.id,
+                kind: 'data' as const,
+                sourceId: t.sourceId,
+                object: t.object,
+                ...(t.where ? { where: t.where } : {}),
+                ...(t.orderBy ? { orderBy: t.orderBy } : {}),
+                ...layouts(t),
+              }
+            : {
+                id: t.id,
+                kind: 'ddl' as const,
+                sourceId: t.sourceId,
+                objects: t.objects,
+                title: t.title,
+              },
     ),
     activeTabId: s.activeTabId,
   };
+}
+
+function layouts(t: GridTab): { gridLayouts?: Record<string, GridLayout> } {
+  return t.gridLayouts && Object.keys(t.gridLayouts).length > 0
+    ? { gridLayouts: t.gridLayouts }
+    : {};
 }

@@ -221,6 +221,9 @@ pub enum RowChange {
         key: Vec<Cell>,
         set: Vec<ColumnValue>,
         original: Vec<ColumnValue>,
+        /// Result-column positions set to the column default (`SET col = DEFAULT`).
+        #[serde(default)]
+        defaults: Vec<usize>,
     },
     Delete {
         key: Vec<Cell>,

@@ -38,6 +38,7 @@ mod tests {
         let decls = [
             // Settings (quarry-store)
             decl::<quarry_store::ThemePreference>(&cfg),
+            decl::<quarry_store::ResultTabs>(&cfg),
             decl::<quarry_store::Settings>(&cfg),
             // Errors
             decl::<crate::error::AppError>(&cfg),
@@ -109,6 +110,8 @@ mod tests {
             decl::<crate::results::ExportFormat>(&cfg),
             decl::<crate::results::ExportColumn>(&cfg),
             decl::<crate::results::ExportSummary>(&cfg),
+            decl::<crate::results::ExportOptions>(&cfg),
+            decl::<crate::results::CopySummary>(&cfg),
         ];
         format!("{HEADER}\n{}", decls.join("\n"))
     }

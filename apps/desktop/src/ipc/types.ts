@@ -6,7 +6,11 @@ import type { DdlObject, ObjectRef, Settings } from './bindings';
 
 export type * from './bindings';
 
-export const DEFAULT_SETTINGS: Settings = { theme: 'system', editorFontSize: 13 };
+export const DEFAULT_SETTINGS: Settings = {
+  theme: 'system',
+  editorFontSize: 13,
+  resultTabs: 'reuse',
+};
 
 /** Text form of a value as the server renders it; `null` is SQL NULL (Rust `quarry_db_core::Cell`). */
 export type Cell = string | null;
@@ -25,6 +29,15 @@ export interface ConsoleTabState {
   ownSession?: boolean;
   /** Schema put first in the search path for this console's runs; absent = server default. */
   schema?: string | null;
+  /** Column order and visibility of this tab's results, by column signature (M4.8). */
+  gridLayouts?: Record<string, GridLayout>;
+}
+
+/** Column order and visibility of a result: result-column indices. */
+export interface GridLayout {
+  /** Display order; columns not listed follow in result order. */
+  order: number[];
+  hidden: number[];
 }
 
 /** A read-only structure view of one table, view or materialized view (M4.3). */
@@ -45,6 +58,19 @@ export interface DdlTabState {
   title: string;
 }
 
+/** A table's rows ("Open data", M4.8), filtered and sorted with free-form SQL text. */
+export interface DataTabState {
+  id: string;
+  kind: 'data';
+  sourceId: string;
+  object: ObjectRef;
+  /** Condition after WHERE, as typed; empty for all rows. */
+  where?: string;
+  /** Expression list after ORDER BY, as typed. */
+  orderBy?: string;
+  gridLayouts?: Record<string, GridLayout>;
+}
+
 /** Pre-M3.1 tabs kept their text inline; migrated into console files on load. */
 export interface LegacyTabState {
   id: string;
@@ -56,6 +82,6 @@ export interface LegacyTabState {
 export interface WorkspaceState {
   layout: Record<string, Record<string, number>>;
   panels: { explorerCollapsed: boolean; bottomCollapsed: boolean };
-  tabs: (ConsoleTabState | LegacyTabState | ObjectTabState | DdlTabState)[];
+  tabs: (ConsoleTabState | LegacyTabState | ObjectTabState | DdlTabState | DataTabState)[];
   activeTabId: string | null;
 }

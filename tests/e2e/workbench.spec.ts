@@ -49,10 +49,18 @@ test('runs a query, shows the result grid, and exports it', async ({ app }) => {
     request: { statements: [{ sql: 'select id, email from shop.customers', offset: 0 }] },
   });
 
-  await app.getByRole('button', { name: 'CSV' }).click();
+  await app.getByRole('button', { name: /Export/ }).click();
+  const dialog = app.getByRole('dialog', { name: 'Export result' });
+  await dialog.getByLabel('Format').selectOption('csv');
+  await dialog.getByRole('button', { name: 'Export' }).click();
   await expect.poll(() => ipcCalls(app, 'result_export')).toHaveLength(1);
   const [exported] = await ipcCalls(app, 'result_export');
-  expect(exported?.args).toMatchObject({ cursor: 'quarry_c1', format: 'csv' });
+  expect(exported?.args).toMatchObject({
+    cursor: 'quarry_c1',
+    format: 'csv',
+    options: { header: true },
+  });
+  await expect(app.getByText(/Exported 2 rows/)).toBeVisible();
 });
 
 test('asks before running a destructive statement, with Cancel focused', async ({ app }) => {
@@ -197,6 +205,45 @@ test.describe('accessibility', () => {
     await expect(dialog).toBeHidden();
     const [applied] = await ipcCalls(app, 'schema_apply');
     expect(applied?.args).toMatchObject({ statements: ['CREATE TABLE shop.events (...)'] });
+  });
+
+  test('Open data grid, selection summary and copy dialog have no WCAG A/AA violations', async ({
+    app,
+  }) => {
+    await createDataSource(app, 'Dev');
+    await app.getByRole('treeitem', { name: /^Dev/ }).click();
+    const tree = app.getByRole('tree', { name: 'Data sources' });
+    await tree.press('ArrowRight');
+    await expect(app.getByRole('treeitem', { name: 'shop, schema' })).toBeVisible();
+    await tree.press('ArrowDown');
+    await tree.press('ArrowRight');
+    await tree.press('ArrowDown');
+    await tree.press('ArrowRight');
+    await app.getByRole('treeitem', { name: 'customers, table' }).click({ button: 'right' });
+    await app.getByRole('menuitem', { name: 'Open data' }).click();
+    await expect(app.getByRole('tab', { name: 'customers (data)' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    const grid = app.getByRole('grid', { name: 'Result rows' });
+    await expect(grid.getByText('a@example.test')).toBeVisible();
+    const [run] = await ipcCalls(app, 'query_execute');
+    expect(run?.args).toMatchObject({
+      request: { statements: [{ sql: 'SELECT * FROM shop.customers', offset: 0 }] },
+    });
+    await grid.focus();
+    await app.keyboard.press('ControlOrMeta+a');
+    await expect(app.getByRole('status', { name: 'Selection summary' })).toContainText('Count');
+    await expectNoA11yViolations(app);
+
+    await app.getByRole('button', { name: /Copy/ }).click();
+    const dialog = app.getByRole('dialog', { name: 'Copy rows' });
+    await dialog.getByLabel('Format').selectOption('markdown');
+    await expectNoA11yViolations(app, '[role="dialog"]');
+    await dialog.getByRole('button', { name: 'Copy' }).click();
+    await expect.poll(() => ipcCalls(app, 'result_format')).toHaveLength(1);
+    const [formatted] = await ipcCalls(app, 'result_format');
+    expect(formatted?.args).toMatchObject({ format: 'markdown' });
   });
 
   test('connection dialog has no WCAG A/AA violations', async ({ app }) => {

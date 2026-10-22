@@ -9,7 +9,9 @@ import type {
   DdlOptions,
   ExecEvent,
   ExecRequest,
+  CopySummary,
   ExportFormat,
+  ExportOptions,
   EditStatement,
   EditTarget,
   ExportSummary,
@@ -107,15 +109,39 @@ export interface Backend {
   ): Promise<EditStatement[]>;
   /** All or nothing; resolves to the number of changes applied. */
   resultApplyEdits(session: SessionKey, target: EditTarget, changes: RowChange[]): Promise<number>;
-  /** Native save dialog + streamed export in the backend; `null` if the user cancelled. */
+  /**
+   * Native save dialog + streamed export in the backend; `null` if the user cancelled the dialog
+   * or the export (`resultExportCancel(job)`).
+   */
   resultExport(
     session: SessionKey,
     cursor: string,
     columns: ColumnInfo[],
     format: ExportFormat,
+    options: ExportOptions,
     fileName: string,
+    job: string,
     onProgress: (rows: number) => void,
   ): Promise<ExportSummary | null>;
+  /** Copies the whole result to the clipboard from the backend; `null` if cancelled. */
+  resultCopy(
+    session: SessionKey,
+    cursor: string,
+    columns: ColumnInfo[],
+    format: ExportFormat,
+    options: ExportOptions,
+    job: string,
+    onProgress: (rows: number) => void,
+  ): Promise<CopySummary | null>;
+  /** Stops a running export or whole-result copy. */
+  resultExportCancel(job: string): Promise<null>;
+  /** Formats rows the UI holds (a selection) as text in one of the export formats. */
+  resultFormat(
+    columns: ColumnInfo[],
+    rows: Cell[][],
+    format: ExportFormat,
+    options: ExportOptions,
+  ): Promise<string>;
   /** Transaction state and settings of a session (open or not). */
   sessionState(session: SessionKey): Promise<SessionState>;
   sessionSetTx(session: SessionKey, settings: TxSettings): Promise<SessionState>;
@@ -184,7 +210,7 @@ const tauriBackend: Backend = {
     invoke<EditStatement[]>('result_preview_edits', { session, target, changes }),
   resultApplyEdits: (session, target, changes) =>
     invoke<number>('result_apply_edits', { session, target, changes }),
-  resultExport: (session, cursor, columns, format, fileName, onProgress) => {
+  resultExport: (session, cursor, columns, format, options, fileName, job, onProgress) => {
     const channel = new Channel<number>();
     channel.onmessage = onProgress;
     return invoke<ExportSummary | null>('result_export', {
@@ -192,10 +218,28 @@ const tauriBackend: Backend = {
       cursor,
       columns,
       format,
+      options,
       fileName,
+      job,
       onProgress: channel,
     });
   },
+  resultCopy: (session, cursor, columns, format, options, job, onProgress) => {
+    const channel = new Channel<number>();
+    channel.onmessage = onProgress;
+    return invoke<CopySummary | null>('result_copy', {
+      session,
+      cursor,
+      columns,
+      format,
+      options,
+      job,
+      onProgress: channel,
+    });
+  },
+  resultExportCancel: (job) => invoke<null>('result_export_cancel', { job }),
+  resultFormat: (columns, rows, format, options) =>
+    invoke<string>('result_format', { columns, rows, format, options }),
   sessionState: (session) => invoke<SessionState>('session_state', { session }),
   sessionSetTx: (session, settings) =>
     invoke<SessionState>('session_set_tx', { session, settings }),

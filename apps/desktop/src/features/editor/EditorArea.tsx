@@ -3,6 +3,7 @@ import { AlignLeft, ListChecks, Play, Square, X } from 'lucide-react';
 import { useCallback, useState } from 'react';
 import { useSettings } from '../../app/settingsStore';
 import { isConsole, useWorkspace, type ConsoleTab, type EditorTab } from '../../app/workspaceStore';
+import { DataTab } from '../data/DataTab';
 import { DdlViewer } from '../schema/DdlViewer';
 import { ObjectViewer } from '../schema/ObjectViewer';
 import { shortcutLabel } from '../../lib/keymap';
@@ -123,6 +124,7 @@ export function EditorArea({ theme }: { theme: 'light' | 'dark' }) {
           object={active.object}
         />
       )}
+      {active?.kind === 'data' && <DataTab key={active.id} tab={active} />}
       {active?.kind === 'ddl' && (
         <DdlViewer
           key={active.id}
@@ -141,12 +143,18 @@ function tabLabel(tab: EditorTab): string {
   if (isConsole(tab)) {
     return `${tab.console}.sql`;
   }
+  if (tab.kind === 'data') {
+    return `${tab.object.name} (data)`;
+  }
   return tab.kind === 'object' ? tab.object.name : `DDL: ${tab.title}`;
 }
 
 function tabTitle(tab: EditorTab): string {
   if (isConsole(tab)) {
     return `${tab.console}.sql`;
+  }
+  if (tab.kind === 'data') {
+    return `Rows of ${tab.object.schema}.${tab.object.name}`;
   }
   return tab.kind === 'object'
     ? `${tab.object.schema}.${tab.object.name} (${tab.object.objectType.replace('_', ' ')})`

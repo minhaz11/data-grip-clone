@@ -82,6 +82,7 @@ describe('row editing in the grid', () => {
         key: ['1'],
         set: [{ column: 1, value: 'new@x.test' }],
         original: [{ column: 1, value: 'a@x.test' }],
+        defaults: [],
       },
     ]);
 

@@ -348,6 +348,13 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
     return true;
   }
 
+  function openData(row: Row) {
+    const object = objectOf(row);
+    if (object) {
+      useWorkspace.getState().openData(row.profile.id, object);
+    }
+  }
+
   function menuItems(row: Row): MenuItem[] {
     const refreshItem: MenuItem = {
       label: 'Refresh',
@@ -360,7 +367,10 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
       const live = sessions[row.profile.id]?.state === 'connected';
       return [
         ...(objectOf(row)
-          ? [{ label: 'Open table viewer', shortcut: 'Enter', onSelect: () => openViewer(row) }]
+          ? [
+              { label: 'Open table viewer', shortcut: 'Enter', onSelect: () => openViewer(row) },
+              { label: 'Open data', onSelect: () => openData(row) },
+            ]
           : []),
         ...(info
           ? [{ label: 'Quick info', shortcut: 'Ctrl+Q', onSelect: () => setQuickInfo(info) }]

@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { DialogHost } from '../../app/dialogs';
 import { backend } from '../../ipc/client';
 import type { Cell, StatementOutcome } from '../../ipc/types';
 import { MAX_SCROLL_PX, PAGE_SIZE } from './gridModel';
@@ -105,14 +106,15 @@ describe('ResultGrid', () => {
     expect(write).toHaveBeenLastCalledWith(''); // NULL copies as empty text
   });
 
-  it('exports through the backend with progress and a summary', async () => {
+  it('exports through the backend with options, progress, Cancel and a summary', async () => {
     let finish: (v: { path: string; rows: number; bytes: number } | null) => void = () => {};
     const exp = vi
       .spyOn(backend, 'resultExport')
-      .mockImplementation((_s, _c, _cols, _f, _n, onProgress) => {
+      .mockImplementation((_s, _c, _cols, _f, _o, _n, _job, onProgress) => {
         onProgress(5000);
         return new Promise((resolve) => (finish = resolve));
       });
+    const cancel = vi.spyOn(backend, 'resultExportCancel').mockResolvedValue(null);
     const user = userEvent.setup();
     render(
       <ResultGrid
@@ -121,35 +123,69 @@ describe('ResultGrid', () => {
         exportName="console_result_1"
       />,
     );
-    await user.click(screen.getByRole('button', { name: /CSV/ }));
+    await user.click(screen.getByRole('button', { name: /Export/ }));
+    const dialog = screen.getByRole('dialog', { name: 'Export result' });
+    await user.selectOptions(within(dialog).getByLabelText('Format'), 'sql');
+    expect(dialog).toHaveTextContent('placeholder name result_table');
+    await user.selectOptions(within(dialog).getByLabelText('Format'), 'csv');
+    await user.type(within(dialog).getByLabelText('NULL as'), '\\N');
+    await user.click(within(dialog).getByLabelText('Quote every value'));
+    await user.click(within(dialog).getByRole('button', { name: 'Export' }));
     expect(exp).toHaveBeenCalledWith(
       { sourceId: 'src' },
       'quarry_cursor_1',
       COLUMNS,
       'csv',
+      { nullText: '\\N', quoteAll: true, header: true, table: null },
       'console_result_1',
+      expect.any(String),
       expect.any(Function),
     );
     expect(await screen.findByText(/Exporting CSV… 5,000 rows/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /JSON/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Export/ })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(cancel).toHaveBeenCalledWith(exp.mock.calls[0]?.[6]);
     await act(async () =>
       finish({ path: '/home/u/out/console_result_1.csv', rows: 1_000_000, bytes: 123 }),
     );
     expect(screen.getByText('Exported 1,000,000 rows to console_result_1.csv')).toBeInTheDocument();
   });
 
-  it('treats a cancelled save dialog as no-op and reports export failures', async () => {
+  it('treats a cancelled export as no-op and reports export failures', async () => {
     const exp = vi
       .spyOn(backend, 'resultExport')
       .mockResolvedValueOnce(null)
       .mockRejectedValueOnce({ kind: 'storage', message: 'disk full' });
     const user = userEvent.setup();
     render(<ResultGrid session={{ sourceId: 'src' }} outcome={million()} exportName="r" />);
-    await user.click(screen.getByRole('button', { name: /JSON/ }));
+    const exportOnce = async () => {
+      await user.click(screen.getByRole('button', { name: /Export/ }));
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Export' }));
+    };
+    await exportOnce();
     await waitFor(() => expect(exp).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /JSON/ }));
+    await exportOnce();
     expect(await screen.findByRole('alert')).toHaveTextContent('Export failed: disk full');
+  });
+
+  it('copies the whole result to the clipboard from the backend after confirming', async () => {
+    const copy = vi.spyOn(backend, 'resultCopy').mockResolvedValue({ rows: 1_000_000, bytes: 9 });
+    const user = userEvent.setup();
+    render(
+      <>
+        <ResultGrid session={{ sourceId: 'src' }} outcome={million()} exportName="r" />
+        <DialogHost />
+      </>,
+    );
+    await user.click(screen.getByRole('button', { name: /Export/ }));
+    const dialog = screen.getByRole('dialog');
+    await user.click(within(dialog).getByLabelText('Clipboard'));
+    await user.click(within(dialog).getByRole('button', { name: 'Export' }));
+    const confirm = await screen.findByRole('dialog', { name: 'Copy 1,000,000 rows?' });
+    await user.click(within(confirm).getByRole('button', { name: 'Copy' }));
+    await waitFor(() => expect(copy).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText('Copied 1,000,000 rows')).toBeInTheDocument();
   });
 
   it('explains capped results that cannot be paged or exported', () => {
@@ -164,7 +200,7 @@ describe('ResultGrid', () => {
     expect(
       screen.getByText(/2,000 rows \(first 500 shown; this statement cannot be paged\)/),
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /CSV/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Export/ })).toBeDisabled();
     expect(screen.getByRole('grid')).toHaveAttribute('aria-rowcount', '501');
   });
 });

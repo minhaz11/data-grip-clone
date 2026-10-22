@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-result-format"
+description = "Enables the result_format command without any pre-configured scope."
+commands.allow = ["result_format"]
+
+[[permission]]
+identifier = "deny-result-format"
+description = "Denies the result_format command without any pre-configured scope."
+commands.deny = ["result_format"]

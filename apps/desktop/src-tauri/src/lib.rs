@@ -22,6 +22,8 @@ pub fn run() {
     tauri::Builder::default()
         // Used from Rust only (export save dialog); the WebView gets no dialog permissions.
         .plugin(tauri_plugin_dialog::init())
+        // Used from Rust only (whole-result copy); the WebView gets no clipboard permissions.
+        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             // Redacting, size-capped log file (ADR-0003); also stderr in development builds.
             quarry_logging::init(&app.path().app_log_dir()?, cfg!(debug_assertions))?;
@@ -40,6 +42,7 @@ pub fn run() {
             )));
             app.manage(store);
             app.manage(Arc::new(exec::Jobs::default()));
+            app.manage(Arc::new(results::Exports::default()));
             app.manage(Arc::new(sessions::Sessions::new(Arc::new(PostgresAdapter))));
             Ok(())
         })
@@ -76,6 +79,9 @@ pub fn run() {
             results::result_preview_edits,
             results::result_apply_edits,
             results::result_export,
+            results::result_copy,
+            results::result_export_cancel,
+            results::result_format,
             transactions::session_state,
             transactions::session_set_tx,
             transactions::tx_commit,

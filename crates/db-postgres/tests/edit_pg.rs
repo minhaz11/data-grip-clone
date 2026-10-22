@@ -154,6 +154,7 @@ async fn edits_apply_in_one_transaction_with_optimistic_checks() {
                 key: k("1"),
                 set: vec![v(1, Some("A"))],
                 original: vec![v(1, Some("a"))],
+                defaults: vec![],
             }],
         )
         .expect("preview");
@@ -171,6 +172,7 @@ async fn edits_apply_in_one_transaction_with_optimistic_checks() {
                     key: k("1"),
                     set: vec![v(1, Some("A")), v(2, None)],
                     original: vec![v(1, Some("a")), v(2, Some("1"))],
+                    defaults: vec![],
                 },
                 RowChange::Delete { key: k("2") },
                 RowChange::Insert {
@@ -207,6 +209,36 @@ async fn edits_apply_in_one_transaction_with_optimistic_checks() {
         "omitted columns take defaults"
     );
 
+    // Set DEFAULT on an existing row.
+    s.apply_edits(
+        &t,
+        &[RowChange::Update {
+            key: k("1"),
+            set: vec![],
+            original: vec![v(1, Some("A"))],
+            defaults: vec![1],
+        }],
+    )
+    .await
+    .expect("default");
+    assert_eq!(
+        scalar(&s, "select name from public.it_edit where id = 1")
+            .await
+            .as_deref(),
+        Some("unnamed")
+    );
+    s.apply_edits(
+        &t,
+        &[RowChange::Update {
+            key: k("1"),
+            set: vec![v(1, Some("A"))],
+            original: vec![v(1, Some("unnamed"))],
+            defaults: vec![],
+        }],
+    )
+    .await
+    .expect("restore");
+
     // A stale original value (someone changed the row) aborts the whole batch.
     let e = s
         .apply_edits(
@@ -216,11 +248,13 @@ async fn edits_apply_in_one_transaction_with_optimistic_checks() {
                     key: k("3"),
                     set: vec![v(1, Some("first"))],
                     original: vec![v(1, Some("c"))],
+                    defaults: vec![],
                 },
                 RowChange::Update {
                     key: k("1"),
                     set: vec![v(1, Some("second"))],
                     original: vec![v(1, Some("stale"))],
+                    defaults: vec![],
                 },
             ],
         )
@@ -246,6 +280,7 @@ async fn edits_apply_in_one_transaction_with_optimistic_checks() {
                 key: k("3"),
                 set: vec![v(2, Some("not a number"))],
                 original: vec![],
+                defaults: vec![],
             }],
         )
         .await
@@ -291,6 +326,7 @@ async fn edits_never_touch_the_sessions_open_transaction() {
             key: k("1"),
             set: vec![v(1, Some("edited"))],
             original: vec![],
+            defaults: vec![],
         }],
     )
     .await
