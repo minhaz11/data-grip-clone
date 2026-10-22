@@ -12,7 +12,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "npm -w apps/desktop run typecheck",
-    "test": "npm -w apps/desktop run test"
+    "test": "npm -w apps/desktop run test",
+    "test:release": "node --test \"scripts/release/*.test.mjs\""
   },
   "devDependencies": {
     "prettier": "3.9.10"

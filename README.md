@@ -41,6 +41,23 @@ scripts/test-pg.sh down
 The harness refuses any endpoint other than `127.0.0.1:55432`, so it can never touch other
 databases. Credentials and the self-signed certificate live in `target/test-pg/` (gitignored).
 
+## Releases
+
+Releases are automated (details and one-time setup in
+[`docs/plans/20-release-automation.md`](docs/plans/20-release-automation.md)):
+
+1. Every push to `main` updates a release PR (`chore: release vX.Y.Z`, branch `release/next`) with
+   the next version and a `CHANGELOG.md` section. `feat` commits bump minor, everything else bumps
+   patch, and breaking changes bump major (minor while on 0.x). Run the "Release PR" workflow by hand
+   to force a bump.
+2. Merging that PR builds Linux, Windows and macOS installers and publishes them as a GitHub
+   release. If any build fails, the release stays a draft.
+
+```bash
+npm run test:release                                # unit tests for the version script
+node scripts/release/version.mjs current            # version in the app files
+```
+
 ## Layout
 
 | Path                       | Purpose                                                |
