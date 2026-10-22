@@ -280,7 +280,7 @@ pub async fn result_export(
 }
 
 /// A file-name suggestion: letters, digits, `-`, `_`, `.`, at most 80 characters.
-fn sanitize(name: &str) -> String {
+pub(crate) fn sanitize(name: &str) -> String {
     let cleaned: String = name
         .chars()
         .map(|c| {

@@ -17,6 +17,8 @@ fn main() {
         "sessions_list",
         "metadata_children",
         "object_details",
+        "ddl_generate",
+        "ddl_save",
         "console_list",
         "console_create",
         "console_read",

@@ -22,6 +22,8 @@
     "allow-sessions-list",
     "allow-metadata-children",
     "allow-object-details",
+    "allow-ddl-generate",
+    "allow-ddl-save",
     "allow-console-list",
     "allow-console-create",
     "allow-console-read",

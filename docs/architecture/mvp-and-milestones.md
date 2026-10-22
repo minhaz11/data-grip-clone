@@ -212,7 +212,28 @@ listed tests run green in CI.
   - Tests: integration (every new kind, overloads, owned sequences, both FK directions, identity
     and generated columns, comments, estimates, a missing object); UI (viewer sections, Connect,
     quick info, tab de-duplication and restore); E2E axe scan of the viewer.
-  - Not yet: Show DDL (M4.4), Open data (M4.8), partitions as children of their parent.
+  - Not yet: Open data (M4.8), partitions as children of their parent.
+- **M4.4 DDL generation** ✅ (plan: `docs/plans/05-ddl-generation.md`)
+  - **Show DDL / Copy DDL** on tables, views, materialized views, routines, sequences, indexes,
+    triggers and whole schemas. The DDL tab is read-only (Monaco), with Qualified names / Owner /
+    Grants options, Copy, Open in console and Save (native dialog from Rust, written atomically).
+  - **Generated in Rust from the catalog** on a short-lived side connection with its own
+    `search_path`, so a console's open transaction is never touched and the server qualifies and
+    quotes every name the same way (`regclass`, `pg_get_*def`, `quote_ident`, `quote_literal`).
+  - **Order that applies cleanly**: schemas, sequences, routines (row-type routines after
+    tables), tables without foreign keys (partitions after parents), views in dependency order,
+    sequence ownership, indexes, foreign keys (so circular pairs work), triggers. Serial
+    sequences come with their table.
+  - **Round-trip tests**: the seeded `shop` schema and a rich fixture (identity and generated
+    columns, collations, partial and expression indexes, circular FKs, partitions, chained views,
+    materialized views, functions, a procedure, enabled and disabled triggers, odd identifiers,
+    comments) are generated, applied to an empty database and generated again: the text and a
+    catalog fingerprint of the two databases must match. The fingerprint caught a partitioned
+    index written as `ON ONLY`, which would have left partitions unindexed.
+  - Also fixed: SQL syntax colors below 4.5:1 contrast in the editor (strings and operators in
+    light, comments, strings and predefined variables in dark), now scanned in both themes.
+  - Not yet: aggregates (emitted as a comment), table inheritance (`INHERITS`), arbitrary
+    multi-select in the explorer (schema-level generation covers multiple objects).
 - **M4.6 Transactions and sessions** ✅ (plan: `docs/plans/03-transactions-sessions.md`)
   - **Transaction state comes from the server.** `tokio-postgres` drops the ReadyForQuery
     status, so after any statement that can change it (BEGIN/COMMIT/…, CALL, DO, or an error

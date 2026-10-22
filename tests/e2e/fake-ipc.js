@@ -264,6 +264,15 @@
       sendOnChannel(onProgress, [ROWS.rows.length]);
       return { path: '/tmp/quarry-e2e.csv', rows: ROWS.rows.length, bytes: 42 };
     },
+    ddl_generate: ({ objects, options }) =>
+      objects
+        .map((o) =>
+          o.kind === 'relation'
+            ? `CREATE TABLE ${options.qualify ? `${o.schema}.` : ''}${o.name} (\n    id integer NOT NULL\n);\n`
+            : `-- ${o.kind}\n`,
+        )
+        .join('\n'),
+    ddl_save: () => '/tmp/quarry-e2e.sql',
     session_state: ({ session }) => sessionState(session),
     session_set_tx: ({ session, settings }) => updateSession(session, { settings }),
     tx_commit: ({ session }) => updateSession(session, { status: 'idle' }),

@@ -34,4 +34,6 @@ export interface SqlEditorProps {
   onCaret(caret: { line: number; column: number } | null): void;
   /** Formatting failed (e.g. text the formatter cannot parse). */
   onFormatError(message: string): void;
+  /** Shows text that cannot be edited (generated DDL); Format does nothing. */
+  readOnly?: boolean;
 }

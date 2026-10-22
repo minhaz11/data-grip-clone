@@ -2,7 +2,7 @@
  * IPC types. Everything that crosses IPC is generated from the Rust types into `bindings.ts`
  * (regenerate with `npm run bindings`); this file re-exports it and adds the few types the UI owns.
  */
-import type { ObjectRef, Settings } from './bindings';
+import type { DdlObject, ObjectRef, Settings } from './bindings';
 
 export type * from './bindings';
 
@@ -35,6 +35,16 @@ export interface ObjectTabState {
   object: ObjectRef;
 }
 
+/** Generated DDL for some objects (M4.4); the text is generated again when the tab is shown. */
+export interface DdlTabState {
+  id: string;
+  kind: 'ddl';
+  sourceId: string;
+  objects: DdlObject[];
+  /** What the DDL is for, e.g. `shop.orders`. */
+  title: string;
+}
+
 /** Pre-M3.1 tabs kept their text inline; migrated into console files on load. */
 export interface LegacyTabState {
   id: string;
@@ -46,6 +56,6 @@ export interface LegacyTabState {
 export interface WorkspaceState {
   layout: Record<string, Record<string, number>>;
   panels: { explorerCollapsed: boolean; bottomCollapsed: boolean };
-  tabs: (ConsoleTabState | LegacyTabState | ObjectTabState)[];
+  tabs: (ConsoleTabState | LegacyTabState | ObjectTabState | DdlTabState)[];
   activeTabId: string | null;
 }

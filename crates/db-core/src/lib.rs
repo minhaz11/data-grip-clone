@@ -1,6 +1,7 @@
 //! Engine-neutral adapter contract (ADR-0002). The UI and app layer only see these types; each
 //! engine crate (`quarry-db-postgres`, later MySQL/SQLite) implements [`DatabaseAdapter`].
 
+mod ddl;
 mod details;
 mod exec;
 mod metadata;
@@ -13,6 +14,7 @@ use std::time::Duration;
 use quarry_secrets::SecretString;
 use serde::Serialize;
 
+pub use ddl::{DdlObject, DdlOptions};
 pub use details::{
     ColumnDetail, ConstraintDetail, ForeignKeyDetail, IndexDetail, ObjectDetails, ObjectRef,
     TriggerDetail,
@@ -177,6 +179,9 @@ pub trait Session: Send + Sync {
     /// Columns, indexes, constraints, foreign keys (both directions), triggers and size of one
     /// object; `None` if it no longer exists.
     async fn object_details(&self, object: &ObjectRef) -> Result<Option<ObjectDetails>, DbError>;
+    /// DDL for `objects` from the catalog, as one script that applies cleanly in order. Runs on
+    /// a separate short-lived connection, so this session's transaction is never touched.
+    async fn ddl(&self, objects: &[DdlObject], options: &DdlOptions) -> Result<String, DbError>;
     /// Runs one statement exactly as given (no parameters, no rewriting).
     async fn execute(&self, sql: &str, options: &ExecOptions) -> Result<StatementOutcome, DbError>;
     /// Asks the server to cancel whatever this session is running. Returns once the request is

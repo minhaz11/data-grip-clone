@@ -2,6 +2,7 @@ mod bindings;
 mod commands;
 mod connections;
 mod consoles;
+mod ddl;
 mod error;
 mod exec;
 mod results;
@@ -57,6 +58,8 @@ pub fn run() {
             connections::sessions_list,
             connections::metadata_children,
             connections::object_details,
+            ddl::ddl_generate,
+            ddl::ddl_save,
             consoles::console_list,
             consoles::console_create,
             consoles::console_read,

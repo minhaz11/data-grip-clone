@@ -20,6 +20,7 @@ export default function TextareaSqlEditor({
   onChange,
   onCaret,
   onFormatError,
+  readOnly = false,
 }: SqlEditorProps) {
   const ref = useRef<HTMLTextAreaElement>(null);
 
@@ -44,6 +45,9 @@ export default function TextareaSqlEditor({
         el()?.removeAttribute('aria-description');
       },
       format: () => {
+        if (readOnly) {
+          return;
+        }
         try {
           onChange(formatSql(ref.current?.value ?? ''));
         } catch (e) {
@@ -52,7 +56,7 @@ export default function TextareaSqlEditor({
       },
     });
     return () => setActiveEditor(null);
-  }, [onChange, onFormatError]);
+  }, [onChange, onFormatError, readOnly]);
 
   const report = (el: HTMLTextAreaElement) => onCaret(caretPosition(el.value, el.selectionStart));
   return (
@@ -60,6 +64,7 @@ export default function TextareaSqlEditor({
       ref={ref}
       aria-label={`${name} SQL`}
       value={value}
+      readOnly={readOnly}
       spellCheck={false}
       // Mounted per tab (keyed by id), so opening or switching a console puts the caret in it.
       autoFocus

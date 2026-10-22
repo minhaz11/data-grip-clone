@@ -73,6 +73,8 @@ mod tests {
             decl::<quarry_db_core::ConstraintDetail>(&cfg),
             decl::<quarry_db_core::ForeignKeyDetail>(&cfg),
             decl::<quarry_db_core::TriggerDetail>(&cfg),
+            decl::<quarry_db_core::DdlObject>(&cfg),
+            decl::<quarry_db_core::DdlOptions>(&cfg),
             // Query execution
             decl::<quarry_db_core::ColumnInfo>(&cfg),
             decl::<quarry_db_core::StatementOutcome>(&cfg),

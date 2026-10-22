@@ -5,6 +5,8 @@ import type {
   ConnectionProfile,
   Cell,
   ColumnInfo,
+  DdlObject,
+  DdlOptions,
   ExecEvent,
   ExecRequest,
   ExportFormat,
@@ -61,6 +63,15 @@ export interface Backend {
   metadataChildren(id: string, request: MetadataRequest): Promise<MetaNode[]>;
   /** Everything the table viewer shows; `null` if the object no longer exists. */
   objectDetails(id: string, object: ObjectRef): Promise<ObjectDetails | null>;
+  /** DDL for `objects`, as one script that applies in order. */
+  ddlGenerate(id: string, objects: DdlObject[], options: DdlOptions): Promise<string>;
+  /** Generates DDL and saves it via the native dialog; the saved path, or `null` if cancelled. */
+  ddlSave(
+    id: string,
+    objects: DdlObject[],
+    options: DdlOptions,
+    fileName: string,
+  ): Promise<string | null>;
   consoleList(): Promise<string[]>;
   /** Creates an empty console file; returns its name (`preferred` if free and valid). */
   consoleCreate(preferred: string | null): Promise<string>;
@@ -133,6 +144,9 @@ const tauriBackend: Backend = {
   onConnectionStatus: (cb) => listen<StatusEvent>('connection-status', (e) => cb(e.payload)),
   metadataChildren: (id, request) => invoke<MetaNode[]>('metadata_children', { id, request }),
   objectDetails: (id, object) => invoke<ObjectDetails | null>('object_details', { id, object }),
+  ddlGenerate: (id, objects, options) => invoke<string>('ddl_generate', { id, objects, options }),
+  ddlSave: (id, objects, options, fileName) =>
+    invoke<string | null>('ddl_save', { id, objects, options, fileName }),
   consoleList: () => invoke<string[]>('console_list'),
   consoleCreate: (preferred) => invoke<string>('console_create', { preferred }),
   consoleRead: (name) => invoke<string>('console_read', { name }),

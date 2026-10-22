@@ -3,6 +3,7 @@ import { AlignLeft, ListChecks, Play, Square, X } from 'lucide-react';
 import { useCallback, useState } from 'react';
 import { useSettings } from '../../app/settingsStore';
 import { isConsole, useWorkspace, type ConsoleTab, type EditorTab } from '../../app/workspaceStore';
+import { DdlViewer } from '../schema/DdlViewer';
 import { ObjectViewer } from '../schema/ObjectViewer';
 import { shortcutLabel } from '../../lib/keymap';
 import { useConnections } from '../connections/connectionsStore';
@@ -114,7 +115,7 @@ export function EditorArea({ theme }: { theme: 'light' | 'dark' }) {
         })}
       </div>
       {isConsole(active) && <ConsolePane key={active.id} tab={active} theme={theme} />}
-      {active && !isConsole(active) && (
+      {active?.kind === 'object' && (
         <ObjectViewer
           key={active.id}
           tabId={active.id}
@@ -122,18 +123,34 @@ export function EditorArea({ theme }: { theme: 'light' | 'dark' }) {
           object={active.object}
         />
       )}
+      {active?.kind === 'ddl' && (
+        <DdlViewer
+          key={active.id}
+          tabId={active.id}
+          sourceId={active.sourceId}
+          objects={active.objects}
+          title={active.title}
+          theme={theme}
+        />
+      )}
     </section>
   );
 }
 
 function tabLabel(tab: EditorTab): string {
-  return isConsole(tab) ? `${tab.console}.sql` : tab.object.name;
+  if (isConsole(tab)) {
+    return `${tab.console}.sql`;
+  }
+  return tab.kind === 'object' ? tab.object.name : `DDL: ${tab.title}`;
 }
 
 function tabTitle(tab: EditorTab): string {
-  return isConsole(tab)
-    ? `${tab.console}.sql`
-    : `${tab.object.schema}.${tab.object.name} (${tab.object.objectType.replace('_', ' ')})`;
+  if (isConsole(tab)) {
+    return `${tab.console}.sql`;
+  }
+  return tab.kind === 'object'
+    ? `${tab.object.schema}.${tab.object.name} (${tab.object.objectType.replace('_', ' ')})`
+    : `Generated DDL for ${tab.title}`;
 }
 
 /** Marks a tab whose session has an open (or failed) transaction. */

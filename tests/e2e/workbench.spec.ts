@@ -140,6 +140,47 @@ test.describe('accessibility', () => {
     await expectNoA11yViolations(app);
   });
 
+  test('DDL tab is read-only and has no WCAG A/AA violations', async ({ app }) => {
+    await createDataSource(app, 'Dev');
+    await app.getByRole('treeitem', { name: /^Dev/ }).click();
+    const tree = app.getByRole('tree', { name: 'Data sources' });
+    await tree.press('ArrowRight');
+    await expect(app.getByRole('treeitem', { name: 'shop, schema' })).toBeVisible();
+    await tree.press('ArrowDown');
+    await tree.press('ArrowRight');
+    await tree.press('ArrowDown');
+    await tree.press('ArrowRight');
+    await app.getByRole('treeitem', { name: 'customers, table' }).click({ button: 'right' });
+    await app.getByRole('menuitem', { name: 'Show DDL' }).click();
+    await expect(app.getByRole('tab', { name: 'DDL: shop.customers' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    const editor = app.locator('.monaco-editor').first();
+    await expect(editor).toContainText('CREATE TABLE shop.customers');
+    // Typing does not change generated DDL.
+    await editor.click();
+    await app.keyboard.type('xyz');
+    await expect(editor).not.toContainText('xyz');
+    await expectNoA11yViolations(app);
+  });
+
+  test('SQL syntax colors meet contrast in both themes', async ({ app }) => {
+    await createDataSource(app, 'Dev');
+    await consoleWith(
+      app,
+      'Dev',
+      "-- comment\nselect id, 'text', 42, now() from t where a is not null and b <> 1;",
+    );
+    await expectNoA11yViolations(app, '.monaco-editor');
+    await app.getByRole('button', { name: /^Settings/ }).click();
+    const settings = app.getByRole('dialog');
+    await settings.getByLabel('Theme').selectOption('dark');
+    await settings.getByRole('button', { name: 'Save' }).click();
+    await expect(app.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await expectNoA11yViolations(app, '.monaco-editor');
+  });
+
   test('connection dialog has no WCAG A/AA violations', async ({ app }) => {
     await app.getByRole('button', { name: 'New data source', exact: true }).click();
     await expect(app.getByRole('dialog', { name: 'New PostgreSQL Data Source' })).toBeVisible();

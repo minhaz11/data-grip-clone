@@ -1,6 +1,13 @@
 import { create } from 'zustand';
 import { backend } from '../ipc/client';
-import type { ConsoleTabState, ObjectRef, ObjectTabState, WorkspaceState } from '../ipc/types';
+import type {
+  ConsoleTabState,
+  DdlObject,
+  DdlTabState,
+  ObjectRef,
+  ObjectTabState,
+  WorkspaceState,
+} from '../ipc/types';
 import { toAppError } from '../lib/errors';
 
 export type SaveState = 'saved' | 'pending' | 'saving' | 'error';
@@ -12,12 +19,13 @@ export interface ConsoleTab extends ConsoleTabState {
 }
 
 export type ObjectTab = ObjectTabState;
+export type DdlTab = DdlTabState;
 
-/** An editor tab: a SQL console or an object (table viewer). */
-export type EditorTab = ConsoleTab | ObjectTab;
+/** An editor tab: a SQL console, an object (table viewer) or generated DDL. */
+export type EditorTab = ConsoleTab | ObjectTab | DdlTab;
 
 export function isConsole(tab: EditorTab | undefined): tab is ConsoleTab {
-  return !!tab && tab.kind !== 'object';
+  return !!tab && tab.kind !== 'object' && tab.kind !== 'ddl';
 }
 
 function sameObject(a: ObjectRef, b: ObjectRef): boolean {
@@ -39,6 +47,8 @@ interface WorkspaceStore {
   newConsole(sourceId?: string | null): Promise<string>;
   /** Opens (or activates) the table viewer for `object`. */
   openObject(sourceId: string, object: ObjectRef): string;
+  /** Opens (or activates) a DDL tab for `objects`. */
+  openDdl(sourceId: string, objects: DdlObject[], title: string): string;
   closeTab(id: string): Promise<void>;
   activate(id: string): void;
   cycleTab(delta: 1 | -1): void;
@@ -106,7 +116,7 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => {
     const notices: string[] = [];
     for (const t of state.tabs) {
       try {
-        if ('kind' in t && t.kind === 'object') {
+        if ('kind' in t && (t.kind === 'object' || t.kind === 'ddl')) {
           tabs.push(t);
         } else if ('console' in t) {
           tabs.push({ ...t, text: await backend.consoleRead(t.console), save: 'saved' });
@@ -175,7 +185,7 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => {
 
     openObject(sourceId, object) {
       const existing = get().tabs.find(
-        (t) => !isConsole(t) && t.sourceId === sourceId && sameObject(t.object, object),
+        (t) => t.kind === 'object' && t.sourceId === sourceId && sameObject(t.object, object),
       );
       if (existing) {
         set({ activeTabId: existing.id, caret: null });
@@ -184,6 +194,24 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => {
       const id = newId();
       set((s) => ({
         tabs: [...s.tabs, { id, kind: 'object', sourceId, object }],
+        activeTabId: id,
+        caret: null,
+      }));
+      return id;
+    },
+
+    openDdl(sourceId, objects, title) {
+      const key = JSON.stringify(objects);
+      const existing = get().tabs.find(
+        (t) => t.kind === 'ddl' && t.sourceId === sourceId && JSON.stringify(t.objects) === key,
+      );
+      if (existing) {
+        set({ activeTabId: existing.id, caret: null });
+        return existing.id;
+      }
+      const id = newId();
+      set((s) => ({
+        tabs: [...s.tabs, { id, kind: 'ddl', sourceId, objects, title }],
         activeTabId: id,
         caret: null,
       }));
@@ -260,7 +288,15 @@ export function snapshot(
             ...(t.ownSession ? { ownSession: t.ownSession } : {}),
             ...(t.schema ? { schema: t.schema } : {}),
           }
-        : { id: t.id, kind: 'object' as const, sourceId: t.sourceId, object: t.object },
+        : t.kind === 'object'
+          ? { id: t.id, kind: 'object' as const, sourceId: t.sourceId, object: t.object }
+          : {
+              id: t.id,
+              kind: 'ddl' as const,
+              sourceId: t.sourceId,
+              objects: t.objects,
+              title: t.title,
+            },
     ),
     activeTabId: s.activeTabId,
   };

@@ -177,6 +177,22 @@ export type TriggerDetail = { name: string,
  */
 definition: string, enabled: boolean, };
 
+export type DdlObject = { "kind": "relation", schema: string, name: string, } | { "kind": "sequence", schema: string, name: string, } | { "kind": "routine", schema: string, name: string, args: string, } | { "kind": "index", schema: string, name: string, } | { "kind": "trigger", schema: string, table: string, name: string, } | { "kind": "schema", schema: string, };
+
+export type DdlOptions = { 
+/**
+ * Schema-qualify every name (otherwise names in the object's own schema are bare).
+ */
+qualify: boolean, 
+/**
+ * Add `ALTER … OWNER TO`.
+ */
+owner: boolean, 
+/**
+ * Add `GRANT` statements from the object's privileges.
+ */
+grants: boolean, };
+
 export type ColumnInfo = { name: string, 
 /**
  * Engine type name ("int4", "text", ...) when the statement could be described.

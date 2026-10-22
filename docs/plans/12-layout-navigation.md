@@ -65,6 +65,8 @@ actions; Go to DDL works from the tree and the editor; tabs and consoles can be 
       action).
 - [ ] Go to DDL from tree and editor; reveal in tree.
 - [ ] Back/forward history across tabs and caret positions; recent consoles switcher.
+- [ ] Explorer multi-select (Shift/Ctrl+click, Shift+arrows) for Show DDL and other bulk
+      actions (moved from step 05).
 - [ ] Explorer: item-type filter, expand/collapse all, Force Refresh with last refresh time,
       loading spinner with cancel, next/previous match.
 

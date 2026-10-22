@@ -15,17 +15,25 @@ self.MonacoEnvironment = { getWorker: () => new EditorWorker() };
 const css = (name: string) =>
   getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 function defineThemes() {
-  // Match the app's surface colors; token colors come from Monaco's built-in themes.
+  // Match the app's surface colors; token colors come from Monaco's built-in themes, except the
+  // ones that fall below 4.5:1 contrast (WCAG AA) on our backgrounds, current line included.
   monaco.editor.defineTheme('quarry-light', {
     base: 'vs',
     inherit: true,
-    rules: [],
+    rules: [
+      { token: 'string.sql', foreground: 'b31d1d' }, // was FF0000 (4.0:1)
+      { token: 'operator.sql', foreground: '56626e' }, // was 778899 (3.6:1)
+    ],
     colors: { 'editor.background': '#ffffff' },
   });
   monaco.editor.defineTheme('quarry-dark', {
     base: 'vs-dark',
     inherit: true,
-    rules: [],
+    rules: [
+      { token: 'string.sql', foreground: 'ff8080' }, // was FF0000 (4.1:1)
+      { token: 'comment', foreground: '7fb069' }, // was 608B4E (4.2:1)
+      { token: 'variable.predefined', foreground: '8aa8e8' }, // was 4864AA (2.9:1)
+    ],
     colors: { 'editor.background': '#1e1f22' },
   });
 }
@@ -115,13 +123,14 @@ export default function MonacoSqlEditor({
   onChange,
   onCaret,
   onFormatError,
+  readOnly = false,
 }: SqlEditorProps) {
   const host = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
-  const callbacks = useRef({ onChange, onCaret, onFormatError });
+  const callbacks = useRef({ onChange, onCaret, onFormatError, readOnly });
   // Keep the latest callbacks without recreating the editor (refs must not be written during render).
   useLayoutEffect(() => {
-    callbacks.current = { onChange, onCaret, onFormatError };
+    callbacks.current = { onChange, onCaret, onFormatError, readOnly };
   });
 
   // Create the editor once.
@@ -148,6 +157,8 @@ export default function MonacoSqlEditor({
     ];
 
     const format = () => {
+      // executeEdits would still change a read-only model.
+      if (callbacks.current.readOnly) return;
       const model = editor.getModel();
       const selection = editor.getSelection();
       if (!model || !selection) return;
@@ -235,6 +246,10 @@ export default function MonacoSqlEditor({
   }, [tabId, value]);
 
   useEffect(() => editorRef.current?.updateOptions({ fontSize }), [fontSize]);
+  useEffect(
+    () => editorRef.current?.updateOptions({ readOnly, domReadOnly: readOnly }),
+    [readOnly],
+  );
   useEffect(
     () => monaco.editor.setTheme(theme === 'dark' ? 'quarry-dark' : 'quarry-light'),
     [theme],

@@ -1,5 +1,6 @@
 //! PostgreSQL adapter (ADR-0002): tokio-postgres over rustls.
 
+mod ddl;
 mod editability;
 mod edits;
 mod errors;
@@ -17,9 +18,9 @@ use std::time::{Duration, Instant};
 
 use quarry_db_core::{
     Cell, ColumnInfo, ConnectError, ConnectErrorKind, ConnectParams, DatabaseAdapter, DbError,
-    EditStatement, EditTarget, ExecOptions, MetaNode, MetadataRequest, ObjectDetails, ObjectRef,
-    OnClose, Refinement, RowChange, ServerInfo, Session, StatementOutcome, TlsMode, TxMode,
-    TxSettings, TxStatus,
+    DdlObject, DdlOptions, EditStatement, EditTarget, ExecOptions, MetaNode, MetadataRequest,
+    ObjectDetails, ObjectRef, OnClose, Refinement, RowChange, ServerInfo, Session,
+    StatementOutcome, TlsMode, TxMode, TxSettings, TxStatus,
 };
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
@@ -356,6 +357,28 @@ impl Session for PgSession {
     async fn object_details(&self, object: &ObjectRef) -> Result<Option<ObjectDetails>, DbError> {
         self.with_client(async |client| metadata::details(client, object).await)
             .await
+    }
+
+    async fn ddl(&self, objects: &[DdlObject], options: &DdlOptions) -> Result<String, DbError> {
+        // Its own connection: generation changes search_path, and must not touch this
+        // session's transaction or settings.
+        let side = open(&self.params, None).await.map_err(|e| {
+            errors::invalid(format!(
+                "Could not open a connection to generate DDL: {}",
+                e.message
+            ))
+        })?;
+        let result = side
+            .with_client(async |client| Ok(ddl::generate(client, objects, options).await))
+            .await;
+        side.close().await;
+        match result? {
+            Ok(script) => Ok(script),
+            Err(ddl::DdlError::Db(e)) => Err(errors::db_error(&e)),
+            Err(ddl::DdlError::Missing(what)) => Err(errors::invalid(format!(
+                "{what} does not exist (any more). Refresh the explorer."
+            ))),
+        }
     }
 
     fn tx_status(&self) -> TxStatus {

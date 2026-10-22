@@ -16,7 +16,9 @@ import { useMetadata } from './metadataStore';
 import { TreeRow } from './TreeRow';
 import { flattenTree, SEP, type Row } from './treeModel';
 import { useWorkspace } from '../../app/workspaceStore';
-import type { ObjectRef } from '../../ipc/types';
+import type { DdlObject, ObjectRef } from '../../ipc/types';
+import { backend } from '../../ipc/client';
+import { toAppError } from '../../lib/errors';
 import { QuickInfo, type QuickInfoTarget } from '../schema/QuickInfo';
 
 interface Props {
@@ -160,6 +162,70 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
     return null;
   }
 
+  /** What "Show DDL" generates for a row, and a title for it. */
+  function ddlOf(row: Row): { object: DdlObject; title: string } | null {
+    if (row.type !== 'node') {
+      return null;
+    }
+    const n = row.node;
+    if (n.kind === 'schema') {
+      return { object: { kind: 'schema', schema: n.name }, title: n.name };
+    }
+    const object = objectOf(row);
+    if (object) {
+      return {
+        object: { kind: 'relation', schema: object.schema, name: object.name },
+        title: `${object.schema}.${object.name}`,
+      };
+    }
+    // Routines, sequences, indexes and triggers take their schema (and table) from the group
+    // they are listed in.
+    const parent = rows.find((r) => r.key === row.parentKey);
+    const from = parent?.type === 'node' ? parent.node.children : undefined;
+    if (!from) {
+      return null;
+    }
+    if (n.kind === 'routine' && from.level === 'routines') {
+      const args = n.key.slice(`r:${n.name}(`.length, -1);
+      return {
+        object: { kind: 'routine', schema: from.schema, name: n.name, args },
+        title: `${from.schema}.${n.name}(${args})`,
+      };
+    }
+    if (n.kind === 'sequence' && from.level === 'sequences') {
+      return {
+        object: { kind: 'sequence', schema: from.schema, name: n.name },
+        title: `${from.schema}.${n.name}`,
+      };
+    }
+    if (n.kind === 'index' && from.level === 'indexes') {
+      return {
+        object: { kind: 'index', schema: from.schema, name: n.name },
+        title: `${from.schema}.${n.name}`,
+      };
+    }
+    if (n.kind === 'trigger' && from.level === 'triggers') {
+      return {
+        object: { kind: 'trigger', schema: from.schema, table: from.table, name: n.name },
+        title: `${n.name} on ${from.schema}.${from.table}`,
+      };
+    }
+    return null;
+  }
+
+  async function copyDdl(row: Row, target: { object: DdlObject }) {
+    try {
+      const script = await backend.ddlGenerate(row.profile.id, [target.object], {
+        qualify: true,
+        owner: false,
+        grants: false,
+      });
+      await navigator.clipboard?.writeText(script);
+    } catch (e) {
+      setActionError(toAppError(e).message);
+    }
+  }
+
   function openViewer(row: Row): boolean {
     const object = objectOf(row);
     if (!object) {
@@ -177,12 +243,24 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
     };
     if (row.type === 'node') {
       const info = quickInfoOf(row);
+      const ddl = ddlOf(row);
+      const live = sessions[row.profile.id]?.state === 'connected';
       return [
         ...(objectOf(row)
           ? [{ label: 'Open table viewer', shortcut: 'Enter', onSelect: () => openViewer(row) }]
           : []),
         ...(info
           ? [{ label: 'Quick info', shortcut: 'Ctrl+Q', onSelect: () => setQuickInfo(info) }]
+          : []),
+        ...(ddl && live
+          ? [
+              {
+                label: 'Show DDL',
+                onSelect: () =>
+                  void useWorkspace.getState().openDdl(row.profile.id, [ddl.object], ddl.title),
+              },
+              { label: 'Copy DDL', onSelect: () => void copyDdl(row, ddl) },
+            ]
           : []),
         refreshItem,
         { label: 'Copy name', onSelect: () => void navigator.clipboard?.writeText(row.node.name) },

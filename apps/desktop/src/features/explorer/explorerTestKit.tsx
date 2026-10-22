@@ -42,6 +42,22 @@ export function catalog(tables: string[]): (id: string, r: MetadataRequest) => P
             count: tables.length,
             children: { level: 'objects', schema: r.schema, types: ['table'] },
           },
+          {
+            key: 'g:routines',
+            kind: 'group',
+            name: 'Routines',
+            count: 1,
+            children: { level: 'routines', schema: r.schema },
+          },
+        ];
+      case 'routines':
+        return [
+          {
+            key: 'r:price(qty integer)',
+            kind: 'routine',
+            name: 'price',
+            detail: '(qty integer) → numeric',
+          },
         ];
       case 'objects':
         return tables.map((t) => ({
