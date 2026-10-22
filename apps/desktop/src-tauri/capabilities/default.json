@@ -29,6 +29,7 @@
     "allow-query-cancel",
     "allow-result-page",
     "allow-result-close",
-    "allow-result-export"
+    "allow-result-export",
+    "allow-result-refine"
   ]
 }

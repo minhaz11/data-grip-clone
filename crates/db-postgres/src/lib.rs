@@ -3,6 +3,7 @@
 mod errors;
 mod exec;
 mod metadata;
+mod refine;
 mod tls;
 
 use std::net::SocketAddr;
@@ -11,8 +12,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use quarry_db_core::{
-    Cell, ConnectError, ConnectErrorKind, ConnectParams, DatabaseAdapter, DbError, ExecOptions,
-    MetaNode, MetadataRequest, OnClose, ServerInfo, Session, StatementOutcome, TlsMode,
+    Cell, ColumnInfo, ConnectError, ConnectErrorKind, ConnectParams, DatabaseAdapter, DbError,
+    ExecOptions, MetaNode, MetadataRequest, OnClose, Refinement, ServerInfo, Session,
+    StatementOutcome, TlsMode,
 };
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
@@ -102,6 +104,33 @@ impl Session for PgSession {
                 .map(|(_, rows)| rows)
         })
         .await
+    }
+
+    async fn refine(
+        &self,
+        base: &str,
+        columns: &[ColumnInfo],
+        refinement: &Refinement,
+        options: &ExecOptions,
+    ) -> Result<StatementOutcome, DbError> {
+        let built = refine::build(base, columns, refinement).map_err(errors::invalid)?;
+        self.with_client(async |client| {
+            exec::run_refined(
+                client,
+                &self.cursors,
+                &built.sql,
+                &built.params,
+                columns,
+                options,
+            )
+            .await
+        })
+        .await
+        // Positions would point into the generated wrapper, not the user's text.
+        .map_err(|e| DbError {
+            position: None,
+            ..e
+        })
     }
 
     async fn close_cursor(&self, cursor: &str) -> Result<(), DbError> {

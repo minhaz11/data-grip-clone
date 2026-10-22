@@ -25,6 +25,7 @@ fn main() {
         "result_page",
         "result_close",
         "result_export",
+        "result_refine",
     ];
     tauri_build::try_build(
         tauri_build::Attributes::new()

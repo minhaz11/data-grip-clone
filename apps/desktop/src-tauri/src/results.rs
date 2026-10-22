@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc;
 
-use quarry_db_core::{Cell, ColumnInfo, ExecOptions};
+use quarry_db_core::{Cell, ColumnInfo, ExecOptions, Refinement, StatementOutcome};
 use quarry_io::{ExportWriter, Format};
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
@@ -47,6 +47,34 @@ pub async fn result_close(
         Ok(session) => Ok(session.close_cursor(&cursor).await?),
         Err(_) => Ok(()),
     }
+}
+
+/// Re-runs a query result's statement with server-side sort/filter and releases the previous
+/// cursor. `sql` is the statement the user ran; values in `refinement` are bound, not spliced.
+#[tauri::command]
+pub async fn result_refine(
+    sessions: State<'_, Arc<Sessions>>,
+    source_id: String,
+    sql: String,
+    columns: Vec<ExportColumn>,
+    refinement: Refinement,
+    previous_cursor: Option<String>,
+) -> Result<StatementOutcome, AppError> {
+    let session = sessions.get(&source_id).await?;
+    let columns: Vec<ColumnInfo> = columns
+        .into_iter()
+        .map(|c| ColumnInfo {
+            name: c.name,
+            type_name: c.type_name,
+        })
+        .collect();
+    let outcome = session
+        .refine(&sql, &columns, &refinement, &ExecOptions::default())
+        .await?;
+    if let Some(previous) = previous_cursor {
+        let _ = session.close_cursor(&previous).await;
+    }
+    Ok(outcome)
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]

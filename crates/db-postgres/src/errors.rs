@@ -48,6 +48,18 @@ pub fn db_error(e: &tokio_postgres::Error) -> DbError {
     }
 }
 
+pub fn invalid(message: String) -> DbError {
+    DbError {
+        message,
+        detail: None,
+        hint: None,
+        sqlstate: None,
+        position: None,
+        connection_lost: false,
+        cancelled: false,
+    }
+}
+
 pub fn unknown_cursor() -> DbError {
     DbError {
         message: "This result is no longer available on the server.".into(),

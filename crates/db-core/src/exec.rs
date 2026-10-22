@@ -95,3 +95,55 @@ mod tests {
         );
     }
 }
+
+/// Server-side sort and filter applied to a query result by re-running it (module D). Columns are
+/// referenced by position in the original result, never by name or SQL text.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Refinement {
+    /// Applied in order (first key sorts first).
+    #[serde(default)]
+    pub sort: Vec<SortKey>,
+    /// All must hold (AND).
+    #[serde(default)]
+    pub filters: Vec<Filter>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SortKey {
+    pub column: usize,
+    pub descending: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Filter {
+    pub column: usize,
+    pub op: FilterOp,
+    /// Text form of the comparison value; `None` for `IsNull`/`NotNull`.
+    pub value: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FilterOp {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    /// Case-insensitive substring match on the text form.
+    Contains,
+    /// Case-insensitive prefix match on the text form.
+    StartsWith,
+    IsNull,
+    NotNull,
+}
+
+impl FilterOp {
+    pub fn takes_value(self) -> bool {
+        !matches!(self, FilterOp::IsNull | FilterOp::NotNull)
+    }
+}

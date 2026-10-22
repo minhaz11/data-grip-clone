@@ -11,7 +11,10 @@ use std::time::Duration;
 use quarry_secrets::SecretString;
 use serde::Serialize;
 
-pub use exec::{Cell, ColumnInfo, ErrorPosition, ExecOptions, StatementOutcome};
+pub use exec::{
+    Cell, ColumnInfo, ErrorPosition, ExecOptions, Filter, FilterOp, Refinement, SortKey,
+    StatementOutcome,
+};
 pub use metadata::{MetaKind, MetaNode, MetadataRequest, ObjectType};
 
 /// TLS policy, with libpq semantics: `Prefer`/`Require` encrypt without verifying the certificate;
@@ -174,6 +177,15 @@ pub trait Session: Send + Sync {
         limit: usize,
         options: &ExecOptions,
     ) -> Result<Vec<Vec<Cell>>, DbError>;
+    /// Re-runs query `base` (a statement that produced `columns`) with server-side sort/filter
+    /// and returns a fresh cursor-backed result. Values are bound, never interpolated.
+    async fn refine(
+        &self,
+        base: &str,
+        columns: &[ColumnInfo],
+        refinement: &Refinement,
+        options: &ExecOptions,
+    ) -> Result<StatementOutcome, DbError>;
     /// Releases a result cursor. Unknown or already closed cursors are ignored.
     async fn close_cursor(&self, cursor: &str) -> Result<(), DbError>;
     /// Ends the session; waits for in-flight calls to finish first. Idempotent.

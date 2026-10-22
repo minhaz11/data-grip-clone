@@ -207,3 +207,25 @@ export interface ExportSummary {
   rows: number;
   bytes: number;
 }
+
+// ---- Server-side sort/filter (mirrors quarry_db_core::Refinement) ----
+
+export type FilterOp =
+  'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge' | 'contains' | 'starts_with' | 'is_null' | 'not_null';
+
+export interface SortKey {
+  /** Position in the original result. */
+  column: number;
+  descending: boolean;
+}
+
+export interface Filter {
+  column: number;
+  op: FilterOp;
+  value: string | null;
+}
+
+export interface Refinement {
+  sort: SortKey[];
+  filters: Filter[];
+}

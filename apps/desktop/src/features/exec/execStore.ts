@@ -3,6 +3,7 @@ import { backend } from '../../ipc/client';
 import type {
   ExecEvent,
   JobStatus,
+  Refinement,
   StatementError,
   StatementOutcome,
   StatementRequest,
@@ -18,6 +19,10 @@ export interface StatementRun {
   outcome?: StatementOutcome;
   error?: StatementError;
   elapsedMs?: number;
+  /** Server-side sort/filter currently applied to `outcome`. */
+  refinement?: Refinement;
+  refining?: boolean;
+  refineError?: string;
 }
 
 export interface Run {
@@ -50,6 +55,8 @@ interface ExecState {
   reject(tabId: string, sourceId: string, sourceName: string, error: string): void;
   cancel(tabId: string): Promise<void>;
   setView(tabId: string, view: ResultView): void;
+  /** Re-runs one result with sort/filter; keeps the current result if that fails. */
+  refine(tabId: string, index: number, refinement: Refinement): Promise<void>;
 }
 
 export const useExec = create<ExecState>((set, get) => {
@@ -159,6 +166,26 @@ export const useExec = create<ExecState>((set, get) => {
     },
 
     setView: (tabId, view) => set((s) => ({ view: { ...s.view, [tabId]: view } })),
+
+    async refine(tabId, index, refinement) {
+      const run = get().runs[tabId];
+      const st = run?.statements.find((x) => x.index === index);
+      if (!run || !st || st.outcome?.type !== 'rows' || st.refining) return;
+      const cursor = st.outcome.cursor ?? null;
+      patchStatement(tabId, index, { refining: true, refineError: undefined });
+      try {
+        const outcome = await backend.resultRefine(
+          run.sourceId,
+          st.sql,
+          st.outcome.columns,
+          refinement,
+          cursor,
+        );
+        patchStatement(tabId, index, { outcome, refinement, refining: false });
+      } catch (e) {
+        patchStatement(tabId, index, { refining: false, refineError: toAppError(e).message });
+      }
+    },
   };
 });
 

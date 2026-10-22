@@ -154,7 +154,23 @@ listed tests run green in CI.
 
 ### Phase 4 — Data and schema management
 
-- Server-side sort/filter (WHERE/ORDER BY builders with bound values), paging controls.
+- **M4.1 Server-side sort/filter** ✅ (WHERE/ORDER BY builders with bound values).
+  - The query re-runs as `SELECT * FROM (<query>) AS q(c1…cn) WHERE … ORDER BY <positions>`.
+    The positional alias list handles duplicate or odd column names, the original sits on its
+    own lines (trailing comments are safe), and every identifier is generated.
+  - Values are bind parameters cast to the column type (`($1::text)::int4`), so bad input gets
+    PostgreSQL's own message. Contains/starts-with use `ILIKE … ESCAPE` with `%`/`_` escaped.
+    Type names are allow-listed; anything else compares as text.
+  - The result is a fresh cursor (paging and export keep working), and the old cursor is closed.
+    A failed re-run keeps the previous result and shows the error.
+  - UI: click a header to sort (asc → desc → off), Shift+click for multi-column (numbered
+    indicators, `aria-sort`). The filter bar has removable chips and an inline
+    column/operator/value form. Column widths survive re-runs. Results that cannot be re-run
+    show no controls.
+  - Tests: builder unit tests (no values in SQL text, unsafe type names, limits) and integration
+    tests (numeric vs text order, typed timestamp filters, literal `%`/`_`, NULL tests, duplicate
+    names, CTEs with inner ORDER BY, 22P02 messages, injection as a plain value).
+  - Paging controls: superseded by the virtual scroller over cursor pages (M3.3).
 - Safe row editing:
   - Requires a PK/unique key (otherwise read-only, with a reason shown).
   - Pending-change highlighting.

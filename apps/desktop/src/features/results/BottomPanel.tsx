@@ -208,15 +208,22 @@ function ResultView({ run, statement }: { run: Run; statement: StatementRun | un
   const consoleName = useWorkspace(
     (s) => s.tabs.find((t) => t.id === run.tabId)?.console ?? 'result',
   );
+  const refine = useExec((s) => s.refine);
   const o = statement?.outcome;
   if (!statement || !o || o.type !== 'rows') return null;
-  // Keyed by cursor so a new run starts with a fresh page cache and scroll position.
+  // Re-keyed per result (cursor), so each re-run starts with a fresh page cache and scroll position.
   return (
     <ResultGrid
       key={`${statement.index}:${o.cursor ?? 'capped'}:${run.startedAt}`}
       sourceId={run.sourceId}
       outcome={o}
       exportName={`${consoleName}_result_${statement.index + 1}`}
+      // Only cursor-backed query results can be re-run with sort/filter.
+      onRefine={o.cursor ? (r) => void refine(run.tabId, statement.index, r) : undefined}
+      refinement={statement.refinement}
+      refining={statement.refining}
+      refineError={statement.refineError}
+      widthsKey={`${run.tabId}:${run.startedAt}:${statement.index}`}
     />
   );
 }

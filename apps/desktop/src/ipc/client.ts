@@ -9,6 +9,8 @@ import type {
   ExecRequest,
   ExportFormat,
   ExportSummary,
+  Refinement,
+  StatementOutcome,
   MetaNode,
   MetadataRequest,
   PasswordChange,
@@ -59,6 +61,14 @@ export interface Backend {
   /** Rows `[offset, offset + limit)` of a result cursor (limit ≤ 2000). */
   resultPage(sourceId: string, cursor: string, offset: number, limit: number): Promise<Cell[][]>;
   resultClose(sourceId: string, cursor: string): Promise<null>;
+  /** Re-runs `sql` with server-side sort/filter; closes `previousCursor`. */
+  resultRefine(
+    sourceId: string,
+    sql: string,
+    columns: ColumnInfo[],
+    refinement: Refinement,
+    previousCursor: string | null,
+  ): Promise<StatementOutcome>;
   /** Native save dialog + streamed export in the backend; `null` if the user cancelled. */
   resultExport(
     sourceId: string,
@@ -102,6 +112,14 @@ const tauriBackend: Backend = {
   resultPage: (sourceId, cursor, offset, limit) =>
     invoke<Cell[][]>('result_page', { sourceId, cursor, offset, limit }),
   resultClose: (sourceId, cursor) => invoke<null>('result_close', { sourceId, cursor }),
+  resultRefine: (sourceId, sql, columns, refinement, previousCursor) =>
+    invoke<StatementOutcome>('result_refine', {
+      sourceId,
+      sql,
+      columns,
+      refinement,
+      previousCursor,
+    }),
   resultExport: (sourceId, cursor, columns, format, fileName, onProgress) => {
     const channel = new Channel<number>();
     channel.onmessage = onProgress;

@@ -123,6 +123,53 @@ pub async fn run(
     run_direct(client, sql, types, options).await
 }
 
+/// Declares a cursor for `sql` with bound `params` (refined queries) and returns its first page,
+/// labelled with the original result's `columns`.
+pub async fn run_refined(
+    client: &Client,
+    cursors: &Cursors,
+    sql: &str,
+    params: &[String],
+    columns: &[ColumnInfo],
+    options: &ExecOptions,
+) -> Result<StatementOutcome, tokio_postgres::Error> {
+    let name = cursors.allocate();
+    let binds: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = params
+        .iter()
+        .map(|p| p as &(dyn tokio_postgres::types::ToSql + Sync))
+        .collect();
+    client
+        .execute(
+            &format!("DECLARE {name} SCROLL CURSOR WITH HOLD FOR {sql}"),
+            &binds,
+        )
+        .await?;
+    if let Some(evicted) = cursors.register(name.clone()) {
+        let _ = client.batch_execute(&format!("CLOSE {evicted}")).await;
+    }
+    let types: Vec<String> = columns
+        .iter()
+        .map(|c| c.type_name.clone().unwrap_or_default())
+        .collect();
+    match first_page(client, &name, Some(types), options).await? {
+        // The wrapper renames outputs c1…cn; show the original names.
+        StatementOutcome::Rows {
+            rows,
+            total_rows,
+            truncated,
+            cursor,
+            ..
+        } => Ok(StatementOutcome::Rows {
+            columns: columns.to_vec(),
+            rows,
+            total_rows,
+            truncated,
+            cursor,
+        }),
+        other => Ok(other),
+    }
+}
+
 async fn first_page(
     client: &Client,
     name: &str,

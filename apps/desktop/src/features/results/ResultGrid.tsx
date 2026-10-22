@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { Download, LoaderCircle } from 'lucide-react';
+import { ArrowDown, ArrowUp, Download, LoaderCircle } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { backend } from '../../ipc/client';
 import type {
@@ -7,6 +7,7 @@ import type {
   ColumnInfo,
   ExportFormat,
   ExportSummary,
+  Refinement,
   StatementOutcome,
 } from '../../ipc/types';
 import { toAppError } from '../../lib/errors';
@@ -18,6 +19,8 @@ import {
   scrollTopFor,
   visibleWindow,
 } from './gridModel';
+import { FilterBar } from './FilterBar';
+import { nextSort } from './refineModel';
 
 type RowsOutcome = Extract<StatementOutcome, { type: 'rows' }>;
 
@@ -27,12 +30,22 @@ const HEADER_HEIGHT = 26;
 const MAX_CACHED_PAGES = 24;
 /** Used until the viewport has been measured (and in environments without layout). */
 const FALLBACK_VIEWPORT = 400;
+/** Column widths per result view, so re-sorting or re-filtering keeps the user's layout. */
+const widthCache = new Map<string, number[]>();
+const NO_REFINEMENT: Refinement = { sort: [], filters: [] };
 
 interface Props {
   sourceId: string;
   outcome: RowsOutcome;
   /** Base name suggested for exported files. */
   exportName: string;
+  /** Present when the result can be re-run with server-side sort/filter. */
+  onRefine?(refinement: Refinement): void;
+  refinement?: Refinement;
+  refining?: boolean;
+  refineError?: string;
+  /** Identifies the result view across re-runs (keeps column widths). */
+  widthsKey?: string;
 }
 
 /**
@@ -80,7 +93,16 @@ function usePages(sourceId: string, outcome: RowsOutcome) {
   return { row, ensure, error };
 }
 
-export function ResultGrid({ sourceId, outcome, exportName }: Props) {
+export function ResultGrid({
+  sourceId,
+  outcome,
+  exportName,
+  onRefine,
+  refinement = NO_REFINEMENT,
+  refining = false,
+  refineError,
+  widthsKey,
+}: Props) {
   const { columns } = outcome;
   // Rows the user can browse: all of them with a cursor, otherwise only what came back.
   const rowCount = outcome.cursor ? outcome.totalRows : outcome.rows.length;
@@ -89,14 +111,19 @@ export function ResultGrid({ sourceId, outcome, exportName }: Props) {
   const scroller = useRef<HTMLDivElement>(null);
   const [scroll, setScroll] = useState({ top: 0, left: 0 });
   const [viewport, setViewport] = useState(FALLBACK_VIEWPORT);
-  const [widths, setWidths] = useState(() =>
-    columns.map((c, i) =>
+  const [widths, setWidths] = useState(() => {
+    const cached = widthsKey ? widthCache.get(widthsKey) : undefined;
+    if (cached?.length === columns.length) return cached;
+    return columns.map((c, i) =>
       initialWidth(
         c.name,
         outcome.rows.slice(0, 50).map((r) => r[i] ?? null),
       ),
-    ),
-  );
+    );
+  });
+  useEffect(() => {
+    if (widthsKey) widthCache.set(widthsKey, widths);
+  }, [widthsKey, widths]);
   const [selected, setSelected] = useState<{ row: number; col: number } | null>(null);
 
   useLayoutEffect(() => {
@@ -185,8 +212,18 @@ export function ResultGrid({ sourceId, outcome, exportName }: Props) {
         outcome={outcome}
         exportName={exportName}
         rowCount={rowCount}
-        error={error}
+        error={refineError ?? error}
+        refining={refining}
+        refinement={refinement}
       />
+      {onRefine && (
+        <FilterBar
+          columns={columns}
+          filters={refinement.filters}
+          busy={refining}
+          onChange={(filters) => onRefine({ ...refinement, filters })}
+        />
+      )}
       <div
         ref={scroller}
         role="grid"
@@ -222,11 +259,29 @@ export function ResultGrid({ sourceId, outcome, exportName }: Props) {
                 <div
                   key={i}
                   role="columnheader"
-                  title={c.typeName ? `${c.name} (${c.typeName})` : c.name}
+                  aria-sort={sortState(refinement, i)}
+                  title={
+                    (c.typeName ? `${c.name} (${c.typeName})` : c.name) +
+                    (onRefine ? '\nClick to sort, Shift+click to add a sort column' : '')
+                  }
                   className="relative flex shrink-0 items-center gap-1.5 overflow-hidden border-r border-border px-2 font-semibold whitespace-nowrap"
                   style={{ width: widths[i] }}
                 >
-                  <span className="truncate">{c.name}</span>
+                  {onRefine ? (
+                    <button
+                      type="button"
+                      disabled={refining}
+                      onClick={(e) =>
+                        onRefine({ ...refinement, sort: nextSort(refinement.sort, i, e.shiftKey) })
+                      }
+                      className="min-w-0 truncate text-left font-semibold hover:text-accent disabled:cursor-wait"
+                    >
+                      {c.name}
+                    </button>
+                  ) : (
+                    <span className="truncate">{c.name}</span>
+                  )}
+                  <SortIndicator refinement={refinement} column={i} />
                   {c.typeName && (
                     <span className="truncate font-normal text-muted">{c.typeName}</span>
                   )}
@@ -344,12 +399,16 @@ function GridToolbar({
   exportName,
   rowCount,
   error,
+  refining,
+  refinement,
 }: {
   sourceId: string;
   outcome: RowsOutcome;
   exportName: string;
   rowCount: number;
   error: string | null;
+  refining: boolean;
+  refinement: Refinement;
 }) {
   const [exporting, setExporting] = useState<{ format: ExportFormat; rows: number } | null>(null);
   const [result, setResult] = useState<{ ok: ExportSummary } | { error: string } | null>(null);
@@ -383,7 +442,19 @@ function GridToolbar({
         {!cursor &&
           outcome.truncated &&
           ` (first ${rowCount.toLocaleString()} shown; this statement cannot be paged)`}
+        {(refinement.sort.length > 0 || refinement.filters.length > 0) && (
+          <span className="ml-1">
+            ·{refinement.filters.length > 0 && ` filtered (${refinement.filters.length})`}
+            {refinement.sort.length > 0 &&
+              ` sorted by ${refinement.sort.length} column${refinement.sort.length > 1 ? 's' : ''}`}
+          </span>
+        )}
       </span>
+      {refining && (
+        <span className="flex items-center gap-1" role="status">
+          <LoaderCircle size={12} className="animate-spin" aria-hidden /> Re-running…
+        </span>
+      )}
       {error && (
         <span role="alert" className="truncate text-danger" title={error}>
           {error}
@@ -422,5 +493,23 @@ function GridToolbar({
         </button>
       ))}
     </div>
+  );
+}
+
+function sortState(r: Refinement, column: number): 'ascending' | 'descending' | 'none' {
+  const k = r.sort.find((x) => x.column === column);
+  return k ? (k.descending ? 'descending' : 'ascending') : 'none';
+}
+
+function SortIndicator({ refinement, column }: { refinement: Refinement; column: number }) {
+  const at = refinement.sort.findIndex((k) => k.column === column);
+  const key = refinement.sort[at];
+  if (!key) return null;
+  const Icon = key.descending ? ArrowDown : ArrowUp;
+  return (
+    <span className="flex shrink-0 items-center text-accent" aria-hidden>
+      <Icon size={11} />
+      {refinement.sort.length > 1 && <span className="text-[10px]">{at + 1}</span>}
+    </span>
   );
 }

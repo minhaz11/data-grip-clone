@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-result-refine"
+description = "Enables the result_refine command without any pre-configured scope."
+commands.allow = ["result_refine"]
+
+[[permission]]
+identifier = "deny-result-refine"
+description = "Denies the result_refine command without any pre-configured scope."
+commands.deny = ["result_refine"]
