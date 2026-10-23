@@ -12,7 +12,8 @@ export type CommandId =
   | 'editor.previousError'
   | 'query.run'
   | 'query.runScript'
-  | 'query.cancel';
+  | 'query.cancel'
+  | 'history.open';
 
 /** Default bindings. Phase 5 makes these user-configurable; keep ids stable. */
 export const DEFAULT_KEYMAP: Record<CommandId, string[]> = {
@@ -30,6 +31,7 @@ export const DEFAULT_KEYMAP: Record<CommandId, string[]> = {
   'query.run': ['Ctrl+Enter'],
   'query.runScript': ['Ctrl+Shift+F10'],
   'query.cancel': ['Ctrl+F2'],
+  'history.open': ['Ctrl+Alt+E'],
 };
 
 const KEY_ALIASES: Record<string, string> = {

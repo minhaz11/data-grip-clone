@@ -104,6 +104,11 @@ export function createMemoryBackend(): Backend {
     ddlSave: () => fail('not_connected', 'This data source is not connected.'),
     queryExecute: () => fail('unsupported', 'Running queries requires the Quarry desktop app.'),
     queryCancel: async () => null,
+    // Nothing runs in the browser, so nothing is ever recorded.
+    historySearch: async () => [],
+    historyDelete: async () => 0,
+    historyClear: async () => 0,
+    historyExport: () => fail('unsupported', 'Exporting history requires the Quarry desktop app.'),
     resultPage: () => fail('unsupported', 'Result paging requires the Quarry desktop app.'),
     resultClose: async () => null,
     resultPreviewEdits: () => fail('unsupported', 'Editing requires the Quarry desktop app.'),

@@ -13,12 +13,14 @@ import { closeConsole } from '../features/exec/txGuards';
 import { DialogHost } from './dialogs';
 import { Toasts } from '../features/notifications/notifications';
 import { ConnectionDialog } from '../features/connections/ConnectionDialog';
+import { HistoryDialog } from '../features/history/HistoryDialog';
 import type { ConnectionProfile } from '../ipc/types';
 
 export function App() {
   const { ready, error } = useWorkspacePersistence();
   const theme = useAppliedTheme();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const notices = useWorkspace((s) => s.notices);
   const dismissNotices = useWorkspace((s) => s.dismissNotices);
   // `null` = closed, `'new'` = create, profile = edit.
@@ -47,6 +49,7 @@ export function App() {
         const id = ws().activeTabId;
         if (id) void useExec.getState().cancel(id);
       },
+      'history.open': () => setHistoryOpen(true),
     };
   }, []);
   useKeybindings(handlers);
@@ -61,7 +64,10 @@ export function App() {
 
   return (
     <div className="flex h-full flex-col">
-      <Toolbar onOpenSettings={() => setSettingsOpen(true)} />
+      <Toolbar
+        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenHistory={() => setHistoryOpen(true)}
+      />
       {error && (
         <div role="alert" className="border-b border-border bg-panel-2 px-3 py-1 text-danger">
           {error}
@@ -87,6 +93,7 @@ export function App() {
       <DialogHost />
       <Toasts />
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
+      {historyOpen && <HistoryDialog onClose={() => setHistoryOpen(false)} />}
       {connectionDialog && (
         <ConnectionDialog
           profile={connectionDialog === 'new' ? undefined : connectionDialog}

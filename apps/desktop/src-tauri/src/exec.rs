@@ -2,12 +2,14 @@
 //! progress to the console that started it through a Tauri `Channel`.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use quarry_db_core::{Cell, DbError, ExecOptions, Notice, Session, StatementOutcome};
-use quarry_store::Store;
+use quarry_store::history::error_summary;
+use quarry_store::{HistoryRecord, HistoryStatus, Retention, Store};
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, State};
@@ -126,6 +128,20 @@ struct Job {
     cancel_requested: AtomicBool,
 }
 
+/// Where a job records its statements (REQ-HIST-01).
+struct History {
+    store: Arc<Store>,
+    retention: Retention,
+}
+
+/// What a run of statements did.
+struct Script {
+    status: JobStatus,
+    executed: usize,
+    /// One record per statement that reached the server, in order.
+    history: Vec<HistoryRecord>,
+}
+
 #[derive(Default)]
 pub struct Jobs {
     running: Mutex<HashMap<String, Arc<Job>>>,
@@ -135,6 +151,12 @@ fn millis(since: Instant) -> u64 {
     u64::try_from(since.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
+pub(crate) fn unix_millis() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+}
+
 impl Jobs {
     async fn start(
         self: &Arc<Self>,
@@ -142,6 +164,7 @@ impl Jobs {
         sessions: &Arc<Sessions>,
         request: ExecRequest,
         timeout_ms: u64,
+        history: History,
         channel: Channel<ExecEvent>,
     ) -> Result<String, AppError> {
         if request.statements.is_empty() {
@@ -206,19 +229,29 @@ impl Jobs {
         let id = job_id.clone();
         let (app, sessions) = (app.clone(), Arc::clone(sessions));
         tauri::async_runtime::spawn(async move {
-            jobs.run(&id, request.statements, options, channel, &app, &sessions)
-                .await;
+            jobs.run(
+                &id,
+                request.statements,
+                options,
+                channel,
+                history,
+                &app,
+                &sessions,
+            )
+            .await;
             jobs.running.lock().await.remove(&id);
         });
         Ok(job_id)
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn run(
         &self,
         job_id: &str,
         statements: Vec<StatementRequest>,
         options: ExecOptions,
         channel: Channel<ExecEvent>,
+        history: History,
         app: &AppHandle,
         sessions: &Sessions,
     ) {
@@ -226,82 +259,33 @@ impl Jobs {
             return;
         };
         let started = Instant::now();
-        let mut status = JobStatus::Completed;
-        let mut executed = 0;
-        // Notices go to this job's channel, tagged with the statement running when they came.
-        let current = Arc::new(AtomicUsize::new(0));
-        {
-            let current = Arc::clone(&current);
-            let channel = channel.clone();
-            job.session.set_notice_sink(Some(Arc::new(move |notice| {
-                let index = current.load(Ordering::SeqCst);
-                let _ = channel.send(ExecEvent::Notice { index, notice });
-            })));
-        }
-        for (index, statement) in statements.iter().enumerate() {
-            current.store(index, Ordering::SeqCst);
-            if job.cancel_requested.load(Ordering::SeqCst) {
-                status = JobStatus::Cancelled;
-                break;
-            }
-            let offset = statement.offset;
-            let _ = channel.send(ExecEvent::StatementStarted { index, offset });
-            let at = Instant::now();
-            let tx_before = job.session.tx_status();
-            let result = match &statement.params {
-                Some(params) if !params.is_empty() => {
-                    job.session
-                        .execute_params(&statement.sql, params, &options)
-                        .await
-                }
-                _ => job.session.execute(&statement.sql, &options).await,
-            };
-            executed += 1;
-            if job.session.tx_status() != tx_before {
-                sessions.emit_state(app, &job.key).await;
-            }
-            match result {
-                Ok(outcome) => {
-                    let _ = channel.send(ExecEvent::StatementDone {
-                        index,
-                        offset,
-                        elapsed_ms: millis(at),
-                        outcome,
-                    });
-                }
-                Err(e) => {
-                    let cancelled = e.cancelled || job.cancel_requested.load(Ordering::SeqCst);
-                    tracing::debug!(
-                        job = %job_id,
-                        index,
-                        sqlstate = e.sqlstate.as_deref().unwrap_or(""),
-                        connection_lost = e.connection_lost,
-                        "statement failed"
-                    );
-                    let _ = channel.send(ExecEvent::StatementFailed {
-                        index,
-                        offset,
-                        elapsed_ms: millis(at),
-                        error: e.into(),
-                    });
-                    // Scripts stop at the first error, like running them through psql -v ON_ERROR_STOP.
-                    status = if cancelled {
-                        JobStatus::Cancelled
-                    } else {
-                        JobStatus::Failed
-                    };
-                    break;
-                }
-            }
-        }
-        job.session.set_notice_sink(None);
+        let script = run_statements(&job, job_id, &statements, &options, &channel, || {
+            sessions.emit_state(app, &job.key)
+        })
+        .await;
         let elapsed_ms = millis(started);
+        let (status, executed) = (script.status, script.executed);
         tracing::info!(job = %job_id, ?status, executed, elapsed_ms, "query job finished");
         let _ = channel.send(ExecEvent::Finished {
             status,
             executed,
             elapsed_ms,
         });
+        // Recorded here, not by the UI, so the history is complete even if the window goes away.
+        let source_id = job.key.source_id.clone();
+        let History { store, retention } = history;
+        let records = script.history;
+        let written = tauri::async_runtime::spawn_blocking(move || {
+            store.record_history(&source_id, &records, retention, unix_millis())
+        })
+        .await;
+        match written {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => {
+                tracing::warn!(job = %job_id, error = %e, "could not record query history")
+            }
+            Err(e) => tracing::warn!(job = %job_id, error = %e, "query history task failed"),
+        }
     }
 
     async fn cancel(&self, job_id: &str) -> Result<(), AppError> {
@@ -310,6 +294,122 @@ impl Jobs {
         job.cancel_requested.store(true, Ordering::SeqCst);
         tracing::info!(job = %job_id, "cancel requested");
         job.session.cancel().await.map_err(AppError::from)
+    }
+}
+
+/// Runs `statements` in order on the job's session, sending progress on `channel`, and stops at the
+/// first error or cancel. `on_tx_change` runs whenever a statement changes the transaction state.
+async fn run_statements<F, Fut>(
+    job: &Job,
+    job_id: &str,
+    statements: &[StatementRequest],
+    options: &ExecOptions,
+    channel: &Channel<ExecEvent>,
+    on_tx_change: F,
+) -> Script
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = ()>,
+{
+    let mut status = JobStatus::Completed;
+    let mut executed = 0;
+    let mut history = Vec::with_capacity(statements.len());
+    let tx_mode = job.session.tx_settings().mode;
+    // Notices go to this job's channel, tagged with the statement running when they came.
+    let current = Arc::new(AtomicUsize::new(0));
+    {
+        let current = Arc::clone(&current);
+        let channel = channel.clone();
+        job.session.set_notice_sink(Some(Arc::new(move |notice| {
+            let index = current.load(Ordering::SeqCst);
+            let _ = channel.send(ExecEvent::Notice { index, notice });
+        })));
+    }
+    for (index, statement) in statements.iter().enumerate() {
+        current.store(index, Ordering::SeqCst);
+        if job.cancel_requested.load(Ordering::SeqCst) {
+            status = JobStatus::Cancelled;
+            break;
+        }
+        let offset = statement.offset;
+        let _ = channel.send(ExecEvent::StatementStarted { index, offset });
+        let at = Instant::now();
+        let started_at = unix_millis();
+        let tx_before = job.session.tx_status();
+        let result = match &statement.params {
+            Some(params) if !params.is_empty() => {
+                job.session
+                    .execute_params(&statement.sql, params, options)
+                    .await
+            }
+            _ => job.session.execute(&statement.sql, options).await,
+        };
+        executed += 1;
+        if job.session.tx_status() != tx_before {
+            on_tx_change().await;
+        }
+        let elapsed_ms = millis(at);
+        let mut record = HistoryRecord {
+            console: job.key.console.clone(),
+            sql: statement.sql.clone(),
+            started_at,
+            duration_ms: elapsed_ms,
+            status: HistoryStatus::Ok,
+            row_count: None,
+            error: None,
+            tx_mode,
+        };
+        match result {
+            Ok(outcome) => {
+                record.row_count = Some(match &outcome {
+                    StatementOutcome::Rows { total_rows, .. } => *total_rows,
+                    StatementOutcome::Command { rows_affected } => *rows_affected,
+                });
+                history.push(record);
+                let _ = channel.send(ExecEvent::StatementDone {
+                    index,
+                    offset,
+                    elapsed_ms,
+                    outcome,
+                });
+            }
+            Err(e) => {
+                let cancelled = e.cancelled || job.cancel_requested.load(Ordering::SeqCst);
+                tracing::debug!(
+                    job = %job_id,
+                    index,
+                    sqlstate = e.sqlstate.as_deref().unwrap_or(""),
+                    connection_lost = e.connection_lost,
+                    "statement failed"
+                );
+                record.status = if cancelled {
+                    HistoryStatus::Cancelled
+                } else {
+                    HistoryStatus::Error
+                };
+                record.error = Some(error_summary(&e.message));
+                history.push(record);
+                let _ = channel.send(ExecEvent::StatementFailed {
+                    index,
+                    offset,
+                    elapsed_ms,
+                    error: e.into(),
+                });
+                // Scripts stop at the first error, like running them through psql -v ON_ERROR_STOP.
+                status = if cancelled {
+                    JobStatus::Cancelled
+                } else {
+                    JobStatus::Failed
+                };
+                break;
+            }
+        }
+    }
+    job.session.set_notice_sink(None);
+    Script {
+        status,
+        executed,
+        history,
     }
 }
 
@@ -325,8 +425,19 @@ pub async fn query_execute(
 ) -> Result<String, AppError> {
     let settings = crate::commands::with_store(&store, |s| s.settings()).await?;
     let timeout_ms = u64::from(settings.statement_timeout_secs) * 1000;
+    let history = History {
+        store: Arc::clone(store.inner()),
+        retention: settings.history_retention(),
+    };
     jobs.inner()
-        .start(&app, sessions.inner(), request, timeout_ms, on_event)
+        .start(
+            &app,
+            sessions.inner(),
+            request,
+            timeout_ms,
+            history,
+            on_event,
+        )
         .await
 }
 
@@ -392,5 +503,189 @@ mod tests {
         assert_eq!(json["elapsedMs"], 1);
         assert_eq!(json["error"]["connectionLost"], false);
         assert_eq!(json["error"]["position"], 3);
+    }
+
+    // ---- History recording against the disposable server (`scripts/test-pg.sh up`) ----
+
+    use std::time::Duration;
+
+    use quarry_db_core::{ConnectParams, DatabaseAdapter, TlsMode};
+    use quarry_db_postgres::PostgresAdapter;
+    use quarry_secrets::SecretString;
+    use quarry_store::{ConnectionDraft, Engine, Environment, HistoryQuery, SaveMode, SslMode};
+
+    fn params() -> ConnectParams {
+        let pw_file = format!(
+            "{}/../../../target/test-pg/password",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let password = std::fs::read_to_string(&pw_file)
+            .unwrap_or_else(|e| panic!("{pw_file}: {e} (run scripts/test-pg.sh up)"))
+            .trim()
+            .to_owned();
+        ConnectParams {
+            host: "127.0.0.1".into(),
+            port: 55432,
+            database: "quarry_test".into(),
+            username: "quarry".into(),
+            password: Some(SecretString::new(password)),
+            tls: TlsMode::Disable,
+            connect_timeout: Duration::from_secs(5),
+            read_only: false,
+            application_name: "quarry-it-history".into(),
+        }
+    }
+
+    fn statement(sql: &str) -> StatementRequest {
+        StatementRequest {
+            sql: sql.into(),
+            offset: 0,
+            params: None,
+        }
+    }
+
+    async fn job() -> Arc<Job> {
+        let session = PostgresAdapter
+            .connect(&params(), Box::new(|_| {}))
+            .await
+            .expect("connect");
+        Arc::new(Job {
+            key: SessionKey::shared("src"),
+            session,
+            cancel_requested: AtomicBool::new(false),
+        })
+    }
+
+    async fn run(job: &Job, sql: &[&str]) -> Script {
+        let statements: Vec<StatementRequest> = sql.iter().map(|s| statement(s)).collect();
+        let channel = Channel::new(|_| Ok(()));
+        run_statements(
+            job,
+            "test",
+            &statements,
+            &ExecOptions::default(),
+            &channel,
+            || async {},
+        )
+        .await
+    }
+
+    fn store(history_enabled: bool) -> Store {
+        let store = Store::open_in_memory().expect("store");
+        store
+            .insert_connection(
+                "src",
+                ConnectionDraft {
+                    name: "Test".into(),
+                    engine: Engine::Postgres,
+                    host: "127.0.0.1".into(),
+                    port: 55432,
+                    database: "quarry_test".into(),
+                    username: "quarry".into(),
+                    ssl_mode: SslMode::Disable,
+                    connect_timeout_secs: 5,
+                    read_only: false,
+                    environment: Environment::Testing,
+                    color: None,
+                    save_mode: SaveMode::Never,
+                    tx_mode: quarry_db_core::TxMode::Auto,
+                    isolation: quarry_db_core::Isolation::ReadCommitted,
+                    history_enabled,
+                },
+            )
+            .expect("profile");
+        store
+    }
+
+    const RETENTION: Retention = Retention {
+        max_entries: 10_000,
+        max_age_days: 0,
+    };
+
+    #[tokio::test]
+    #[ignore = "needs scripts/test-pg.sh up"]
+    async fn success_error_and_cancel_are_recorded_with_their_status() {
+        let job = job().await;
+        let store = store(true);
+
+        // A script stops at its first error; the statements that ran are all recorded.
+        let script = run(
+            &job,
+            &["select 1 union all select 2", "select nope", "select 3"],
+        )
+        .await;
+        assert!(matches!(script.status, JobStatus::Failed));
+        store
+            .record_history("src", &script.history, RETENTION, unix_millis())
+            .expect("record");
+
+        let canceller = {
+            let job = Arc::clone(&job);
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                job.cancel_requested.store(true, Ordering::SeqCst);
+                job.session.cancel().await.expect("cancel");
+            })
+        };
+        let script = run(&job, &["select pg_sleep(30)", "select 4"]).await;
+        canceller.await.expect("canceller");
+        assert!(matches!(script.status, JobStatus::Cancelled));
+        store
+            .record_history("src", &script.history, RETENTION, unix_millis())
+            .expect("record");
+
+        let entries = store
+            .search_history(&HistoryQuery {
+                connection_id: Some("src".into()),
+                text: String::new(),
+                limit: 10,
+                offset: 0,
+            })
+            .expect("search");
+        let seen: Vec<(&str, HistoryStatus, Option<u64>)> = entries
+            .iter()
+            .map(|e| (e.sql.as_str(), e.status, e.row_count))
+            .collect();
+        assert_eq!(
+            seen,
+            [
+                ("select pg_sleep(30)", HistoryStatus::Cancelled, None),
+                ("select nope", HistoryStatus::Error, None),
+                ("select 1 union all select 2", HistoryStatus::Ok, Some(2)),
+            ]
+        );
+        assert!(
+            entries[1]
+                .error
+                .as_deref()
+                .is_some_and(|e| e.contains("nope")),
+            "{:?}",
+            entries[1].error
+        );
+        assert!(entries[0].duration_ms >= 200, "{}", entries[0].duration_ms);
+        job.session.close().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "needs scripts/test-pg.sh up"]
+    async fn history_disabled_data_source_records_nothing() {
+        let job = job().await;
+        let store = store(false);
+        let script = run(&job, &["select 1"]).await;
+        assert_eq!(script.history.len(), 1);
+        let written = store
+            .record_history("src", &script.history, RETENTION, unix_millis())
+            .expect("record");
+        assert_eq!(written, 0);
+        let entries = store
+            .search_history(&HistoryQuery {
+                connection_id: None,
+                text: String::new(),
+                limit: 10,
+                offset: 0,
+            })
+            .expect("search");
+        assert!(entries.is_empty());
+        job.session.close().await;
     }
 }

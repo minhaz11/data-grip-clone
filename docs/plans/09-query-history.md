@@ -3,11 +3,11 @@
 | Field        | Value                              |
 | ------------ | ---------------------------------- |
 | Milestone    | M5.1                               |
-| Status       | Not started                        |
+| Status       | Done                               |
 | Depends on   | 03                                 |
 | Requirements | REQ-HIST-01, REQ-HIST-02; ADR-0004 |
-| Started      | -                                  |
-| Finished     | -                                  |
+| Started      | 2026-10-23                         |
+| Finished     | 2026-10-23                         |
 
 ## Goal
 
@@ -43,43 +43,43 @@ search, unless the user has turned history off for that connection.
 
 ### Backend
 
-- [ ] Confirm FTS5 in the bundled SQLite.
-- [ ] Store migration: `query_history`, FTS5 index, `history_enabled` on `connections`.
-- [ ] Record each statement from the exec job.
-- [ ] `history_search(connection_id?, query, limit, offset)`, `history_delete(ids)`,
-      `history_clear(connection_id)`, `history_export(...)` (Rust-side save dialog).
-- [ ] Retention pruning (count and age), with settings.
+- [x] Confirm FTS5 in the bundled SQLite.
+- [x] Store migration: `query_history`, FTS5 index, `history_enabled` on `connections`.
+- [x] Record each statement from the exec job.
+- [x] `history_search(query)` (data source, text, limit, offset), `history_delete(ids)`,
+      `history_clear(connection_id)`, `history_export(query, format)` (Rust-side save dialog).
+- [x] Retention pruning (count and age), with settings.
 
 ### IPC
 
-- [ ] Commands above; capabilities and bindings.
+- [x] Commands above; capabilities and bindings.
 
 ### Frontend
 
-- [ ] History popup (Ctrl+Alt+E default) with search box, connection filter, status icons,
+- [x] History popup (Ctrl+Alt+E default) with search box, connection filter, status icons,
       duration.
-- [ ] Insert into editor (at caret) and open in new console.
-- [ ] Delete entry and clear for a connection, with confirmation.
-- [ ] Connection dialog: "Record query history" checkbox.
-- [ ] Settings: retention count and age.
+- [x] Insert into editor (at caret) and open in new console.
+- [x] Delete entry and clear for a connection, with confirmation.
+- [x] Connection dialog: "Record query history" checkbox.
+- [x] Settings: retention count and age.
 
 ### Tests
 
-- [ ] Store: migration on empty and upgraded databases.
-- [ ] Integration: success, error and cancelled runs are all recorded with the right status.
-- [ ] A connection with history disabled writes no rows (test asserts on the table).
-- [ ] Retention prunes oldest first at the limit.
-- [ ] FTS search finds by table name and keyword.
+- [x] Store: migration on empty and upgraded databases.
+- [x] Integration: success, error and cancelled runs are all recorded with the right status.
+- [x] A connection with history disabled writes no rows (test asserts on the table).
+- [x] Retention prunes oldest first at the limit.
+- [x] FTS search finds by table name and keyword.
 
 ### Docs
 
-- [ ] Mark M5.1 done in `mvp-and-milestones.md`.
+- [x] Mark M5.1 done in `mvp-and-milestones.md`.
 
 ## Acceptance criteria
 
-- [ ] History records every run, including failures and cancels.
-- [ ] Disabling history for a connection writes nothing for it.
-- [ ] Search over 10,000 entries returns in under 100 ms.
+- [x] History records every run, including failures and cancels.
+- [x] Disabling history for a connection writes nothing for it.
+- [x] Search over 10,000 entries returns in under 100 ms.
 
 ## Risks and open questions
 
@@ -88,5 +88,11 @@ search, unless the user has turned history off for that connection.
 
 ## Progress log
 
-| Date | Note |
-| ---- | ---- |
+| Date       | Note                                                                                                                                                                                                                                                           |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-10-23 | Bundled SQLite has FTS5 (`sqlite_compileoption_used('ENABLE_FTS5')`, tested); no feature flag needed.                                                                                                                                                          |
+| 2026-10-23 | Records are written in one batch after the run ends (not per statement), in the same transaction as pruning. The job loop moved into `run_statements`, which needs no `AppHandle`, so the integration test drives the real loop against the disposable server. |
+| 2026-10-23 | `started_at` is Unix milliseconds (no date crate); export formats it as ISO 8601 UTC. History rows reference `connections` with `ON DELETE CASCADE`, so deleting a data source removes its history.                                                            |
+| 2026-10-23 | Search quotes every word as a prefix phrase (`"word"*`), so user input never reaches FTS syntax; words without letters or digits are ignored.                                                                                                                  |
+| 2026-10-23 | Export writes CSV or JSON through the `quarry-io` writer; the popup offers both. Retention: 100 to 1,000,000 entries, age 0 (off) to 3,650 days; saving smaller limits prunes at once.                                                                         |
+| 2026-10-23 | E2E: run with one worker on this laptop; with default parallelism WebKit timed out from load (every test passes serially).                                                                                                                                     |

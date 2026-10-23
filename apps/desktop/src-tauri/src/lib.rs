@@ -5,6 +5,7 @@ mod consoles;
 mod ddl;
 mod error;
 mod exec;
+mod history;
 mod results;
 mod schema;
 mod sessions;
@@ -73,6 +74,10 @@ pub fn run() {
             consoles::console_write,
             exec::query_execute,
             exec::query_cancel,
+            history::history_search,
+            history::history_delete,
+            history::history_clear,
+            history::history_export,
             results::result_page,
             results::result_close,
             results::result_refine,

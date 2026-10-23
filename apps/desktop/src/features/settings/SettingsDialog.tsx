@@ -13,7 +13,13 @@ export const FONT_SIZE_RANGE = { min: 9, max: 32 } as const;
 /** Time limits in seconds (matches the backend's `Settings::MAX_SECONDS`). */
 export const MAX_SECONDS = 86_400;
 
+/** Query history retention (matches `Settings::HISTORY_LIMIT_RANGE` and `MAX_HISTORY_DAYS`). */
+export const HISTORY_LIMIT_RANGE = { min: 100, max: 1_000_000 } as const;
+export const MAX_HISTORY_DAYS = 3_650;
+
 const validSeconds = (n: number) => Number.isInteger(n) && n >= 0 && n <= MAX_SECONDS;
+const inRange = (n: number, min: number, max: number) =>
+  Number.isInteger(n) && n >= min && n <= max;
 
 export function SettingsDialog({ onClose }: { onClose(): void }) {
   const current = useSettings((s) => s.settings);
@@ -27,6 +33,9 @@ export function SettingsDialog({ onClose }: { onClose(): void }) {
     draft.editorFontSize <= FONT_SIZE_RANGE.max;
 
   const timesValid = validSeconds(draft.statementTimeoutSecs) && validSeconds(draft.longQuerySecs);
+  const historyValid =
+    inRange(draft.historyLimit, HISTORY_LIMIT_RANGE.min, HISTORY_LIMIT_RANGE.max) &&
+    inRange(draft.historyMaxAgeDays, 0, MAX_HISTORY_DAYS);
 
   async function apply() {
     await update(draft);
@@ -50,7 +59,7 @@ export function SettingsDialog({ onClose }: { onClose(): void }) {
           <button
             type="button"
             onClick={apply}
-            disabled={!fontSizeValid || !timesValid}
+            disabled={!fontSizeValid || !timesValid || !historyValid}
             className="rounded bg-accent px-3 py-1 text-accent-fg disabled:opacity-50"
           >
             Save
@@ -137,6 +146,24 @@ export function SettingsDialog({ onClose }: { onClose(): void }) {
           value={draft.longQuerySecs}
           onChange={(longQuerySecs) => setDraft({ ...draft, longQuerySecs })}
         />
+        <NumberField
+          id="settings-history-limit"
+          label="Query history per data source"
+          hint={`entries, ${HISTORY_LIMIT_RANGE.min.toLocaleString()}-${HISTORY_LIMIT_RANGE.max.toLocaleString()}`}
+          min={HISTORY_LIMIT_RANGE.min}
+          max={HISTORY_LIMIT_RANGE.max}
+          value={draft.historyLimit}
+          onChange={(historyLimit) => setDraft({ ...draft, historyLimit })}
+        />
+        <NumberField
+          id="settings-history-age"
+          label="Remove history older than"
+          hint="days, 0 = keep regardless of age"
+          min={0}
+          max={MAX_HISTORY_DAYS}
+          value={draft.historyMaxAgeDays}
+          onChange={(historyMaxAgeDays) => setDraft({ ...draft, historyMaxAgeDays })}
+        />
       </div>
       {error && (
         <p role="alert" className="mt-3 text-danger">
@@ -147,20 +174,34 @@ export function SettingsDialog({ onClose }: { onClose(): void }) {
   );
 }
 
-function SecondsField({
-  id,
-  label,
-  hint,
-  value,
-  onChange,
-}: {
+function SecondsField(props: {
   id: string;
   label: string;
   hint: string;
   value: number;
   onChange(value: number): void;
 }) {
-  const valid = validSeconds(value);
+  return <NumberField {...props} min={0} max={MAX_SECONDS} />;
+}
+
+function NumberField({
+  id,
+  label,
+  hint,
+  min,
+  max,
+  value,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  hint: string;
+  min: number;
+  max: number;
+  value: number;
+  onChange(value: number): void;
+}) {
+  const valid = inRange(value, min, max);
   return (
     <>
       <label htmlFor={id}>{label}</label>
@@ -168,8 +209,8 @@ function SecondsField({
         <input
           id={id}
           type="number"
-          min={0}
-          max={MAX_SECONDS}
+          min={min}
+          max={max}
           value={Number.isNaN(value) ? '' : value}
           aria-invalid={!valid}
           aria-describedby={`${id}-hint`}

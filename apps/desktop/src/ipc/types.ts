@@ -14,6 +14,8 @@ export const DEFAULT_SETTINGS: Settings = {
   longQuerySecs: 20,
   runOutsideStatement: 'nearest',
   runSelection: 'all',
+  historyLimit: 10_000,
+  historyMaxAgeDays: 0,
 };
 
 /** Text form of a value as the server renders it; `null` is SQL NULL (Rust `quarry_db_core::Cell`). */

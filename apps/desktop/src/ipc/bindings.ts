@@ -17,7 +17,15 @@ statementTimeoutSecs: number,
 /**
  * Runs longer than this show a notice and notify when done; 0 = never.
  */
-longQuerySecs: number, runOutsideStatement: OutsideStatement, runSelection: SelectionRun, };
+longQuerySecs: number, runOutsideStatement: OutsideStatement, runSelection: SelectionRun, 
+/**
+ * Query history entries kept per data source; the oldest go first.
+ */
+historyLimit: number, 
+/**
+ * Query history older than this many days is removed; 0 = keep regardless of age.
+ */
+historyMaxAgeDays: number, };
 
 export type AppError = { kind: string, message: string, hint?: string, sqlstate?: string, 
 /**
@@ -43,7 +51,11 @@ txMode: TxMode,
 /**
  * Isolation level for transactions opened in Manual mode.
  */
-isolation: Isolation, };
+isolation: Isolation, 
+/**
+ * Record every statement run against this data source in the query history.
+ */
+historyEnabled: boolean, };
 
 export type ConnectionProfile = { id: string, 
 /**
@@ -57,7 +69,11 @@ txMode: TxMode,
 /**
  * Isolation level for transactions opened in Manual mode.
  */
-isolation: Isolation, };
+isolation: Isolation, 
+/**
+ * Record every statement run against this data source in the query history.
+ */
+historyEnabled: boolean, };
 
 export type PasswordChange = { "action": "keep" } | { "action": "set", "value": string } | { "action": "clear" };
 
@@ -307,6 +323,22 @@ schema?: string, };
 export type JobStatus = "completed" | "failed" | "cancelled";
 
 export type ExecEvent = { "event": "statementStarted", index: number, offset: number, } | { "event": "statementDone", index: number, offset: number, elapsedMs: number, outcome: StatementOutcome, } | { "event": "statementFailed", index: number, offset: number, elapsedMs: number, error: StatementError, } | { "event": "notice", index: number, notice: Notice, } | { "event": "finished", status: JobStatus, executed: number, elapsedMs: number, };
+
+export type HistoryStatus = "ok" | "error" | "cancelled";
+
+export type HistoryEntry = { id: number, connectionId: string, console: string | null, sql: string, 
+/**
+ * Unix time in milliseconds.
+ */
+startedAt: number, durationMs: number, status: HistoryStatus, rowCount: number | null, error: string | null, txMode: TxMode, };
+
+export type HistoryQuery = { 
+/**
+ * Only this data source's entries; absent for all of them.
+ */
+connectionId?: string, text: string, limit: number, offset: number, };
+
+export type HistoryExportFormat = "csv" | "json";
 
 export type SortKey = { column: number, descending: boolean, };
 

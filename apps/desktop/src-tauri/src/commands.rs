@@ -28,7 +28,13 @@ pub async fn settings_set(
     store: State<'_, Arc<Store>>,
     settings: Settings,
 ) -> Result<Settings, AppError> {
-    with_store(&store, move |s| s.set_settings(&settings)).await
+    with_store(&store, move |s| {
+        let saved = s.set_settings(&settings)?;
+        // A smaller history limit applies at once, not only after the next run.
+        s.prune_history(saved.history_retention(), crate::exec::unix_millis())?;
+        Ok(saved)
+    })
+    .await
 }
 
 #[tauri::command]

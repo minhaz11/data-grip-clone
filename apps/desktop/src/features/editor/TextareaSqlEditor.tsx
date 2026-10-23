@@ -31,6 +31,19 @@ export default function TextareaSqlEditor({
       getText: () => el()?.value ?? '',
       getSelection: () => ({ start: el()?.selectionStart ?? 0, end: el()?.selectionEnd ?? 0 }),
       getCaret: () => el()?.selectionStart ?? 0,
+      insertText: (text) => {
+        const area = el();
+        if (!area || readOnly) {
+          return;
+        }
+        const { selectionStart: start, selectionEnd: end, value } = area;
+        onChange(value.slice(0, start) + text + value.slice(end));
+        // The new value renders on the next frame; put the caret after the inserted text then.
+        requestAnimationFrame(() => {
+          area.setSelectionRange(start + text.length, start + text.length);
+          area.focus();
+        });
+      },
       revealOffset: (offset) => {
         el()?.setSelectionRange(offset, offset);
         el()?.focus();

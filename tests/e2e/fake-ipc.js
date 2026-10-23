@@ -19,6 +19,8 @@
       longQuerySecs: 20,
       runOutsideStatement: 'nearest',
       runSelection: 'all',
+      historyLimit: 10000,
+      historyMaxAgeDays: 0,
     },
     workspace: null,
     connections: [],
@@ -26,6 +28,8 @@
     seq: 0,
     // Per session (sourceId + console): transaction settings and status.
     sessions: new Map(),
+    // Query history, newest first, recorded by query_execute as the Rust job does.
+    history: [],
   };
 
   const sessionKey = (session) => `${session.sourceId}|${session.console ?? ''}`;
@@ -269,6 +273,19 @@
           elapsedMs: 2,
           outcome,
         });
+        state.seq += 1;
+        state.history.unshift({
+          id: state.seq,
+          connectionId: request.session.sourceId,
+          console: request.session.console ?? null,
+          sql: statement.sql,
+          startedAt: Date.now(),
+          durationMs: 2,
+          status: 'ok',
+          rowCount: outcome.type === 'rows' ? outcome.totalRows : outcome.rowsAffected,
+          error: null,
+          txMode: current.settings.mode,
+        });
       });
       messages.push({
         event: 'finished',
@@ -280,6 +297,27 @@
       return 'job-1';
     },
     query_cancel: () => null,
+    history_search: ({ query }) =>
+      state.history
+        .filter((e) => !query.connectionId || e.connectionId === query.connectionId)
+        .filter((e) =>
+          query.text
+            .toLowerCase()
+            .split(/\s+/)
+            .every((word) => e.sql.toLowerCase().includes(word)),
+        )
+        .slice(query.offset, query.offset + query.limit),
+    history_delete: ({ ids }) => {
+      const before = state.history.length;
+      state.history = state.history.filter((e) => !ids.includes(e.id));
+      return before - state.history.length;
+    },
+    history_clear: ({ connectionId }) => {
+      const before = state.history.length;
+      state.history = state.history.filter((e) => e.connectionId !== connectionId);
+      return before - state.history.length;
+    },
+    history_export: () => '/tmp/quarry-history.csv',
     result_page: ({ offset, limit }) => ROWS.rows.slice(offset, offset + limit),
     result_close: () => null,
     result_export: ({ onProgress }) => {

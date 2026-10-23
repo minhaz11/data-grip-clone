@@ -72,6 +72,13 @@ pub struct ConnectionDraft {
     /// Isolation level for transactions opened in Manual mode.
     #[serde(default)]
     pub isolation: Isolation,
+    /// Record every statement run against this data source in the query history.
+    #[serde(default = "history_on")]
+    pub history_enabled: bool,
+}
+
+fn history_on() -> bool {
+    true
 }
 
 fn tx_mode_text(m: TxMode) -> &'static str {
@@ -171,7 +178,7 @@ impl ConnectionDraft {
 
 const COLUMNS: &str = "id, name, engine, host, port, database, username, ssl_mode, \
     connect_timeout_secs, read_only, environment, color, save_mode, password_saved, created_at, updated_at, \
-    tx_mode, isolation";
+    tx_mode, isolation, history_enabled";
 
 fn from_row(row: &Row<'_>) -> rusqlite::Result<Result<ConnectionProfile, StoreError>> {
     let text = |i: usize| row.get::<_, String>(i);
@@ -193,6 +200,7 @@ fn from_row(row: &Row<'_>) -> rusqlite::Result<Result<ConnectionProfile, StoreEr
                 save_mode: SaveMode::parse(&text(12)?)?,
                 tx_mode: parse_tx_mode(&text(16)?)?,
                 isolation: parse_isolation(&text(17)?)?,
+                history_enabled: row.get(18)?,
             },
             password_saved: row.get(13)?,
             created_at: text(14)?,
@@ -243,13 +251,14 @@ impl Store {
         self.conn()
             .execute(
                 "INSERT INTO connections (id, name, engine, host, port, database, username, ssl_mode,
-                     connect_timeout_secs, read_only, environment, color, save_mode, tx_mode, isolation)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                     connect_timeout_secs, read_only, environment, color, save_mode, tx_mode, isolation,
+                     history_enabled)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
                 params![
                     id, d.name, d.engine.as_str(), d.host, d.port, d.database, d.username,
                     d.ssl_mode.as_str(), d.connect_timeout_secs, d.read_only,
                     d.environment.as_str(), d.color, d.save_mode.as_str(),
-                    tx_mode_text(d.tx_mode), isolation_text(d.isolation)
+                    tx_mode_text(d.tx_mode), isolation_text(d.isolation), d.history_enabled
                 ],
             )
             .map_err(|e| map_unique(e, &d.name))?;
@@ -268,13 +277,13 @@ impl Store {
                 "UPDATE connections SET name = ?2, engine = ?3, host = ?4, port = ?5, database = ?6,
                      username = ?7, ssl_mode = ?8, connect_timeout_secs = ?9, read_only = ?10,
                      environment = ?11, color = ?12, save_mode = ?13, tx_mode = ?14, isolation = ?15,
-                     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                     history_enabled = ?16, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
                  WHERE id = ?1",
                 params![
                     id, d.name, d.engine.as_str(), d.host, d.port, d.database, d.username,
                     d.ssl_mode.as_str(), d.connect_timeout_secs, d.read_only,
                     d.environment.as_str(), d.color, d.save_mode.as_str(),
-                    tx_mode_text(d.tx_mode), isolation_text(d.isolation)
+                    tx_mode_text(d.tx_mode), isolation_text(d.isolation), d.history_enabled
                 ],
             )
             .map_err(|e| map_unique(e, &d.name))?;
@@ -342,6 +351,7 @@ pub(crate) mod tests {
             save_mode: SaveMode::Forever,
             tx_mode: TxMode::Auto,
             isolation: Isolation::ReadCommitted,
+            history_enabled: true,
         }
     }
 

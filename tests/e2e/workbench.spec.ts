@@ -106,6 +106,38 @@ test('manual transactions stay open until Commit', async ({ app }) => {
   expect(commit?.args).toMatchObject({ session: { sourceId: 'fake-1' } });
 });
 
+test('query history records runs and reopens them in a new console', async ({ app }) => {
+  await createDataSource(app, 'Dev');
+  await app.getByRole('treeitem', { name: /^Dev/ }).click();
+  await app.getByRole('tree', { name: 'Data sources' }).press('ArrowRight');
+  await expect(app.getByRole('treeitem', { name: 'shop, schema' })).toBeVisible();
+
+  await consoleWith(app, 'Dev', 'select id, email from shop.customers');
+  await app.keyboard.press('ControlOrMeta+Enter');
+  await expect(app.getByRole('grid', { name: 'Result rows' })).toBeVisible();
+
+  await app.keyboard.press('ControlOrMeta+Alt+E');
+  const dialog = app.getByRole('dialog', { name: 'Query History' });
+  await expect(dialog).toBeVisible();
+  const list = dialog.getByRole('listbox', { name: 'History entries' });
+  await expect(list.getByRole('option')).toHaveCount(1);
+  await expect(list.getByRole('option').first()).toContainText('select id, email');
+  await expect(list.getByRole('img', { name: 'Succeeded' })).toBeVisible();
+  await expectNoA11yViolations(app, '[role="dialog"]');
+
+  await dialog.getByLabel('Search history').fill('orders');
+  await expect(dialog.getByText('No statements match.')).toBeVisible();
+  await dialog.getByLabel('Search history').fill('customers');
+  await expect(list.getByRole('option')).toHaveCount(1);
+
+  await dialog.getByRole('button', { name: 'Open in new console' }).click();
+  await expect(dialog).toBeHidden();
+  const tabs = app.getByRole('tablist', { name: 'Open editors' }).getByRole('tab');
+  await expect(tabs).toHaveCount(2);
+  await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true');
+  await expect(app.locator('.monaco-editor').last()).toContainText('select id, email');
+});
+
 test.describe('accessibility', () => {
   test('main workbench has no WCAG A/AA violations', async ({ app }) => {
     await createDataSource(app, 'Dev');

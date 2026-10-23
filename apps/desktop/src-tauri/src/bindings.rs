@@ -98,6 +98,11 @@ mod tests {
             decl::<crate::exec::ExecRequest>(&cfg),
             decl::<crate::exec::JobStatus>(&cfg),
             decl::<crate::exec::ExecEvent>(&cfg),
+            // Query history
+            decl::<quarry_store::HistoryStatus>(&cfg),
+            decl::<quarry_store::HistoryEntry>(&cfg),
+            decl::<quarry_store::HistoryQuery>(&cfg),
+            decl::<crate::history::HistoryExportFormat>(&cfg),
             // Results: sort/filter, editing, export
             decl::<quarry_db_core::SortKey>(&cfg),
             decl::<quarry_db_core::Filter>(&cfg),

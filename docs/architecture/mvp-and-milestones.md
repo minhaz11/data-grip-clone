@@ -121,7 +121,7 @@ listed tests run green in CI.
     - Integration tests (disposable server): typed exact values, cap and count, affected rows,
       error positions, cancel < 1 s with the session reusable, read-only rejection.
   - Later: per-console sessions and transaction mode controls came in M4.6; NOTICE messages
-    and the statement timeout setting in M4.7. Not yet: query history (Phase 5).
+    and the statement timeout setting in M4.7; query history in M5.1.
 - **M3.3 Grid + export** ✅: virtualized paged grid; multiple result tabs; CSV/JSON export streamed from
   the backend.
   - **AC**: a 1M-row result never sends more than 2 pages over IPC at once; it scrolls smoothly in
@@ -356,6 +356,28 @@ listed tests run green in CI.
 - Query history with FTS search; saved consoles/files; snippets; configurable keymap; workspace
   restore; CSV/JSON import with preview, mapping, type validation, null/encoding handling, and
   streaming.
+- **M5.1 Query history** ✅ (plan: `docs/plans/09-query-history.md`)
+  - **Recording**: the query job in Rust records every statement that reached the server
+    (succeeded, failed or cancelled) with data source, console session, start time, duration,
+    rows, error summary and transaction mode, in one batch per run after it finishes, so a
+    closed window loses nothing. A statement skipped after a cancel is not recorded.
+  - **Storage**: `query_history` in `app.db` (migration 4) with an FTS5 index kept in sync by
+    triggers; entries go with their data source when it is deleted. Search turns each word into
+    a quoted prefix phrase, so input is never parsed as FTS syntax; 10,000 entries search in
+    well under 100 ms (tested).
+  - **Retention**: 10,000 entries per data source by default, plus an optional age limit, both
+    in Settings; pruning runs after each recorded batch and when the settings change.
+  - **Per data source**: "Record query history" in the connection dialog (on by default), with
+    help text saying statements are kept as typed, values included.
+  - **Popup** (Ctrl+Alt+E or the toolbar): search, data source filter, status icons, duration
+    and time, paging; Insert at the caret or Open in new console; Delete and Clear data source
+    history, both confirmed; CSV or JSON export through the native save dialog.
+  - Tests: store (migration from version 3, FTS5 present, retention by count and age, search by
+    table name and keyword, index in sync after delete and clear, disabled data sources write
+    nothing, 10,000-entry timing); integration (success, error and cancel recorded with their
+    status, nothing for a disabled data source); UI (search, insert, open, confirmations,
+    export, settings); E2E (run, find, reopen, axe).
+  - Not yet: redacting literals and the internal execution log (Later, ADR-0004).
 
 ### Phase 6 — AI assistant
 

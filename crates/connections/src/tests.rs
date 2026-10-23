@@ -56,6 +56,7 @@ fn draft(name: &str, mode: SaveMode) -> ConnectionDraft {
         save_mode: mode,
         tx_mode: TxMode::Auto,
         isolation: Isolation::ReadCommitted,
+        history_enabled: true,
     }
 }
 

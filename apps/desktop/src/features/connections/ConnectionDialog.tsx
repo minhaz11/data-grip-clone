@@ -418,6 +418,23 @@ export function ConnectionDialog({ profile, onClose }: Props) {
           Read-only (block statements that modify data or schema)
         </label>
 
+        <span />
+        <div>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={draft.historyEnabled}
+              aria-describedby="connection-history-help"
+              onChange={(e) => patch({ historyEnabled: e.target.checked })}
+            />
+            Record query history
+          </label>
+          <p id="connection-history-help" className="mt-0.5 text-muted">
+            Statements are kept on this computer as typed, including any values written in them.
+            Turn this off for data sources whose queries hold sensitive values.
+          </p>
+        </div>
+
         <button type="submit" hidden aria-hidden tabIndex={-1} />
       </form>
       {testResult && (

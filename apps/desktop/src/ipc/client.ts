@@ -15,6 +15,9 @@ import type {
   EditStatement,
   EditTarget,
   ExportSummary,
+  HistoryEntry,
+  HistoryExportFormat,
+  HistoryQuery,
   RowChange,
   SchemaChange,
   TableModel,
@@ -90,6 +93,14 @@ export interface Backend {
   /** Starts a query job; resolves to its id at once. Progress arrives through `onEvent`. */
   queryExecute(request: ExecRequest, onEvent: (e: ExecEvent) => void): Promise<string>;
   queryCancel(jobId: string): Promise<null>;
+  /** Recorded statements matching `query`, newest first (at most 500 per call). */
+  historySearch(query: HistoryQuery): Promise<HistoryEntry[]>;
+  /** Removes history entries; resolves to how many were removed. */
+  historyDelete(ids: number[]): Promise<number>;
+  /** Removes every history entry of one data source; resolves to how many were removed. */
+  historyClear(connectionId: string): Promise<number>;
+  /** Saves every entry matching `query` via the native dialog; the path, or `null` if cancelled. */
+  historyExport(query: HistoryQuery, format: HistoryExportFormat): Promise<string | null>;
   /** Rows `[offset, offset + limit)` of a result cursor (limit ≤ 2000). */
   resultPage(session: SessionKey, cursor: string, offset: number, limit: number): Promise<Cell[][]>;
   resultClose(session: SessionKey, cursor: string): Promise<null>;
@@ -194,6 +205,10 @@ const tauriBackend: Backend = {
     return invoke<string>('query_execute', { request, onEvent: channel });
   },
   queryCancel: (jobId) => invoke<null>('query_cancel', { jobId }),
+  historySearch: (query) => invoke<HistoryEntry[]>('history_search', { query }),
+  historyDelete: (ids) => invoke<number>('history_delete', { ids }),
+  historyClear: (connectionId) => invoke<number>('history_clear', { connectionId }),
+  historyExport: (query, format) => invoke<string | null>('history_export', { query, format }),
   resultPage: (session, cursor, offset, limit) =>
     invoke<Cell[][]>('result_page', { session, cursor, offset, limit }),
   resultClose: (session, cursor) => invoke<null>('result_close', { session, cursor }),

@@ -1,9 +1,15 @@
-import { PanelBottom, PanelLeft, Settings, SquarePlus } from 'lucide-react';
+import { History, PanelBottom, PanelLeft, Settings, SquarePlus } from 'lucide-react';
 import { IconButton } from '../components/ui/IconButton';
 import { shortcutLabel } from '../lib/keymap';
 import { useWorkspace } from './workspaceStore';
 
-export function Toolbar({ onOpenSettings }: { onOpenSettings(): void }) {
+export function Toolbar({
+  onOpenSettings,
+  onOpenHistory,
+}: {
+  onOpenSettings(): void;
+  onOpenHistory(): void;
+}) {
   const explorerCollapsed = useWorkspace((s) => s.explorerCollapsed);
   const bottomCollapsed = useWorkspace((s) => s.bottomCollapsed);
   const setExplorerCollapsed = useWorkspace((s) => s.setExplorerCollapsed);
@@ -31,6 +37,13 @@ export function Toolbar({ onOpenSettings }: { onOpenSettings(): void }) {
         onClick={() => newConsole()}
       >
         <SquarePlus size={16} aria-hidden />
+      </IconButton>
+      <IconButton
+        label="Query history"
+        shortcut={shortcutLabel('history.open')}
+        onClick={onOpenHistory}
+      >
+        <History size={16} aria-hidden />
       </IconButton>
       <div className="flex-1" />
       <IconButton

@@ -53,6 +53,7 @@ export const NEW_DRAFT: ConnectionDraft = {
   saveMode: 'forever',
   txMode: 'auto',
   isolation: 'read_committed',
+  historyEnabled: true,
 };
 
 export type DraftErrors = Partial<Record<keyof ConnectionDraft, string>>;

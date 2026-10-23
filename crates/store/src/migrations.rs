@@ -41,6 +41,32 @@ const MIGRATIONS: &[&str] = &[
     // 3: default transaction mode and isolation per data source (M4.6).
     "ALTER TABLE connections ADD COLUMN tx_mode TEXT NOT NULL DEFAULT 'auto';
      ALTER TABLE connections ADD COLUMN isolation TEXT NOT NULL DEFAULT 'read_committed';",
+    // 4: query history with full-text search on the statement text (M5.1, ADR-0004).
+    "ALTER TABLE connections ADD COLUMN history_enabled INTEGER NOT NULL DEFAULT 1;
+     CREATE TABLE query_history (
+         id            INTEGER PRIMARY KEY,
+         connection_id TEXT NOT NULL REFERENCES connections (id) ON DELETE CASCADE,
+         console       TEXT,
+         sql           TEXT NOT NULL,
+         started_at    INTEGER NOT NULL,
+         duration_ms   INTEGER NOT NULL,
+         status        TEXT NOT NULL,
+         row_count     INTEGER,
+         error         TEXT,
+         tx_mode       TEXT NOT NULL
+     ) STRICT;
+     CREATE INDEX query_history_by_connection ON query_history (connection_id, id);
+     CREATE INDEX query_history_by_time ON query_history (started_at);
+     CREATE VIRTUAL TABLE query_history_fts USING fts5 (
+         sql, content = 'query_history', content_rowid = 'id', tokenize = 'unicode61'
+     );
+     CREATE TRIGGER query_history_ai AFTER INSERT ON query_history BEGIN
+         INSERT INTO query_history_fts (rowid, sql) VALUES (new.id, new.sql);
+     END;
+     CREATE TRIGGER query_history_ad AFTER DELETE ON query_history BEGIN
+         INSERT INTO query_history_fts (query_history_fts, rowid, sql)
+         VALUES ('delete', old.id, old.sql);
+     END;",
 ];
 
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;

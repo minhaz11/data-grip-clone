@@ -2,6 +2,7 @@
 //! through typed commands. Secrets are never stored here (ADR-0003).
 
 pub mod connections;
+pub mod history;
 mod migrations;
 
 use std::path::Path;
@@ -11,6 +12,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 pub use connections::{ConnectionDraft, ConnectionProfile, Engine, Environment, SaveMode, SslMode};
+pub use history::{HistoryEntry, HistoryQuery, HistoryRecord, HistoryStatus, Retention};
 pub use migrations::LATEST_VERSION;
 
 #[derive(Debug, thiserror::Error)]
@@ -95,12 +97,19 @@ pub struct Settings {
     pub long_query_secs: u32,
     pub run_outside_statement: OutsideStatement,
     pub run_selection: SelectionRun,
+    /// Query history entries kept per data source; the oldest go first.
+    pub history_limit: u32,
+    /// Query history older than this many days is removed; 0 = keep regardless of age.
+    pub history_max_age_days: u32,
 }
 
 impl Settings {
     pub const FONT_SIZE_RANGE: std::ops::RangeInclusive<u8> = 9..=32;
     /// Upper bound for the timeout and long-query thresholds (one day).
     pub const MAX_SECONDS: u32 = 86_400;
+    pub const HISTORY_LIMIT_RANGE: std::ops::RangeInclusive<u32> = 100..=1_000_000;
+    /// Ten years.
+    pub const MAX_HISTORY_DAYS: u32 = 3_650;
 
     pub fn validate(&self) -> Result<(), StoreError> {
         if !Self::FONT_SIZE_RANGE.contains(&self.editor_font_size) {
@@ -118,7 +127,28 @@ impl Settings {
                 Self::MAX_SECONDS
             )));
         }
+        if !Self::HISTORY_LIMIT_RANGE.contains(&self.history_limit) {
+            return Err(StoreError::Invalid(format!(
+                "history size must be between {} and {} entries",
+                Self::HISTORY_LIMIT_RANGE.start(),
+                Self::HISTORY_LIMIT_RANGE.end()
+            )));
+        }
+        if self.history_max_age_days > Self::MAX_HISTORY_DAYS {
+            return Err(StoreError::Invalid(format!(
+                "history age must be between 0 and {} days",
+                Self::MAX_HISTORY_DAYS
+            )));
+        }
         Ok(())
+    }
+
+    /// The history retention these settings ask for.
+    pub fn history_retention(&self) -> Retention {
+        Retention {
+            max_entries: self.history_limit,
+            max_age_days: self.history_max_age_days,
+        }
     }
 }
 
@@ -132,6 +162,8 @@ impl Default for Settings {
             long_query_secs: 20,
             run_outside_statement: OutsideStatement::Nearest,
             run_selection: SelectionRun::All,
+            history_limit: 10_000,
+            history_max_age_days: 0,
         }
     }
 }
@@ -350,6 +382,39 @@ mod tests {
     }
 
     #[test]
+    fn history_retention_is_validated() {
+        let store = Store::open_in_memory().expect("open");
+        for bad in [
+            Settings {
+                history_limit: 10,
+                ..Settings::default()
+            },
+            Settings {
+                history_max_age_days: Settings::MAX_HISTORY_DAYS + 1,
+                ..Settings::default()
+            },
+        ] {
+            assert!(matches!(
+                store.set_settings(&bad),
+                Err(StoreError::Invalid(_))
+            ));
+        }
+        let ok = Settings {
+            history_limit: 500,
+            history_max_age_days: 30,
+            ..Settings::default()
+        };
+        assert_eq!(store.set_settings(&ok).expect("save"), ok);
+        assert_eq!(
+            ok.history_retention(),
+            Retention {
+                max_entries: 500,
+                max_age_days: 30
+            }
+        );
+    }
+
+    #[test]
     fn settings_json_uses_frontend_field_names() {
         let json = serde_json::to_value(Settings::default()).expect("encode");
         assert_eq!(
@@ -361,7 +426,9 @@ mod tests {
                 "statementTimeoutSecs": 0,
                 "longQuerySecs": 20,
                 "runOutsideStatement": "nearest",
-                "runSelection": "all"
+                "runSelection": "all",
+                "historyLimit": 10000,
+                "historyMaxAgeDays": 0
             })
         );
     }

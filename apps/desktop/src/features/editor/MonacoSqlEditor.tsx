@@ -206,6 +206,15 @@ export default function MonacoSqlEditor({
         return { start: toOffset(s.getStartPosition()), end: toOffset(s.getEndPosition()) };
       },
       getCaret: () => toOffset(editor.getPosition() ?? { lineNumber: 1, column: 1 }),
+      insertText: (text) => {
+        const selection = editor.getSelection();
+        if (!selection) {
+          return;
+        }
+        editor.executeEdits('quarry-insert', [{ range: selection, text, forceMoveMarkers: true }]);
+        editor.pushUndoStop();
+        editor.focus();
+      },
       revealOffset: (offset) => {
         const m = model();
         if (!m) return;
