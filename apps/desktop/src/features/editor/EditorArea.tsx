@@ -6,6 +6,7 @@ import { isConsole, useWorkspace, type ConsoleTab, type EditorTab } from '../../
 import { DataTab } from '../data/DataTab';
 import { DdlViewer } from '../schema/DdlViewer';
 import { ObjectViewer } from '../schema/ObjectViewer';
+import { useKeymap } from '../../app/keymapStore';
 import { shortcutLabel } from '../../lib/keymap';
 import { useConnections } from '../connections/connectionsStore';
 import { effectiveColor } from '../connections/model';
@@ -18,6 +19,7 @@ import { changeSource, closeConsole } from '../exec/txGuards';
 import { keyOf, sessionOf, useTx } from '../exec/txStore';
 
 export function EditorArea({ theme }: { theme: 'light' | 'dark' }) {
+  const keymap = useKeymap();
   const tabs = useWorkspace((s) => s.tabs);
   const activeTabId = useWorkspace((s) => s.activeTabId);
   const activate = useWorkspace((s) => s.activate);
@@ -39,7 +41,7 @@ export function EditorArea({ theme }: { theme: 'light' | 'dark' }) {
           onClick={() => void newConsole(selectedSourceId)}
           className="rounded border border-border px-3 py-1 text-fg hover:bg-hover"
         >
-          New console <span className="text-muted">({shortcutLabel('console.new')})</span>
+          New console <span className="text-muted">({shortcutLabel('console.new', keymap)})</span>
         </button>
       </section>
     );
@@ -105,7 +107,7 @@ export function EditorArea({ theme }: { theme: 'light' | 'dark' }) {
                 type="button"
                 tabIndex={-1}
                 aria-hidden
-                title={`Close (${shortcutLabel('tab.close')})`}
+                title={`Close (${shortcutLabel('tab.close', keymap)})`}
                 onClick={() => void closeTab(tab.id)}
                 className="mr-1 rounded p-0.5 opacity-60 hover:bg-hover hover:opacity-100"
               >
@@ -184,6 +186,7 @@ function TabTxBadge({ tab }: { tab: ConsoleTab }) {
 }
 
 function ConsolePane({ tab, theme }: { tab: ConsoleTab; theme: 'light' | 'dark' }) {
+  const keymap = useKeymap();
   const fontSize = useSettings((s) => s.settings.editorFontSize);
   const updateText = useWorkspace((s) => s.updateText);
   const setCaret = useWorkspace((s) => s.setCaret);
@@ -231,7 +234,7 @@ function ConsolePane({ tab, theme }: { tab: ConsoleTab; theme: 'light' | 'dark' 
           type="button"
           onClick={() => void runFromEditor('current')}
           disabled={running}
-          title={`Run statement or selection (${shortcutLabel('query.run')})`}
+          title={`Run statement or selection (${shortcutLabel('query.run', keymap)})`}
           className="flex items-center gap-1 rounded px-1.5 py-0.5 text-success hover:bg-hover disabled:opacity-40"
         >
           <Play size={13} aria-hidden /> Run
@@ -240,7 +243,7 @@ function ConsolePane({ tab, theme }: { tab: ConsoleTab; theme: 'light' | 'dark' 
           type="button"
           onClick={() => void runFromEditor('script')}
           disabled={running}
-          title={`Run whole console (${shortcutLabel('query.runScript')})`}
+          title={`Run whole console (${shortcutLabel('query.runScript', keymap)})`}
           className="flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-hover disabled:opacity-40"
         >
           <ListChecks size={13} aria-hidden /> Run script
@@ -249,7 +252,7 @@ function ConsolePane({ tab, theme }: { tab: ConsoleTab; theme: 'light' | 'dark' 
           type="button"
           onClick={() => void cancel(tab.id)}
           disabled={!running}
-          title={`Stop (${shortcutLabel('query.cancel')})`}
+          title={`Stop (${shortcutLabel('query.cancel', keymap)})`}
           className="flex items-center gap-1 rounded px-1.5 py-0.5 text-danger hover:bg-hover disabled:opacity-40"
         >
           <Square size={12} aria-hidden /> Stop
@@ -258,7 +261,7 @@ function ConsolePane({ tab, theme }: { tab: ConsoleTab; theme: 'light' | 'dark' 
         <button
           type="button"
           onClick={() => activeEditor()?.format()}
-          title={`Format (${shortcutLabel('editor.format')})`}
+          title={`Format (${shortcutLabel('editor.format', keymap)})`}
           className="flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-hover"
         >
           <AlignLeft size={13} aria-hidden /> Format
@@ -279,7 +282,7 @@ function ConsolePane({ tab, theme }: { tab: ConsoleTab; theme: 'light' | 'dark' 
           )}
         </span>
       </div>
-      <div className="min-h-0 flex-1">
+      <div className="min-h-0 flex-1" data-action-context="editor">
         <SqlEditor
           tabId={tab.id}
           name={tab.console}

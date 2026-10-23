@@ -356,6 +356,24 @@ listed tests run green in CI.
 - Query history with FTS search; saved consoles/files; snippets; configurable keymap; workspace
   restore; CSV/JSON import with preview, mapping, type validation, null/encoding handling, and
   streaming.
+- **M5.3 Keymap and action registry** ✅ (plan: `docs/plans/10-keymap-actions.md`)
+  - **Registry**: every action is registered once with a title, a context (everywhere, SQL
+    editor, result grid, Database Explorer) and default bindings per platform; the 13 earlier
+    command ids are unchanged. The grid's and explorer's command keys (select all, copy, edit,
+    delete, add row, column menu, quick info, refresh, duplicate, context menu) moved into it.
+  - **Resolution**: the focused panel's actions win over global ones; one capture-phase listener
+    runs global and editor actions before Monaco sees the key.
+  - **Settings > Keymap**: search by action or shortcut, add a shortcut by pressing it, remove,
+    reset one or all; conflicts show inline before saving and same-context clashes block Save;
+    reserved system chords and plain typing keys are refused. Overrides live in settings.
+  - **macOS**: Cmd is the primary modifier and Control is separate; ⌘⌥⇧⌃ labels; defaults
+    avoid system chords (⌘Q, ⌘Tab, Option-arrows).
+  - Docs: `docs/keymap.md`, generated from the registry and checked by a test.
+  - Tests: unit (chords per platform, focused context over global, overrides, conflicts,
+    reserved chords, defaults conflict-free on both platforms); UI (rebind works at once and
+    after a restart, the old chord stops working, conflicts and blocked Save, refusals, reset,
+    search, editor actions only with editor focus); E2E (rebind and use in both browsers, axe).
+  - Not yet: importing keymaps from other IDEs (out of scope); the search palette (step 12).
 - **M5.1 Query history** ✅ (plan: `docs/plans/09-query-history.md`)
   - **Recording**: the query job in Rust records every statement that reached the server
     (succeeded, failed or cancelled) with data source, console session, start time, duration,

@@ -1,6 +1,8 @@
 import { CopyPlus, Eye, Lock, Plus, RotateCcw, Save, Undo2 } from 'lucide-react';
 import { useState } from 'react';
 import { askConfirm } from '../../app/dialogs';
+import { useKeymap } from '../../app/keymapStore';
+import { chordLabel, shortcutLabel } from '../../lib/keymap';
 import { Modal } from '../../components/ui/Modal';
 import { backend } from '../../ipc/client';
 import type { ConnectionProfile, EditStatement, EditTarget, SessionKey } from '../../ipc/types';
@@ -48,6 +50,7 @@ export function EditBar({
   actions,
   leading,
 }: Props) {
+  const keymap = useKeymap();
   const [preview, setPreview] = useState<EditStatement[] | 'loading' | { error: string } | null>(
     null,
   );
@@ -125,7 +128,7 @@ export function EditBar({
         type="button"
         disabled={submitting}
         onClick={() => onChange((e) => addInsert(e, `new-${Date.now()}-${e.inserts.length}`))}
-        title="Add a row (Insert). Edit a cell with double-click, F2 or Enter; Delete marks a row for deletion."
+        title={`Add a row (${shortcutLabel('grid.addRow', keymap)}). Edit a cell with double-click or ${keymap['grid.editCell'].map((c) => chordLabel(c)).join(' or ')}; ${shortcutLabel('grid.deleteRows', keymap)} marks a row for deletion.`}
         className="flex items-center gap-0.5 rounded px-1.5 py-0.5 hover:bg-hover disabled:opacity-40"
       >
         <Plus size={12} aria-hidden /> Row

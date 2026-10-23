@@ -4,6 +4,7 @@ import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { ContextMenu, type MenuItem } from '../../components/ui/ContextMenu';
 import { IconButton } from '../../components/ui/IconButton';
 import type { AppError, ConnectionProfile } from '../../ipc/types';
+import { useContextActions, useKeymap } from '../../app/keymapStore';
 import { shortcutLabel } from '../../lib/keymap';
 import { ConnectionResult } from '../connections/ConnectionResult';
 import { useConnections } from '../connections/connectionsStore';
@@ -37,6 +38,7 @@ interface Props {
 
 /** Database Explorer: data sources and their lazily loaded schema tree. */
 export function ExplorerPanel({ onNew, onEdit }: Props) {
+  const keymap = useKeymap();
   const items = useConnections((s) => s.items);
   const selectedSourceId = useConnections((s) => s.selectedId);
   const selectSource = useConnections((s) => s.select);
@@ -358,7 +360,7 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
   function menuItems(row: Row): MenuItem[] {
     const refreshItem: MenuItem = {
       label: 'Refresh',
-      shortcut: 'Ctrl+F5',
+      shortcut: shortcutLabel('explorer.refresh', keymap),
       onSelect: () => refreshRow(row),
     };
     if (row.type === 'node') {
@@ -373,7 +375,13 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
             ]
           : []),
         ...(info
-          ? [{ label: 'Quick info', shortcut: 'Ctrl+Q', onSelect: () => setQuickInfo(info) }]
+          ? [
+              {
+                label: 'Quick info',
+                shortcut: shortcutLabel('explorer.quickInfo', keymap),
+                onSelect: () => setQuickInfo(info),
+              },
+            ]
           : []),
         ...(ddl && live
           ? [
@@ -399,12 +407,49 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
         : { label: 'Connect', onSelect: () => void runConnect(p) },
       ...(state === 'connected' ? [refreshItem] : []),
       { label: 'Properties…', shortcut: 'Enter', onSelect: () => onEdit(p) },
-      { label: 'Duplicate', shortcut: 'Ctrl+D', onSelect: () => void runDuplicate(p) },
-      { label: 'Delete…', shortcut: 'Delete', danger: true, onSelect: () => void askDelete(p) },
+      {
+        label: 'Duplicate',
+        shortcut: shortcutLabel('explorer.duplicate', keymap),
+        onSelect: () => void runDuplicate(p),
+      },
+      {
+        label: 'Delete…',
+        shortcut: shortcutLabel('explorer.delete', keymap),
+        danger: true,
+        onSelect: () => void askDelete(p),
+      },
     ];
   }
 
+  const current = selected;
+  const source = current?.type === 'source' ? current.profile : null;
+  const runAction = useContextActions('explorer', {
+    'explorer.quickInfo': current
+      ? () => {
+          const info = quickInfoOf(current);
+          if (info) {
+            setQuickInfo(info);
+          }
+        }
+      : undefined,
+    'explorer.refresh': current ? () => refreshRow(current) : undefined,
+    'explorer.delete': source ? () => void askDelete(source) : undefined,
+    'explorer.duplicate': source ? () => void runDuplicate(source) : undefined,
+    'explorer.contextMenu': current
+      ? () => {
+          const rect = treeRef.current
+            ?.querySelector('[aria-selected="true"]')
+            ?.getBoundingClientRect();
+          setMenu({ x: (rect?.left ?? 0) + 24, y: rect?.bottom ?? 0, row: current });
+        }
+      : undefined,
+  });
+
   function onTreeKeyDown(e: React.KeyboardEvent) {
+    if (runAction(e)) {
+      return;
+    }
+    // Tree navigation (WAI-ARIA tree pattern, not rebindable).
     const move = (i: number) => select(rows[Math.max(0, Math.min(rows.length - 1, i))]);
     const row = selected;
     if (e.key === 'ArrowDown') move(selectedIndex + 1);
@@ -421,19 +466,6 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
     } else if (e.key === 'Enter') {
       if (row.type === 'source') onEdit(row.profile);
       else if (!openViewer(row)) void toggle(row);
-    } else if (e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'q') {
-      // Control only: Cmd+Q quits on macOS.
-      const info = quickInfoOf(row);
-      if (info) setQuickInfo(info);
-    } else if (e.key === 'F5' && e.ctrlKey) refreshRow(row);
-    else if (row.type === 'source' && e.key === 'Delete') void askDelete(row.profile);
-    else if (row.type === 'source' && e.ctrlKey && e.key.toLowerCase() === 'd')
-      void runDuplicate(row.profile);
-    else if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
-      const rect = treeRef.current
-        ?.querySelector('[aria-selected="true"]')
-        ?.getBoundingClientRect();
-      setMenu({ x: (rect?.left ?? 0) + 24, y: rect?.bottom ?? 0, row });
     } else return;
     e.preventDefault();
     e.stopPropagation();
@@ -447,7 +479,7 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
         </h2>
         <IconButton
           label="New data source"
-          shortcut={shortcutLabel('datasource.new')}
+          shortcut={shortcutLabel('datasource.new', keymap)}
           onClick={onNew}
         >
           <Plus size={15} aria-hidden />
@@ -536,7 +568,8 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
             onClick={onNew}
             className="rounded border border-border px-3 py-1 text-fg hover:bg-hover"
           >
-            New data source <span className="text-muted">({shortcutLabel('datasource.new')})</span>
+            New data source{' '}
+            <span className="text-muted">({shortcutLabel('datasource.new', keymap)})</span>
           </button>
         </div>
       ) : (
@@ -547,6 +580,7 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
           tabIndex={0}
           aria-activedescendant={selected ? `tree-row-${selectedIndex}` : undefined}
           onKeyDown={onTreeKeyDown}
+          data-action-context="explorer"
           onFocus={() => !selected && select(rows[0])}
           className="@container flex-1 overflow-auto py-1 outline-none"
         >

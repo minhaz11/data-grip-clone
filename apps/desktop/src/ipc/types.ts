@@ -16,6 +16,7 @@ export const DEFAULT_SETTINGS: Settings = {
   runSelection: 'all',
   historyLimit: 10_000,
   historyMaxAgeDays: 0,
+  keymap: {},
 };
 
 /** Text form of a value as the server renders it; `null` is SQL NULL (Rust `quarry_db_core::Cell`). */

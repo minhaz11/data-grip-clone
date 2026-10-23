@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { backend } from '../ipc/client';
-import { chordOf, commandForChord, type CommandId } from '../lib/keymap';
+import type { ActionId } from '../lib/actions';
+import { chordOf, contextOf, isModifierOnly, resolveAction } from '../lib/keymap';
+import { currentKeymap, isCapturingShortcut } from './keymapStore';
 import { resolveTheme, useSettings } from './settingsStore';
 import { snapshot, useWorkspace } from './workspaceStore';
 import { useConnections } from '../features/connections/connectionsStore';
@@ -9,12 +11,19 @@ import { resetCatalog } from '../features/editor/catalog';
 import { askQuit } from '../features/exec/txGuards';
 import { useTx } from '../features/exec/txStore';
 
-/** Global keyboard shortcuts, dispatched through the keymap so bindings stay configurable. */
-export function useKeybindings(handlers: Partial<Record<CommandId, () => void>>) {
+/**
+ * App-level shortcuts, dispatched through the action registry and the user's keymap. The focused
+ * panel's context decides: its own actions win, and grid and explorer actions are left to those
+ * panels' handlers. Runs in the capture phase, so Monaco never sees a chord bound to an action.
+ */
+export function useKeybindings(handlers: Partial<Record<ActionId, () => void>>) {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      const command = commandForChord(chordOf(e));
-      const handler = command ? handlers[command] : undefined;
+      if (isModifierOnly(e) || isCapturingShortcut(e.target)) {
+        return;
+      }
+      const id = resolveAction(chordOf(e), contextOf(e.target), currentKeymap());
+      const handler = id ? handlers[id] : undefined;
       if (handler) {
         e.preventDefault();
         e.stopPropagation();

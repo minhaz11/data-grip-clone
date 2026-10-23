@@ -315,4 +315,30 @@ test.describe('accessibility', () => {
     await expect(app.getByRole('dialog')).toBeVisible();
     await expectNoA11yViolations(app, '[role="dialog"]');
   });
+
+  test('keymap settings rebind a shortcut and have no WCAG A/AA violations', async ({ app }) => {
+    await app.getByRole('button', { name: /^Settings/ }).click();
+    const dialog = app.getByRole('dialog', { name: 'Settings' });
+    await dialog.getByRole('tab', { name: 'Keymap' }).click();
+    await dialog.getByRole('button', { name: 'Add shortcut to Query history' }).click();
+    await app.keyboard.press('ControlOrMeta+Alt+J');
+    await dialog.getByRole('button', { name: 'Add shortcut to Stop the running query' }).click();
+    await app.keyboard.press('ControlOrMeta+Enter');
+    await expect(dialog.getByText(/only one of them can run/).first()).toBeVisible();
+    await expectNoA11yViolations(app, '[role="dialog"]');
+    await dialog
+      .getByRole('button', { name: /^Remove .* from Stop the running query$/ })
+      .last()
+      .click();
+    await dialog.getByRole('button', { name: 'Save' }).click();
+    await expect(dialog).toBeHidden();
+
+    // The new shortcut works in the real browser key path (Cmd on macOS, Ctrl elsewhere).
+    await app.keyboard.press('ControlOrMeta+Alt+J');
+    await expect(app.getByRole('dialog', { name: 'Query History' })).toBeVisible();
+    const [saved] = (await ipcCalls(app, 'settings_set')).slice(-1);
+    expect(saved?.args).toMatchObject({
+      settings: { keymap: { 'history.open': ['Ctrl+Alt+E', 'Ctrl+Alt+J'] } },
+    });
+  });
 });

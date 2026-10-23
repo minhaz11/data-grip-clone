@@ -1,5 +1,6 @@
 import { History, PanelBottom, PanelLeft, Settings, SquarePlus } from 'lucide-react';
 import { IconButton } from '../components/ui/IconButton';
+import { useKeymap } from './keymapStore';
 import { shortcutLabel } from '../lib/keymap';
 import { useWorkspace } from './workspaceStore';
 
@@ -15,6 +16,7 @@ export function Toolbar({
   const setExplorerCollapsed = useWorkspace((s) => s.setExplorerCollapsed);
   const setBottomCollapsed = useWorkspace((s) => s.setBottomCollapsed);
   const newConsole = useWorkspace((s) => s.newConsole);
+  const keymap = useKeymap();
 
   return (
     <div
@@ -25,7 +27,7 @@ export function Toolbar({
       <span className="mr-2 font-semibold tracking-tight">Quarry</span>
       <IconButton
         label="Database Explorer"
-        shortcut={shortcutLabel('view.toggleExplorer')}
+        shortcut={shortcutLabel('view.toggleExplorer', keymap)}
         pressed={!explorerCollapsed}
         onClick={() => setExplorerCollapsed(!explorerCollapsed)}
       >
@@ -33,14 +35,14 @@ export function Toolbar({
       </IconButton>
       <IconButton
         label="New console"
-        shortcut={shortcutLabel('console.new')}
+        shortcut={shortcutLabel('console.new', keymap)}
         onClick={() => newConsole()}
       >
         <SquarePlus size={16} aria-hidden />
       </IconButton>
       <IconButton
         label="Query history"
-        shortcut={shortcutLabel('history.open')}
+        shortcut={shortcutLabel('history.open', keymap)}
         onClick={onOpenHistory}
       >
         <History size={16} aria-hidden />
@@ -48,7 +50,7 @@ export function Toolbar({
       <div className="flex-1" />
       <IconButton
         label="Results panel"
-        shortcut={shortcutLabel('view.toggleBottomPanel')}
+        shortcut={shortcutLabel('view.toggleBottomPanel', keymap)}
         pressed={!bottomCollapsed}
         onClick={() => setBottomCollapsed(!bottomCollapsed)}
       >
@@ -56,7 +58,7 @@ export function Toolbar({
       </IconButton>
       <IconButton
         label="Settings"
-        shortcut={shortcutLabel('settings.open')}
+        shortcut={shortcutLabel('settings.open', keymap)}
         onClick={onOpenSettings}
       >
         <Settings size={16} aria-hidden />

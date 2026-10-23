@@ -15,7 +15,8 @@
     "test": "npm -w apps/desktop run test",
     "test:e2e": "playwright test -c tests/e2e/playwright.config.ts",
     "test:release": "node --test \"scripts/release/*.test.mjs\"",
-    "bindings": "UPDATE_BINDINGS=1 cargo test -p quarry-desktop --lib bindings::"
+    "bindings": "UPDATE_BINDINGS=1 cargo test -p quarry-desktop --lib bindings::",
+    "keymap:doc": "npm -w apps/desktop exec -- vitest run src/lib/keymapDoc.test.ts -u"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.13.0",

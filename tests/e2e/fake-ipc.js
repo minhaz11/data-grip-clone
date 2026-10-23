@@ -21,6 +21,7 @@
       runSelection: 'all',
       historyLimit: 10000,
       historyMaxAgeDays: 0,
+      keymap: {},
     },
     workspace: null,
     connections: [],

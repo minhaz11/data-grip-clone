@@ -43,7 +43,7 @@ is the human summary; refresh its Progress column from the script output when yo
 | 07  | [Result grid gaps and table browsing](07-result-grid.md)          | M4.8             | 03, 04     | Done        | 100%     |
 | 08  | [Editor gaps](08-editor.md)                                       | M4.7             | 03         | Done        | 100%     |
 | 09  | [Query history](09-query-history.md)                              | M5.1             | 03         | Done        | 100%     |
-| 10  | [Keymap and action registry](10-keymap-actions.md)                | M5.3             | 01         | Not started | 0%       |
+| 10  | [Keymap and action registry](10-keymap-actions.md)                | M5.3             | 01         | Done        | 100%     |
 | 11  | [Connection gaps](11-connections.md)                              | M4.9             | 02         | Not started | 0%       |
 | 12  | [Layout, navigation and explorer](12-layout-navigation.md)        | M4.10            | 05, 10     | Not started | 0%       |
 | 13  | [CSV/JSON import](13-import.md)                                   | M5.4             | 06         | Not started | 0%       |

@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import { askConfirm } from '../../app/dialogs';
+import { actionFor, useContextActions } from '../../app/keymapStore';
 import { ContextMenu, type MenuItem } from '../../components/ui/ContextMenu';
 import { backend } from '../../ipc/client';
 import type {
@@ -719,26 +720,49 @@ export function ResultGrid({
 
   // ----- Keyboard -----
 
+  const hasFocus = focus !== null && rowCount > 0;
+  const focusColumn = focus ? (shown[focus.col] ?? 0) : 0;
+  const cellCommands = editing && !editingCell && hasFocus;
+  const runAction = useContextActions('grid', {
+    'grid.selectAll': hasFocus ? () => setSelection(selectAll(rowCount, shown.length)) : undefined,
+    'grid.copy': hasFocus ? () => void copyCells() : undefined,
+    'grid.editCell':
+      cellCommands && focus && canEdit(focus.row, focusColumn)
+        ? () => setEditingCell({ row: focus.row, col: focusColumn })
+        : undefined,
+    'grid.deleteRows':
+      cellCommands && target && !editing.busy && range
+        ? () => {
+            // Every selected row: new rows are removed, existing ones marked (or unmarked).
+            const { existing, insertIds } = selectedRows();
+            editing.onChange((x) => {
+              let next = x;
+              for (const id of insertIds) {
+                next = removeInsert(next, id);
+              }
+              for (const cells of existing) {
+                next = toggleDelete(next, target, cells);
+              }
+              return next;
+            });
+          }
+        : undefined,
+    'grid.addRow':
+      editing && !editing.busy && (!hasFocus || !editingCell)
+        ? () => {
+            editing.onChange((x) => addInsert(x, `new-${Date.now()}-${x.inserts.length}`));
+            // The new row is at the old row count (moveTo would clamp to the old last row).
+            setSelection(single({ row: hasFocus ? rowCount : 0, col: 0 }));
+          }
+        : undefined,
+  });
+
   function onKeyDown(e: React.KeyboardEvent) {
+    if (runAction(e) || !focus || rowCount === 0) {
+      return;
+    }
+    // Widget navigation (not rebindable): arrows, Page Up/Down, Home/End, with Shift to extend.
     const mod = e.ctrlKey || e.metaKey;
-    if (!focus || rowCount === 0) {
-      if (editing && e.key === 'Insert' && !editing.busy) {
-        e.preventDefault();
-        editing.onChange((x) => addInsert(x, `new-${Date.now()}-${x.inserts.length}`));
-        setSelection(single({ row: 0, col: 0 }));
-      }
-      return;
-    }
-    if (mod && e.key.toLowerCase() === 'a') {
-      e.preventDefault();
-      setSelection(selectAll(rowCount, shown.length));
-      return;
-    }
-    if (mod && e.key.toLowerCase() === 'c') {
-      e.preventDefault();
-      void copyCells();
-      return;
-    }
     const page = Math.max(1, Math.floor(viewport / ROW_HEIGHT) - 1);
     const keys: Record<string, () => void> = {
       ArrowDown: () => moveTo(focus.row + 1, focus.col, e.shiftKey),
@@ -750,37 +774,6 @@ export function ResultGrid({
       Home: () => moveTo(mod ? 0 : focus.row, 0, e.shiftKey),
       End: () => moveTo(mod ? rowCount - 1 : focus.row, shown.length - 1, e.shiftKey),
     };
-    const focusColumn = shown[focus.col] ?? 0;
-    if (editing && !editingCell) {
-      if ((e.key === 'Enter' || e.key === 'F2') && canEdit(focus.row, focusColumn)) {
-        e.preventDefault();
-        setEditingCell({ row: focus.row, col: focusColumn });
-        return;
-      }
-      if (e.key === 'Delete' && target && !editing.busy && range) {
-        e.preventDefault();
-        // Every selected row: new rows are removed, existing ones marked (or unmarked).
-        const { existing, insertIds } = selectedRows();
-        editing.onChange((x) => {
-          let next = x;
-          for (const id of insertIds) {
-            next = removeInsert(next, id);
-          }
-          for (const cells of existing) {
-            next = toggleDelete(next, target, cells);
-          }
-          return next;
-        });
-        return;
-      }
-      if (e.key === 'Insert' && !editing.busy) {
-        e.preventDefault();
-        editing.onChange((x) => addInsert(x, `new-${Date.now()}-${x.inserts.length}`));
-        // The new row is at the old row count (moveTo would clamp to the old last row).
-        setSelection(single({ row: rowCount, col: 0 }));
-        return;
-      }
-    }
     const action = keys[e.key];
     if (action) {
       e.preventDefault();
@@ -862,6 +855,7 @@ export function ResultGrid({
       <div
         ref={scroller}
         role="grid"
+        data-action-context="grid"
         aria-label="Result rows"
         aria-rowcount={rowCount + 1}
         aria-colcount={shown.length}
@@ -959,8 +953,9 @@ export function ResultGrid({
                         }
                         onKeyDown={(e) => {
                           // The column menu from the keyboard.
-                          if (e.key === 'F10' && e.shiftKey) {
+                          if (actionFor(e, 'grid') === 'grid.columnMenu') {
                             e.preventDefault();
+                            e.stopPropagation();
                             const box = e.currentTarget.getBoundingClientRect();
                             setMenu({
                               x: box.left,

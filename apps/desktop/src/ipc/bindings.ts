@@ -25,7 +25,12 @@ historyLimit: number,
 /**
  * Query history older than this many days is removed; 0 = keep regardless of age.
  */
-historyMaxAgeDays: number, };
+historyMaxAgeDays: number, 
+/**
+ * Shortcut overrides by action id; each replaces all of that action's default bindings
+ * (an empty list unbinds it). Ids the UI no longer knows are ignored there.
+ */
+keymap: { [key in string]: Array<string> }, };
 
 export type AppError = { kind: string, message: string, hint?: string, sqlstate?: string, 
 /**

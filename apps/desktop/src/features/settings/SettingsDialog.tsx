@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { hasBlockingConflicts, KeymapPanel } from './KeymapPanel';
 import { Modal } from '../../components/ui/Modal';
 import { useSettings } from '../../app/settingsStore';
 import type {
@@ -26,6 +27,7 @@ export function SettingsDialog({ onClose }: { onClose(): void }) {
   const update = useSettings((s) => s.update);
   const error = useSettings((s) => s.error);
   const [draft, setDraft] = useState<Settings>(current);
+  const [page, setPage] = useState<'general' | 'keymap'>('general');
 
   const fontSizeValid =
     Number.isInteger(draft.editorFontSize) &&
@@ -36,6 +38,7 @@ export function SettingsDialog({ onClose }: { onClose(): void }) {
   const historyValid =
     inRange(draft.historyLimit, HISTORY_LIMIT_RANGE.min, HISTORY_LIMIT_RANGE.max) &&
     inRange(draft.historyMaxAgeDays, 0, MAX_HISTORY_DAYS);
+  const keymapValid = !hasBlockingConflicts(draft.keymap);
 
   async function apply() {
     await update(draft);
@@ -46,7 +49,7 @@ export function SettingsDialog({ onClose }: { onClose(): void }) {
     <Modal
       title="Settings"
       onClose={onClose}
-      width={560}
+      width={page === 'keymap' ? 760 : 560}
       footer={
         <>
           <button
@@ -59,7 +62,7 @@ export function SettingsDialog({ onClose }: { onClose(): void }) {
           <button
             type="button"
             onClick={apply}
-            disabled={!fontSizeValid || !timesValid || !historyValid}
+            disabled={!fontSizeValid || !timesValid || !historyValid || !keymapValid}
             className="rounded bg-accent px-3 py-1 text-accent-fg disabled:opacity-50"
           >
             Save
@@ -67,7 +70,47 @@ export function SettingsDialog({ onClose }: { onClose(): void }) {
         </>
       }
     >
-      <div className="grid grid-cols-[190px_1fr] items-center gap-x-3 gap-y-3">
+      <div role="tablist" aria-label="Settings pages" className="mb-3 flex gap-1">
+        {(
+          [
+            ['general', 'General'],
+            ['keymap', 'Keymap'],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            id={`settings-tab-${id}`}
+            aria-selected={page === id}
+            aria-controls={`settings-page-${id}`}
+            onClick={() => setPage(id)}
+            className={`rounded px-3 py-1 ${page === id ? 'bg-selected' : 'hover:bg-hover'}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {page === 'keymap' && (
+        <div role="tabpanel" id="settings-page-keymap" aria-labelledby="settings-tab-keymap">
+          <KeymapPanel
+            overrides={draft.keymap}
+            onChange={(keymap) => setDraft({ ...draft, keymap: keymap as Settings['keymap'] })}
+          />
+          {!keymapValid && (
+            <p role="alert" className="mt-2 text-danger">
+              Two actions in the same place share a shortcut. Change one before saving.
+            </p>
+          )}
+        </div>
+      )}
+      <div
+        role="tabpanel"
+        id="settings-page-general"
+        aria-labelledby="settings-tab-general"
+        hidden={page !== 'general'}
+        className={`${page === 'general' ? 'grid' : 'hidden'} grid-cols-[190px_1fr] items-center gap-x-3 gap-y-3`}
+      >
         <label htmlFor="settings-theme">Theme</label>
         <select
           id="settings-theme"

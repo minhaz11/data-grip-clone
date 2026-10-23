@@ -5,6 +5,7 @@ pub mod connections;
 pub mod history;
 mod migrations;
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
@@ -101,6 +102,9 @@ pub struct Settings {
     pub history_limit: u32,
     /// Query history older than this many days is removed; 0 = keep regardless of age.
     pub history_max_age_days: u32,
+    /// Shortcut overrides by action id; each replaces all of that action's default bindings
+    /// (an empty list unbinds it). Ids the UI no longer knows are ignored there.
+    pub keymap: BTreeMap<String, Vec<String>>,
 }
 
 impl Settings {
@@ -110,6 +114,9 @@ impl Settings {
     pub const HISTORY_LIMIT_RANGE: std::ops::RangeInclusive<u32> = 100..=1_000_000;
     /// Ten years.
     pub const MAX_HISTORY_DAYS: u32 = 3_650;
+    pub const MAX_KEYMAP_ENTRIES: usize = 500;
+    pub const MAX_BINDINGS: usize = 4;
+    pub const MAX_CHORD_LEN: usize = 64;
 
     pub fn validate(&self) -> Result<(), StoreError> {
         if !Self::FONT_SIZE_RANGE.contains(&self.editor_font_size) {
@@ -140,6 +147,39 @@ impl Settings {
                 Self::MAX_HISTORY_DAYS
             )));
         }
+        self.validate_keymap()
+    }
+
+    fn validate_keymap(&self) -> Result<(), StoreError> {
+        let invalid = |msg: String| Err(StoreError::Invalid(msg));
+        if self.keymap.len() > Self::MAX_KEYMAP_ENTRIES {
+            return invalid(format!(
+                "at most {} shortcut overrides",
+                Self::MAX_KEYMAP_ENTRIES
+            ));
+        }
+        for (id, chords) in &self.keymap {
+            let id_ok = !id.is_empty()
+                && id.len() <= Self::MAX_CHORD_LEN
+                && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '.');
+            if !id_ok {
+                return invalid(format!("invalid action id '{id}'"));
+            }
+            if chords.len() > Self::MAX_BINDINGS {
+                return invalid(format!(
+                    "{id}: at most {} shortcuts per action",
+                    Self::MAX_BINDINGS
+                ));
+            }
+            for chord in chords {
+                if chord.is_empty()
+                    || chord.len() > Self::MAX_CHORD_LEN
+                    || chord.chars().any(char::is_control)
+                {
+                    return invalid(format!("{id}: invalid shortcut '{chord}'"));
+                }
+            }
+        }
         Ok(())
     }
 
@@ -164,6 +204,7 @@ impl Default for Settings {
             run_selection: SelectionRun::All,
             history_limit: 10_000,
             history_max_age_days: 0,
+            keymap: BTreeMap::new(),
         }
     }
 }
@@ -382,6 +423,36 @@ mod tests {
     }
 
     #[test]
+    fn keymap_overrides_round_trip_and_are_validated() {
+        let store = Store::open_in_memory().expect("open");
+        let ok = Settings {
+            keymap: BTreeMap::from([
+                ("query.run".to_owned(), vec!["Ctrl+R".to_owned()]),
+                ("tab.close".to_owned(), vec![]),
+            ]),
+            ..Settings::default()
+        };
+        assert_eq!(store.set_settings(&ok).expect("save"), ok);
+        assert_eq!(store.settings().expect("load"), ok);
+        let bad = [
+            BTreeMap::from([("bad id!".to_owned(), vec![])]),
+            BTreeMap::from([("query.run".to_owned(), vec![String::new()])]),
+            BTreeMap::from([("query.run".to_owned(), vec!["F1".to_owned(); 5])]),
+            BTreeMap::from([("query.run".to_owned(), vec!["Ctrl+\n".to_owned()])]),
+        ];
+        for keymap in bad {
+            assert!(matches!(
+                store.set_settings(&Settings {
+                    keymap,
+                    ..Settings::default()
+                }),
+                Err(StoreError::Invalid(_))
+            ));
+        }
+        assert_eq!(store.settings().expect("load"), ok);
+    }
+
+    #[test]
     fn history_retention_is_validated() {
         let store = Store::open_in_memory().expect("open");
         for bad in [
@@ -428,7 +499,8 @@ mod tests {
                 "runOutsideStatement": "nearest",
                 "runSelection": "all",
                 "historyLimit": 10000,
-                "historyMaxAgeDays": 0
+                "historyMaxAgeDays": 0,
+                "keymap": {}
             })
         );
     }
