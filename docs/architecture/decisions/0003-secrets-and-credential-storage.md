@@ -36,3 +36,12 @@
   whole before it is written (URL credentials, secret-named fields in key=value and JSON form,
   `sk-ant-` keys), and a canary test drives the connection manager with a marker password and
   scans the log file. CI runs gitleaks over the full history on every push and PR.
+- Implemented (step 11, SSH tunnels): SSH secrets belong to a reusable SSH profile, not to a data
+  source, and use the profile's own save mode (forever, until restart, never). Accounts:
+  `ssh:<profile-uuid>:password` for password logins and `ssh:<profile-uuid>:passphrase` for an
+  encrypted key file. Changing a profile's login method or key file drops the old secret. Key and
+  certificate files are referenced by path only and read at connect time; their contents never
+  reach `app.db`. Host keys the user trusted are stored in `app.db` (`ssh_known_hosts`, SHA-256
+  fingerprints, not `~/.ssh/known_hosts`); "Trust" can only confirm the key the server presented
+  on the last attempt. The canary test covers SSH passwords and passphrases in every save mode,
+  and also scans `app.db` (and its WAL) and the IPC responses for the marker.

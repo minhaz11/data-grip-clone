@@ -5,8 +5,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use quarry_db_core::{
-    ConnectParams, DatabaseAdapter, MetaKind, MetaNode, MetadataRequest as Req, ObjectRef,
-    ObjectType, Session, TlsMode,
+    ConnectOptions, ConnectParams, DatabaseAdapter, MetaKind, MetaNode, MetadataRequest as Req,
+    ObjectRef, ObjectType, SchemaScope, Session, TlsMode,
 };
 use quarry_db_postgres::PostgresAdapter;
 use quarry_secrets::SecretString;
@@ -32,6 +32,7 @@ fn params() -> ConnectParams {
         connect_timeout: Duration::from_secs(5),
         read_only: false,
         application_name: "quarry-it-meta".into(),
+        options: Default::default(),
     }
 }
 
@@ -507,6 +508,70 @@ async fn shows_keys_foreign_keys_checks_triggers_routines_and_sequences() {
     assert!(missing.is_none());
 
     db.batch_execute("DROP SCHEMA it_kinds CASCADE")
+        .await
+        .expect("cleanup");
+}
+
+#[tokio::test]
+#[ignore = "needs scripts/test-pg.sh up"]
+async fn schema_scope_limits_introspection() {
+    let db = admin().await;
+    db.batch_execute(
+        "DROP SCHEMA IF EXISTS it_scope_a, it_scope_b1, it_scope_out CASCADE;
+         CREATE SCHEMA it_scope_a; CREATE SCHEMA it_scope_b1; CREATE SCHEMA it_scope_out;
+         CREATE TABLE it_scope_a.t (x int); CREATE TABLE it_scope_b1.t (x int);
+         CREATE TABLE it_scope_out.t (x int);
+         CREATE FUNCTION it_scope_out.f() RETURNS int LANGUAGE sql AS 'select 1';
+         CREATE FUNCTION it_scope_a.f() RETURNS int LANGUAGE sql AS 'select 1';",
+    )
+    .await
+    .expect("fixture");
+
+    let scope = SchemaScope {
+        names: vec!["it_scope_a".into()],
+        patterns: vec!["it_scope_b?".into()],
+    };
+    let s = PostgresAdapter
+        .connect(
+            &ConnectParams {
+                options: ConnectOptions {
+                    schema_scope: scope.clone(),
+                    ..Default::default()
+                },
+                ..params()
+            },
+            Box::new(|_| {}),
+        )
+        .await
+        .expect("connect");
+
+    let schemas = s.metadata(&Req::Schemas).await.expect("schemas");
+    assert_eq!(names(&schemas), ["it_scope_a", "it_scope_b1"]);
+    let all = s.metadata(&Req::AllSchemas).await.expect("all");
+    assert!(names(&all).contains(&"it_scope_out") && names(&all).contains(&"public"));
+
+    let relations = s.metadata(&Req::Relations).await.expect("rel");
+    let mut schemas_of: Vec<&str> = relations
+        .iter()
+        .filter_map(|n| n.detail.as_deref())
+        .collect();
+    schemas_of.dedup();
+    assert_eq!(schemas_of, ["it_scope_a", "it_scope_b1"]);
+
+    let functions = s.metadata(&Req::Functions).await.expect("fn");
+    let keys: Vec<&str> = functions.iter().map(|n| n.key.as_str()).collect();
+    assert!(keys.contains(&"it_scope_a\u{1f}f()"), "{keys:?}");
+    assert!(!keys.iter().any(|k| k.starts_with("it_scope_out")));
+    // Built-ins stay available for completion whatever the scope.
+    assert!(keys.iter().any(|k| k.starts_with("pg_catalog\u{1f}now(")));
+
+    // An edited scope applies to the live session at once; the empty scope means everything.
+    s.set_schema_scope(SchemaScope::default());
+    let schemas = s.metadata(&Req::Schemas).await.expect("schemas");
+    assert!(names(&schemas).contains(&"it_scope_out"));
+
+    s.close().await;
+    db.batch_execute("DROP SCHEMA it_scope_a, it_scope_b1, it_scope_out CASCADE")
         .await
         .expect("cleanup");
 }

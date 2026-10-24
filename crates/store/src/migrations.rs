@@ -67,6 +67,49 @@ const MIGRATIONS: &[&str] = &[
          INSERT INTO query_history_fts (query_history_fts, rowid, sql)
          VALUES ('delete', old.id, old.sql);
      END;",
+    // 5: folders and ordering, SSH profiles and trusted host keys, TLS files, connection options
+    // and schema scope (M4.9). Secrets stay in the keyring (ADR-0003); only flags live here.
+    "CREATE TABLE folders (
+         id         TEXT PRIMARY KEY NOT NULL,
+         name       TEXT NOT NULL,
+         color      TEXT,
+         sort_order INTEGER NOT NULL DEFAULT 0
+     ) STRICT;
+     CREATE UNIQUE INDEX folders_name_unique ON folders (name COLLATE NOCASE);
+     CREATE TABLE ssh_profiles (
+         id           TEXT PRIMARY KEY NOT NULL,
+         name         TEXT NOT NULL,
+         host         TEXT NOT NULL,
+         port         INTEGER NOT NULL,
+         username     TEXT NOT NULL,
+         auth         TEXT NOT NULL,
+         key_file     TEXT,
+         save_mode    TEXT NOT NULL,
+         secret_saved INTEGER NOT NULL DEFAULT 0,
+         created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+         updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+     ) STRICT;
+     CREATE UNIQUE INDEX ssh_profiles_name_unique ON ssh_profiles (name COLLATE NOCASE);
+     CREATE TABLE ssh_known_hosts (
+         host        TEXT NOT NULL,
+         port        INTEGER NOT NULL,
+         algorithm   TEXT NOT NULL,
+         fingerprint TEXT NOT NULL,
+         trusted_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+         PRIMARY KEY (host, port)
+     ) STRICT;
+     ALTER TABLE connections ADD COLUMN folder_id TEXT REFERENCES folders (id) ON DELETE SET NULL;
+     ALTER TABLE connections ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
+     ALTER TABLE connections ADD COLUMN ssh_profile_id TEXT REFERENCES ssh_profiles (id);
+     ALTER TABLE connections ADD COLUMN tls_ca_file TEXT;
+     ALTER TABLE connections ADD COLUMN tls_cert_file TEXT;
+     ALTER TABLE connections ADD COLUMN tls_key_file TEXT;
+     ALTER TABLE connections ADD COLUMN keepalive_secs INTEGER NOT NULL DEFAULT 0;
+     ALTER TABLE connections ADD COLUMN auto_disconnect_mins INTEGER NOT NULL DEFAULT 0;
+     ALTER TABLE connections ADD COLUMN startup_sql TEXT NOT NULL DEFAULT '';
+     ALTER TABLE connections ADD COLUMN schema_names TEXT NOT NULL DEFAULT '[]';
+     ALTER TABLE connections ADD COLUMN schema_pattern TEXT NOT NULL DEFAULT '';
+     ALTER TABLE connections ADD COLUMN url_only INTEGER NOT NULL DEFAULT 0;",
 ];
 
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;

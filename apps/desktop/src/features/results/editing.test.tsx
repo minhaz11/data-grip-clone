@@ -134,6 +134,7 @@ describe('edit bar and submit', () => {
     name: environment === 'production' ? 'Billing' : 'Dev',
     id: 'src',
     passwordSaved: false,
+    sortOrder: 0,
     createdAt: '',
     updatedAt: '',
   });

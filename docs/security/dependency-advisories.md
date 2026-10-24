@@ -33,3 +33,18 @@ on every dependency upgrade.
   - All SQL and file access is mediated by validated Rust commands.
 - **Revisit** if Monaco stops assigning prototype-shadowing properties, or if we can freeze after
   Monaco has loaded without breaking later lazily loaded Monaco modules.
+
+## rsa (RUSTSEC-2023-0071, Marvin attack): low
+
+- **Path:** `quarry-ssh` → `russh@0.64.1` (feature `rsa`) → `rsa@0.10.0-rc.18`. No fixed release
+  exists; the advisory covers every version.
+- **Fact:** the attack recovers an RSA private key by timing many private-key operations, chiefly
+  PKCS#1 v1.5 decryption, from a vantage point that can measure them precisely.
+- **Our usage:** the SSH client verifies RSA host keys (public-key operations, not affected) and,
+  with an RSA user key, signs one authentication challenge per login. Quarry never decrypts with
+  an RSA key and never acts as a server for anyone else's requests, so an attacker cannot drive
+  the many timed operations the attack needs.
+- **Why keep the feature:** without it, `id_rsa` keys and servers that offer only RSA host keys
+  could not be used. Ed25519 and ECDSA keys do not touch this code.
+- **Decision:** accept. Revisit when `rsa` ships a constant-time release or `russh` offers a
+  backend without it.

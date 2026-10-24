@@ -4,6 +4,7 @@
 pub mod connections;
 pub mod history;
 mod migrations;
+pub mod ssh;
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -12,9 +13,12 @@ use std::sync::{Mutex, MutexGuard};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
-pub use connections::{ConnectionDraft, ConnectionProfile, Engine, Environment, SaveMode, SslMode};
+pub use connections::{
+    ConnectionDraft, ConnectionProfile, Engine, Environment, Folder, SaveMode, SslMode,
+};
 pub use history::{HistoryEntry, HistoryQuery, HistoryRecord, HistoryStatus, Retention};
 pub use migrations::LATEST_VERSION;
+pub use ssh::{SshAuthMethod, SshProfile, SshProfileDraft, TrustedHostKey};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {

@@ -227,8 +227,11 @@ impl Jobs {
         );
         let jobs = Arc::clone(self);
         let id = job_id.clone();
+        // A running statement keeps the data source from auto-disconnecting.
+        let busy = sessions.busy(&key.source_id);
         let (app, sessions) = (app.clone(), Arc::clone(sessions));
         tauri::async_runtime::spawn(async move {
+            let _busy = busy;
             jobs.run(
                 &id,
                 request.statements,
@@ -533,6 +536,7 @@ mod tests {
             connect_timeout: Duration::from_secs(5),
             read_only: false,
             application_name: "quarry-it-history".into(),
+            options: Default::default(),
         }
     }
 
@@ -591,6 +595,7 @@ mod tests {
                     tx_mode: quarry_db_core::TxMode::Auto,
                     isolation: quarry_db_core::Isolation::ReadCommitted,
                     history_enabled,
+                    ..Default::default()
                 },
             )
             .expect("profile");

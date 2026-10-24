@@ -3,16 +3,29 @@
 
 use quarry_db_core::{
     ColumnDetail, ConstraintDetail, ForeignKeyDetail, IndexDetail, MetaKind, MetaNode,
-    MetadataRequest as Req, ObjectDetails, ObjectRef, ObjectType, TriggerDetail,
+    MetadataRequest as Req, ObjectDetails, ObjectRef, ObjectType, SchemaScope, TriggerDetail,
 };
 use tokio_postgres::{Client, Row};
 
-const SCHEMAS: &str = "
+/// Schema scope filter on `n.nspname`: `$1` names, `$2` LIKE patterns; both empty = every schema.
+macro_rules! in_scope {
+    () => {
+        "(cardinality($1::text[]) + cardinality($2::text[]) = 0
+          OR n.nspname = ANY ($1::text[]) OR n.nspname LIKE ANY ($2::text[]))"
+    };
+}
+
+const SCHEMAS: &str = concat!(
+    "
     SELECT n.nspname, obj_description(n.oid, 'pg_namespace')
     FROM pg_namespace n
     WHERE n.nspname <> 'information_schema' AND n.nspname !~ '^pg_'
       AND has_schema_privilege(n.oid, 'USAGE')
-    ORDER BY n.nspname";
+      AND ",
+    in_scope!(),
+    "
+    ORDER BY n.nspname"
+);
 
 const SCHEMA_COUNTS: &str = "
     SELECT count(*) FILTER (WHERE c.relkind IN ('r', 'p')),
@@ -156,23 +169,33 @@ const COLUMNS: &str = "
     WHERE n.nspname = $1 AND c.relname = $2
     ORDER BY a.attnum";
 
-const RELATIONS: &str = "
+const RELATIONS: &str = concat!(
+    "
     SELECT n.nspname, c.relname, c.relkind::text
     FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') AND NOT c.relispartition
       AND n.nspname <> 'information_schema' AND n.nspname !~ '^pg_'
       AND has_schema_privilege(n.oid, 'USAGE')
-    ORDER BY n.nspname, c.relname";
+      AND ",
+    in_scope!(),
+    "
+    ORDER BY n.nspname, c.relname"
+);
 
 /// Callable functions for completion. Built-ins that only serve the system (type input/output,
 /// operator implementations, `internal` arguments or results, trigger functions) are left out.
-pub const FUNCTIONS: &str = "
+/// `pg_catalog` is always in the schema scope.
+const FUNCTIONS: &str = concat!(
+    "
     SELECT n.nspname, p.proname, pg_get_function_arguments(p.oid),
            pg_get_function_result(p.oid), p.prokind::text
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
     WHERE p.prokind IN ('f', 'a', 'w', 'p')
       AND n.nspname <> 'information_schema' AND n.nspname !~ '^pg_(toast|temp)'
       AND has_schema_privilege(n.oid, 'USAGE')
+      AND (n.nspname = 'pg_catalog' OR ",
+    in_scope!(),
+    ")
       AND p.prorettype NOT IN ('internal'::regtype, 'trigger'::regtype,
                                'event_trigger'::regtype, 'cstring'::regtype)
       AND NOT 'internal'::regtype = ANY (p.proargtypes::oid[])
@@ -182,7 +205,8 @@ pub const FUNCTIONS: &str = "
         AND NOT EXISTS (SELECT 1 FROM pg_operator o WHERE o.oprcode = p.oid)
         AND NOT EXISTS (SELECT 1 FROM pg_cast c WHERE c.castfunc = p.oid)))
     ORDER BY n.nspname = 'pg_catalog', n.nspname, p.proname, 3
-    LIMIT 5000";
+    LIMIT 5000"
+);
 
 const INDEXES: &str = "
     SELECT i.relname, pg_get_indexdef(x.indexrelid), x.indisunique, x.indisprimary
@@ -380,10 +404,17 @@ async fn constraints(
         .collect())
 }
 
-pub async fn load(client: &Client, req: &Req) -> Result<Vec<MetaNode>, tokio_postgres::Error> {
+pub async fn load(
+    client: &Client,
+    req: &Req,
+    scope: &SchemaScope,
+) -> Result<Vec<MetaNode>, tokio_postgres::Error> {
+    let all = SchemaScope::default();
+    let scope = if *req == Req::AllSchemas { &all } else { scope };
+    let (names, patterns) = (&scope.names, &scope.like_patterns());
     Ok(match req {
-        Req::Schemas => client
-            .query(SCHEMAS, &[])
+        Req::Schemas | Req::AllSchemas => client
+            .query(SCHEMAS, &[names, patterns])
             .await?
             .iter()
             .map(|r| {
@@ -630,7 +661,7 @@ pub async fn load(client: &Client, req: &Req) -> Result<Vec<MetaNode>, tokio_pos
             .collect(),
 
         Req::Relations => client
-            .query(RELATIONS, &[])
+            .query(RELATIONS, &[names, patterns])
             .await?
             .iter()
             .map(|r| {
@@ -647,7 +678,7 @@ pub async fn load(client: &Client, req: &Req) -> Result<Vec<MetaNode>, tokio_pos
             .collect(),
 
         Req::Functions => client
-            .query(FUNCTIONS, &[])
+            .query(FUNCTIONS, &[names, patterns])
             .await?
             .iter()
             .map(|r| {

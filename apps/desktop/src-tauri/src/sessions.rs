@@ -4,6 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use quarry_db_core::{
     ConnectParams, DatabaseAdapter, MetaNode, MetadataRequest, ServerInfo, Session, TxSettings,
@@ -92,10 +93,59 @@ pub struct Sessions {
     schemas: Mutex<HashMap<SessionKey, Option<String>>>,
     /// Statement timeout (ms) applied per session, so it is only set again when it changes.
     timeouts: Mutex<HashMap<SessionKey, u64>>,
+    /// Data sources that disconnect after this much idle time (from their profile at connect).
+    idle_limits: Mutex<HashMap<String, Duration>>,
+    /// When each data source's sessions were last asked for.
+    last_used: Mutex<HashMap<String, Instant>>,
+    /// Long operations (running statements, exports) per data source; never idle while > 0.
+    in_use: Mutex<HashMap<String, usize>>,
+}
+
+/// Marks a data source busy while alive, so auto-disconnect leaves it alone.
+pub struct Busy {
+    sessions: Arc<Sessions>,
+    source_id: String,
+}
+
+impl Drop for Busy {
+    fn drop(&mut self) {
+        let mut in_use = lock(&self.sessions.in_use);
+        if let Some(n) = in_use.get_mut(&self.source_id) {
+            *n = n.saturating_sub(1);
+            if *n == 0 {
+                in_use.remove(&self.source_id);
+            }
+        }
+        drop(in_use);
+        self.sessions.touch(&self.source_id);
+    }
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// Data sources past their idle limit with nothing running, by the bookkeeping alone (the caller
+/// still checks for open transactions).
+fn idle_sources(
+    limits: &HashMap<String, Duration>,
+    last_used: &HashMap<String, Instant>,
+    in_use: &HashMap<String, usize>,
+    now: Instant,
+) -> Vec<String> {
+    let mut ids: Vec<String> = limits
+        .iter()
+        .filter(|(id, limit)| {
+            let busy = in_use.get(*id).is_some_and(|n| *n > 0);
+            let expired = last_used
+                .get(*id)
+                .is_some_and(|t| now.saturating_duration_since(*t) >= **limit);
+            expired && !busy
+        })
+        .map(|(id, _)| id.clone())
+        .collect();
+    ids.sort();
+    ids
 }
 
 impl Sessions {
@@ -108,7 +158,67 @@ impl Sessions {
             defaults: Default::default(),
             schemas: Default::default(),
             timeouts: Default::default(),
+            idle_limits: Default::default(),
+            last_used: Default::default(),
+            in_use: Default::default(),
         }
+    }
+
+    fn touch(&self, source_id: &str) {
+        lock(&self.last_used).insert(source_id.to_owned(), Instant::now());
+    }
+
+    /// Keeps `source_id` from being disconnected as idle until the guard is dropped.
+    pub fn busy(self: &Arc<Self>, source_id: &str) -> Busy {
+        *lock(&self.in_use).entry(source_id.to_owned()).or_default() += 1;
+        self.touch(source_id);
+        Busy {
+            sessions: Arc::clone(self),
+            source_id: source_id.to_owned(),
+        }
+    }
+
+    pub async fn is_connected(&self, id: &str) -> bool {
+        self.peek(&SessionKey::shared(id)).await.is_ok()
+    }
+
+    /// Disconnects data sources idle for longer than their limit: nothing running, no open
+    /// transaction in any of their sessions. Returns the ids it disconnected.
+    pub async fn disconnect_idle(&self, now: Instant) -> Vec<String> {
+        let candidates = idle_sources(
+            &lock(&self.idle_limits),
+            &lock(&self.last_used),
+            &lock(&self.in_use),
+            now,
+        );
+        let mut idle = Vec::new();
+        for id in candidates {
+            let open_tx = self
+                .live
+                .lock()
+                .await
+                .iter()
+                .any(|(k, s)| k.source_id == id && s.tx_status() != TxStatus::Idle);
+            if open_tx || !self.is_connected(&id).await {
+                continue;
+            }
+            tracing::info!(source = %id, "idle: disconnecting");
+            self.disconnect(&id).await;
+            idle.push(id);
+        }
+        idle
+    }
+
+    /// Runs one metadata request on a short-lived connection (for drafts that are not connected).
+    pub async fn metadata_once(
+        &self,
+        params: &ConnectParams,
+        request: &MetadataRequest,
+    ) -> Result<Vec<MetaNode>, AppError> {
+        let session = self.adapter.connect(params, Box::new(|_| {})).await?;
+        let result = session.metadata(request).await;
+        session.close().await;
+        Ok(result?)
     }
 
     pub async fn test(&self, params: &ConnectParams) -> Result<ServerInfo, AppError> {
@@ -131,13 +241,15 @@ impl Sessions {
             .unwrap_or_default()
     }
 
-    /// Opens the shared session of data source `id`; `defaults` are its profile's settings.
+    /// Opens the shared session of data source `id`; `defaults` are its profile's settings and
+    /// `idle` its auto-disconnect limit.
     pub async fn connect(
         self: &Arc<Self>,
         app: &AppHandle,
         id: &str,
         params: &ConnectParams,
         defaults: TxSettings,
+        idle: Option<Duration>,
     ) -> Result<ServerInfo, AppError> {
         let key = SessionKey::shared(id);
         if let Some(s) = self.live.lock().await.get(&key).filter(|s| !s.is_closed()) {
@@ -169,6 +281,11 @@ impl Sessions {
             "connected"
         );
         lock(&self.defaults).insert(id.to_owned(), defaults);
+        match idle {
+            Some(limit) => lock(&self.idle_limits).insert(id.to_owned(), limit),
+            None => lock(&self.idle_limits).remove(id),
+        };
+        self.touch(id);
         session.set_tx_settings(self.settings_for(&key));
         lock(&self.schemas).remove(&key);
         lock(&self.timeouts).remove(&key);
@@ -188,8 +305,14 @@ impl Sessions {
     }
 
     /// The open session for `key`, if any. The registry lock is released before the caller uses
-    /// it.
+    /// it. Counts as use of the data source (for auto-disconnect).
     pub async fn get(&self, key: &SessionKey) -> Result<Arc<dyn Session>, AppError> {
+        self.touch(&key.source_id);
+        self.peek(key).await
+    }
+
+    /// Like [`get`](Self::get), without counting as use (status queries).
+    async fn peek(&self, key: &SessionKey) -> Result<Arc<dyn Session>, AppError> {
         self.live
             .lock()
             .await
@@ -268,7 +391,7 @@ impl Sessions {
     }
 
     pub async fn state(&self, key: &SessionKey) -> SessionState {
-        match self.get(key).await {
+        match self.peek(key).await {
             Ok(session) => SessionState {
                 session: key.clone(),
                 open: true,
@@ -408,6 +531,15 @@ impl Sessions {
         }
     }
 
+    /// Applies an edited schema scope to every live session of data source `id`.
+    pub async fn set_schema_scope(&self, id: &str, scope: &quarry_db_core::SchemaScope) {
+        for (key, session) in self.live.lock().await.iter() {
+            if key.source_id == id {
+                session.set_schema_scope(scope.clone());
+            }
+        }
+    }
+
     /// Shared sessions, for the connection status shown in the explorer.
     pub async fn list(&self) -> Vec<SessionStatus> {
         self.live
@@ -452,5 +584,36 @@ impl Sessions {
                 sessions.emit_state(&app, &key).await;
             });
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_expired_and_unused_sources_are_idle() {
+        let start = Instant::now();
+        let min = Duration::from_secs(60);
+        let limits = HashMap::from([
+            ("idle".to_owned(), min),
+            ("busy".to_owned(), min),
+            ("recent".to_owned(), 10 * min),
+            ("never-used".to_owned(), min),
+        ]);
+        let last_used = HashMap::from([
+            ("idle".to_owned(), start),
+            ("busy".to_owned(), start),
+            ("recent".to_owned(), start),
+            ("unlimited".to_owned(), start),
+        ]);
+        let in_use = HashMap::from([("busy".to_owned(), 1)]);
+        let later = start + 2 * min;
+        assert_eq!(idle_sources(&limits, &last_used, &in_use, later), ["idle"]);
+        assert!(idle_sources(&limits, &last_used, &in_use, start).is_empty());
+        assert_eq!(
+            idle_sources(&limits, &last_used, &HashMap::new(), start + 11 * min),
+            ["busy", "idle", "recent"]
+        );
     }
 }

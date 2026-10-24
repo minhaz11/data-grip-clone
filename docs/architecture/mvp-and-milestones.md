@@ -63,7 +63,8 @@ listed tests run green in CI.
     deliberate vs server-side session close. `server_unavailable` is covered by a SQLSTATE unit
     test only (hard to provoke reliably). Session registry emits `connection-status` events;
     the UI shows status dots, Connect/Disconnect, a password prompt, and copyable error details.
-  - Not yet: custom CA / client certificates (REQ-CONN-08), SSH tunnels (REQ-CONN-07).
+  - Not yet: custom CA / client certificates (REQ-CONN-08) and SSH tunnels (REQ-CONN-07) came
+    in M4.9.
 - **M2.3 Metadata tree** ✅: lazy schema → kind → object → children; refresh; filter.
   - **AC**: 1,000-table schema expands in < 1 s after the first load; refresh picks up a new table.
   - Done: engine-neutral `MetadataRequest`/`MetaNode` (each node carries the request for its
@@ -348,6 +349,46 @@ listed tests run green in CI.
     message could overwrite the finished summary.
   - Not yet: value editor panel, transpose, FK navigation (Later backlog); persistent filter
     history (comes with query history, step 09).
+- **M4.9 Connection gaps** ✅ (plan: `docs/plans/11-connections.md`)
+  - **SSH tunnels** in pure Rust (`quarry-ssh`, russh 0.64 on ring): password, key file (with
+    passphrase) and SSH agent logins; reusable SSH profiles with their own save mode. The tunnel
+    is a local port forward handed to the connection as a guard, so it lives exactly as long as
+    the sessions that use it (forks and side connections too) and cancel goes through it as
+    well. The forward is proved at open time, so an unreachable database behind the bastion is
+    reported as such. Keep-alives notice a dead SSH server within about a minute; the database
+    connection then ends and the session is marked lost.
+  - **Host keys**: the first connect shows the SHA-256 fingerprint and asks (Cancel focused);
+    trusted keys live in `app.db`, never `~/.ssh/known_hosts`. A changed key is refused with
+    both fingerprints and a warning. "Trust" only confirms the key the server just presented.
+  - **TLS files**: CA file, client certificate and key (PEM), picked with the native dialog from
+    Rust and read at connect time. As in libpq, a CA file makes Require verify the chain.
+    Unreadable or wrong files name the file and point at the TLS tab.
+  - **URL**: a `postgresql://` URL field synced with the form (IPv6, %-escapes, libpq
+    parameters); a password in a URL moves to the Password field and is stripped, so URLs never
+    keep one. "URL only" shows just the URL.
+  - **Options**: TCP keep-alive, auto-disconnect after idle minutes (never while a statement,
+    export or transaction is open), startup SQL after every connect.
+  - **Explorer**: one level of folders (color inherited by data sources without their own),
+    drag to reorder or into a folder, Move up/down and Move to folder for the keyboard, inline
+    rename (Shift+F6 or F2) for data sources and folders.
+  - **Schema scope**: checked schemas plus wildcard patterns; the schema list, completion
+    relations and user functions are filtered in SQL. An edit applies to the live session at
+    once. Connected sources with a scope show "N of M schemas".
+  - **Failure view**: the error with a checklist (SSH tunnel, reachable, TLS, credentials) that
+    marks the failing step, plus Test Connection, Edit and Connect. One connect flow asks for the
+    database password, the SSH password or passphrase (again after a wrong one) and host key
+    trust.
+  - Tests: integration against the disposable server and SSH container (queries, cancel, export
+    and forks over a tunnel; password, passphrase and agent logins; unknown and changed host
+    keys; unreachable forward; killed SSH session marks the session lost; verify-full with the
+    test CA, client certificate login, wrong CA also with Require, unreadable files; schema
+    scope in schemas, relations and functions); canary (SSH secrets in every save mode never in
+    the log, `app.db` or IPC responses); unit (URL round trips, store migration, folders and
+    order, SSH secret accounts, trust only of presented keys, idle decision); UI (tabs, URL,
+    SSH test before save, schema selection, prompts, checklist, folders, drag, rename, scope
+    label and reload); E2E (axe on every dialog tab and the folder tree, drag into a folder).
+  - Not yet: Windows agent (OpenSSH pipe, then Pageant) is built but untested; jump hosts;
+    encrypted client keys for TLS; nested folders.
 - Table viewer (columns/indexes/constraints/FKs), DDL generation, create/alter forms with DDL preview,
   destructive-operation confirmation.
 

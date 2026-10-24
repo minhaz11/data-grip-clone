@@ -20,10 +20,11 @@ quarry-secrets.workspace = true
 quarry-connections.workspace = true
 quarry-db-core.workspace = true
 quarry-db-postgres.workspace = true
+quarry-ssh.workspace = true
 quarry-workspace.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tokio = { version = "1.53.3", features = ["sync"] }
+tokio = { version = "1.53.3", features = ["sync", "time"] }
 uuid = { version = "1.28.0", features = ["v4"] }
 tauri-plugin-dialog = "2.8.3"
 tauri-plugin-clipboard-manager = "2.5.0"

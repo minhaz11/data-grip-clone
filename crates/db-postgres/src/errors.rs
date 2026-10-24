@@ -124,11 +124,17 @@ pub fn timeout(params: &ConnectParams, after: Duration) -> ConnectError {
     )
 }
 
-pub fn tls_setup(detail: String) -> ConnectError {
+pub fn tls_setup(e: crate::tls::SetupError) -> ConnectError {
     err(
         Kind::Tls,
-        format!("Could not set up TLS: {detail}."),
-        "Choose another SSL mode or fix the system certificate store.",
+        format!("Could not set up TLS: {}.", e.message),
+        match e.file {
+            Some(_) => "Choose the right PEM file on the TLS tab.",
+            None => {
+                "Check the files on the TLS tab, choose another SSL mode, or fix the system \
+                     certificate store."
+            }
+        },
     )
 }
 
@@ -297,6 +303,7 @@ mod tests {
             connect_timeout: Duration::from_secs(3),
             read_only: false,
             application_name: "quarry".into(),
+            options: Default::default(),
         }
     }
 

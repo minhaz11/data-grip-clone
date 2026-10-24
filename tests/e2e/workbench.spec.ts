@@ -310,6 +310,39 @@ test.describe('accessibility', () => {
     await expectNoA11yViolations(app, '[role="dialog"]');
   });
 
+  test('every connection dialog tab has no WCAG A/AA violations', async ({ app }) => {
+    await app.getByRole('button', { name: 'New data source', exact: true }).click();
+    const dialog = app.getByRole('dialog', { name: 'New PostgreSQL Data Source' });
+    await dialog.getByRole('tab', { name: 'SSH' }).click();
+    await dialog.getByLabel('Connect through an SSH tunnel').check();
+    await expect(dialog.getByLabel('SSH host')).toBeVisible();
+    await expectNoA11yViolations(app, '[role="dialog"]');
+    for (const name of ['TLS', 'Options', 'Schemas']) {
+      await dialog.getByRole('tab', { name }).click();
+      await expect(dialog.getByRole('tab', { name })).toHaveAttribute('aria-selected', 'true');
+      await expectNoA11yViolations(app, '[role="dialog"]');
+    }
+  });
+
+  test('explorer folders rename inline and have no WCAG A/AA violations', async ({ app }) => {
+    await createDataSource(app, 'Dev');
+    await app.getByRole('button', { name: 'New folder' }).click();
+    const input = app.getByRole('textbox', { name: 'New name' });
+    await expect(input).toBeFocused();
+    await input.fill('Production');
+    await input.press('Enter');
+    const folder = app.getByRole('treeitem', { name: /^Production, folder, 0/ });
+    await expect(folder).toBeVisible();
+    await expectNoA11yViolations(app);
+
+    // Drag the data source into the folder.
+    await app.getByRole('treeitem', { name: /^Dev/ }).dragTo(folder);
+    await expect(app.getByRole('treeitem', { name: /^Production, folder, 1/ })).toBeVisible();
+    await expect(app.getByRole('treeitem', { name: /^Dev/ })).toHaveAttribute('aria-level', '2');
+    const [move] = await ipcCalls(app, 'connection_move');
+    expect(move?.args).toMatchObject({ folderId: expect.stringMatching(/^folder-/) });
+  });
+
   test('settings dialog has no WCAG A/AA violations', async ({ app }) => {
     await app.getByRole('button', { name: /^Settings/ }).click();
     await expect(app.getByRole('dialog')).toBeVisible();

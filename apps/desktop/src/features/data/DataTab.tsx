@@ -1,7 +1,7 @@
 import { Play, RefreshCw, Square, X } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { askPasswordAndConnect } from '../../app/dialogs';
+import { connectSource } from '../connections/connectFlow';
 import { useWorkspace, type DataTab as DataTabState } from '../../app/workspaceStore';
 import { useConnections } from '../connections/connectionsStore';
 import { useSessions } from '../connections/sessionsStore';
@@ -196,13 +196,11 @@ async function openRows(tab: DataTabState, where: string, orderBy: string): Prom
     return problem;
   }
   if (useSessions.getState().byId[source.id]?.state !== 'connected') {
-    const error = await useSessions.getState().connect(source.id);
-    if (error?.connectKind === 'password_required') {
-      if (!(await askPasswordAndConnect(source))) {
-        return null;
-      }
-    } else if (error) {
-      return `Could not connect to "${source.name}": ${error.message}`;
+    const outcome = await connectSource(source);
+    if (!outcome.ok) {
+      return outcome.error
+        ? `Could not connect to "${source.name}": ${outcome.error.message}`
+        : null;
     }
   }
   useWorkspace.getState().setDataFilter(tab.id, where.trim(), orderBy.trim());

@@ -1,4 +1,4 @@
-import { Database, Plus, Search, X } from 'lucide-react';
+import { Database, FolderPlus, Plus, Search, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { ContextMenu, type MenuItem } from '../../components/ui/ContextMenu';
@@ -6,21 +6,24 @@ import { IconButton } from '../../components/ui/IconButton';
 import type { AppError, ConnectionProfile } from '../../ipc/types';
 import { useContextActions, useKeymap } from '../../app/keymapStore';
 import { shortcutLabel } from '../../lib/keymap';
-import { ConnectionResult } from '../connections/ConnectionResult';
+import { ConnectFailure } from '../connections/ConnectFailure';
 import { useConnections } from '../connections/connectionsStore';
-import { askPasswordAndConnect } from '../../app/dialogs';
+import { FolderDialog, MoveDialog } from '../connections/FolderDialogs';
+import { scopeLabel } from '../connections/model';
+import { connectSource } from '../connections/connectFlow';
 import { useSessions } from '../connections/sessionsStore';
 import { resetCatalog } from '../editor/catalog';
 import { disconnectSource, resolveTransactions } from '../exec/txGuards';
 import { openTransactions } from '../exec/txStore';
 import { useMetadata } from './metadataStore';
 import { TreeRow } from './TreeRow';
-import { flattenTree, SEP, type Row } from './treeModel';
+import { flattenTree, folderKey, ROOT_REQUEST, SEP, type Row } from './treeModel';
 import { useWorkspace } from '../../app/workspaceStore';
 import type {
   ConnectionProfile as Profile,
   DdlObject,
   DropObject,
+  Folder,
   ObjectRef,
   RenameObject,
   TableName,
@@ -40,14 +43,16 @@ interface Props {
 export function ExplorerPanel({ onNew, onEdit }: Props) {
   const keymap = useKeymap();
   const items = useConnections((s) => s.items);
+  const folders = useConnections((s) => s.folders);
   const selectedSourceId = useConnections((s) => s.selectedId);
   const selectSource = useConnections((s) => s.select);
   const duplicate = useConnections((s) => s.duplicate);
   const remove = useConnections((s) => s.remove);
   const loadError = useConnections((s) => s.error);
   const sessions = useSessions((s) => s.byId);
-  const connect = useSessions((s) => s.connect);
   const { children, expanded, setExpanded, load, refresh, resetSource } = useMetadata();
+  const schemaTotals = useMetadata((s) => s.schemaTotals);
+  const loadSchemaTotal = useMetadata((s) => s.loadSchemaTotal);
 
   const [filter, setFilter] = useState('');
   const [pickedKey, setSelectedKey] = useState<string | null>(null);
@@ -63,18 +68,33 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
   const [quickInfo, setQuickInfo] = useState<QuickInfoTarget | null>(null);
   const [tool, setTool] = useState<SchemaTool | null>(null);
   const stale = useMetadata((s) => s.stale);
-  const [connectError, setConnectError] = useState<{ name: string; error: AppError } | null>(null);
+  const [connectError, setConnectError] = useState<{ profile: Profile; error: AppError } | null>(
+    null,
+  );
+  /** Key of the row whose name is being edited inline. */
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [dragged, setDragged] = useState<string | null>(null);
+  const [folderTool, setFolderTool] = useState<
+    | { kind: 'edit'; folder: Folder }
+    | { kind: 'delete'; folder: Folder }
+    | { kind: 'move'; profile: Profile }
+    | null
+  >(null);
   const treeRef = useRef<HTMLUListElement>(null);
+  const moveSource = useConnections((s) => s.move);
 
   const rows = useMemo(
-    () => flattenTree(items, children, expanded, filter),
-    [items, children, expanded, filter],
+    () => flattenTree(items, children, expanded, filter, folders),
+    [items, children, expanded, filter, folders],
   );
-  // The picked row wins while it belongs to the selected data source; when the source selection
-  // changes elsewhere (e.g. a just-created or duplicated source), that source's row is selected.
+  // The picked row wins while it is a folder or belongs to the selected data source; when the
+  // source selection changes elsewhere (e.g. a just-created or duplicated source), that source's
+  // row is selected.
   const picked = rows.find((r) => r.key === pickedKey);
   const selectedKey =
-    picked && picked.profile.id === selectedSourceId ? pickedKey : selectedSourceId;
+    picked && (picked.type === 'folder' || picked.profile.id === selectedSourceId)
+      ? pickedKey
+      : selectedSourceId;
   const selectedIndex = rows.findIndex((r) => r.key === selectedKey);
   const selected = selectedIndex >= 0 ? rows[selectedIndex] : undefined;
 
@@ -83,6 +103,24 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
     for (const r of rows)
       if (r.type === 'status' && r.needsLoad) void load(r.parentKey, r.profile.id, r.needsLoad);
   }, [rows, load]);
+
+  // A data source with a schema scope shows "N of M schemas": load its (scoped) schema list and
+  // the total once connected. Both are dropped with the tree when the session ends.
+  useEffect(() => {
+    for (const p of items) {
+      const scoped = p.schemaNames.length > 0 || p.schemaPattern.trim() !== '';
+      if (scoped && sessions[p.id]?.state === 'connected') {
+        void load(p.id, p.id, ROOT_REQUEST);
+        void loadSchemaTotal(p.id);
+      }
+    }
+  }, [items, sessions, children, load, loadSchemaTotal]);
+
+  function scopeOf(p: Profile): string | null {
+    const loaded = children[p.id];
+    const shown = loaded?.status === 'loaded' ? loaded.nodes.length : null;
+    return scopeLabel(p, shown, schemaTotals[p.id] ?? null);
+  }
 
   // A source's tree is only valid while its session is: drop it on disconnect or loss.
   useEffect(() => {
@@ -105,17 +143,102 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
   }, [selectedKey]);
 
   function select(row: Row | undefined) {
-    if (!row) return;
+    if (!row) {
+      return;
+    }
     setSelectedKey(row.key);
-    if (row.profile.id !== selectedSourceId) selectSource(row.profile.id);
+    if (row.type !== 'folder' && row.profile.id !== selectedSourceId) {
+      selectSource(row.profile.id);
+    }
+  }
+
+  async function commitRename(row: Row, name: string | null) {
+    setRenaming(null);
+    treeRef.current?.focus();
+    if (name === null) {
+      return;
+    }
+    setActionError(null);
+    try {
+      if (row.type === 'folder') {
+        await useConnections.getState().updateFolder(row.folder.id, name, row.folder.color);
+      } else if (row.type === 'source') {
+        await useConnections.getState().rename(row.profile.id, name);
+      }
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  /** The folder a data source shows in (`null` at the top level, also when its folder is gone). */
+  function folderOf(p: Profile): string | null {
+    return p.folderId && folders.some((f) => f.id === p.folderId) ? p.folderId : null;
+  }
+
+  /** Data sources in the same folder as `p`, in explorer order. */
+  function siblingsOf(p: Profile): Profile[] {
+    return items.filter((c) => folderOf(c) === folderOf(p));
+  }
+
+  async function runMove(id: string, folderId: string | null, index: number) {
+    setActionError(null);
+    try {
+      await moveSource(id, folderId, index);
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  /** Moves a data source one place up or down within its folder. */
+  function step(p: Profile, by: -1 | 1) {
+    const siblings = siblingsOf(p);
+    const index = siblings.findIndex((c) => c.id === p.id) + by;
+    if (index >= 0 && index < siblings.length) {
+      void runMove(p.id, folderOf(p), index);
+    }
+  }
+
+  /** Drops the dragged data source on `target`: into a folder (last), or before a data source. */
+  function dropOn(target: Row | null) {
+    const id = dragged;
+    setDragged(null);
+    if (!id) {
+      return;
+    }
+    if (target === null) {
+      void runMove(id, null, items.length);
+    } else if (target.type === 'folder') {
+      void runMove(id, target.folder.id, items.length);
+    } else if (target.type === 'source' && target.profile.id !== id) {
+      const siblings = siblingsOf(target.profile).filter((c) => c.id !== id);
+      const index = siblings.findIndex((c) => c.id === target.profile.id);
+      void runMove(id, folderOf(target.profile), Math.max(0, index));
+    }
+  }
+
+  async function newFolder() {
+    setActionError(null);
+    const taken = new Set(folders.map((f) => f.name.toLowerCase()));
+    let name = 'New Folder';
+    for (let n = 2; taken.has(name.toLowerCase()); n++) {
+      name = `New Folder ${n}`;
+    }
+    try {
+      const folder = await useConnections.getState().createFolder(name, null);
+      setSelectedKey(folderKey(folder.id));
+      setRenaming(folderKey(folder.id));
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e));
+    }
   }
 
   async function runConnect(p: ConnectionProfile): Promise<boolean> {
     setConnectError(null);
-    const error = await connect(p.id);
-    if (error?.connectKind === 'password_required') return askPasswordAndConnect(p);
-    if (error) setConnectError({ name: p.name, error });
-    return error === null;
+    const outcome = await connectSource(p);
+    if (!outcome.ok && outcome.error) {
+      setConnectError({ profile: p, error: outcome.error });
+    }
+    return outcome.ok;
   }
 
   async function runDuplicate(p: ConnectionProfile) {
@@ -131,6 +254,10 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
   async function toggle(row: Row, open = !isOpen(row)) {
     if (row.type === 'status') return;
     if (row.type === 'node' && !row.node.children) return;
+    if (row.type === 'folder') {
+      setExpanded(row.key, open);
+      return;
+    }
     if (open && row.type === 'source' && sessions[row.profile.id]?.state !== 'connected') {
       if (!(await runConnect(row.profile))) return;
     }
@@ -142,7 +269,7 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
   }
 
   function refreshRow(row: Row) {
-    if (row.type === 'status') return;
+    if (row.type === 'status' || row.type === 'folder') return;
     if (row.type === 'source' && sessions[row.profile.id]?.state !== 'connected') return;
     refresh(row.key);
     resetCatalog(row.profile.id); // completion re-reads the catalog too
@@ -227,6 +354,9 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
   }
 
   async function copyDdl(row: Row, target: { object: DdlObject }) {
+    if (row.type === 'folder') {
+      return;
+    }
     try {
       const script = await backend.ddlGenerate(row.profile.id, [target.object], {
         qualify: true,
@@ -343,7 +473,7 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
 
   function openViewer(row: Row): boolean {
     const object = objectOf(row);
-    if (!object) {
+    if (!object || row.type === 'folder') {
       return false;
     }
     useWorkspace.getState().openObject(row.profile.id, object);
@@ -352,12 +482,30 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
 
   function openData(row: Row) {
     const object = objectOf(row);
-    if (object) {
+    if (object && row.type !== 'folder') {
       useWorkspace.getState().openData(row.profile.id, object);
     }
   }
 
   function menuItems(row: Row): MenuItem[] {
+    if (row.type === 'folder') {
+      return [
+        {
+          label: 'Rename',
+          shortcut: shortcutLabel('explorer.rename', keymap),
+          onSelect: () => setRenaming(row.key),
+        },
+        {
+          label: 'Properties…',
+          onSelect: () => setFolderTool({ kind: 'edit', folder: row.folder }),
+        },
+        {
+          label: 'Delete folder…',
+          danger: true,
+          onSelect: () => setFolderTool({ kind: 'delete', folder: row.folder }),
+        },
+      ];
+    }
     const refreshItem: MenuItem = {
       label: 'Refresh',
       shortcut: shortcutLabel('explorer.refresh', keymap),
@@ -408,6 +556,22 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
       ...(state === 'connected' ? [refreshItem] : []),
       { label: 'Properties…', shortcut: 'Enter', onSelect: () => onEdit(p) },
       {
+        label: 'Rename',
+        shortcut: shortcutLabel('explorer.rename', keymap),
+        onSelect: () => setRenaming(p.id),
+      },
+      { label: 'Move to folder…', onSelect: () => setFolderTool({ kind: 'move', profile: p }) },
+      {
+        label: 'Move up',
+        shortcut: shortcutLabel('explorer.moveUp', keymap),
+        onSelect: () => step(p, -1),
+      },
+      {
+        label: 'Move down',
+        shortcut: shortcutLabel('explorer.moveDown', keymap),
+        onSelect: () => step(p, 1),
+      },
+      {
         label: 'Duplicate',
         shortcut: shortcutLabel('explorer.duplicate', keymap),
         onSelect: () => void runDuplicate(p),
@@ -435,6 +599,12 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
     'explorer.refresh': current ? () => refreshRow(current) : undefined,
     'explorer.delete': source ? () => void askDelete(source) : undefined,
     'explorer.duplicate': source ? () => void runDuplicate(source) : undefined,
+    'explorer.rename':
+      current?.type === 'source' || current?.type === 'folder'
+        ? () => setRenaming(current.key)
+        : undefined,
+    'explorer.moveUp': source ? () => step(source, -1) : undefined,
+    'explorer.moveDown': source ? () => step(source, 1) : undefined,
     'explorer.contextMenu': current
       ? () => {
           const rect = treeRef.current
@@ -462,9 +632,11 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
       else if (rows[selectedIndex + 1]?.level === row.level + 1) move(selectedIndex + 1);
     } else if (e.key === 'ArrowLeft') {
       if (row.type !== 'status' && row.expanded) void toggle(row, false);
-      else if (row.type !== 'source') select(rows.find((r) => r.key === row.parentKey));
+      else if (row.type !== 'folder' && row.parentKey !== null)
+        select(rows.find((r) => r.key === row.parentKey));
     } else if (e.key === 'Enter') {
       if (row.type === 'source') onEdit(row.profile);
+      else if (row.type === 'folder') void toggle(row);
       else if (!openViewer(row)) void toggle(row);
     } else return;
     e.preventDefault();
@@ -477,6 +649,9 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
         <h2 className="flex-1 text-[11px] font-semibold uppercase tracking-wide text-muted">
           Database Explorer
         </h2>
+        <IconButton label="New folder" onClick={() => void newFolder()}>
+          <FolderPlus size={15} aria-hidden />
+        </IconButton>
         <IconButton
           label="New data source"
           shortcut={shortcutLabel('datasource.new', keymap)}
@@ -521,15 +696,13 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
       )}
 
       {connectError && (
-        <div className="border-b border-border p-2">
-          <p className="mb-1 flex items-center justify-between text-[11px] text-muted">
-            <span>{connectError.name}</span>
-            <button type="button" className="underline" onClick={() => setConnectError(null)}>
-              Dismiss
-            </button>
-          </p>
-          <ConnectionResult result={{ error: connectError.error }} />
-        </div>
+        <ConnectFailure
+          profile={connectError.profile}
+          error={connectError.error}
+          onEdit={() => onEdit(connectError.profile)}
+          onConnect={() => void runConnect(connectError.profile)}
+          onDismiss={() => setConnectError(null)}
+        />
       )}
 
       {(loadError || actionError) && (
@@ -582,6 +755,16 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
           onKeyDown={onTreeKeyDown}
           data-action-context="explorer"
           onFocus={() => !selected && select(rows[0])}
+          // Dropping a data source below the last row moves it to the top level.
+          onDragOver={(e) => {
+            if (dragged) {
+              e.preventDefault();
+            }
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            dropOn(null);
+          }}
           className="@container flex-1 overflow-auto py-1 outline-none"
         >
           {rows.map((row, i) => (
@@ -590,19 +773,26 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
               id={`tree-row-${i}`}
               row={row}
               selected={row.key === selectedKey}
-              session={sessions[row.profile.id]}
+              session={row.type === 'folder' ? undefined : sessions[row.profile.id]}
               highlight={filter.trim()}
               onSelect={() => select(row)}
               onToggle={() => void toggle(row)}
               onActivate={() => {
                 if (row.type === 'source') onEdit(row.profile);
-                else if (!openViewer(row)) void toggle(row);
+                else if (row.type === 'folder' || !openViewer(row)) void toggle(row);
               }}
               onContextMenu={(x, y) => {
                 select(row);
                 if (row.type !== 'status') setMenu({ x, y, row });
               }}
               onRetry={() => row.type === 'status' && refresh(row.parentKey)}
+              renaming={renaming === row.key}
+              onRename={(name) => void commitRename(row, name)}
+              scopeLabel={row.type === 'source' ? scopeOf(row.profile) : null}
+              onDragSource={
+                row.type === 'source' && !filter ? () => setDragged(row.profile.id) : undefined
+              }
+              onDropSource={dragged ? () => dropOn(row) : undefined}
             />
           ))}
           {filter && rows.length === 0 && (
@@ -615,7 +805,7 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
         <ContextMenu
           x={menu.x}
           y={menu.y}
-          label={`${menu.row.type === 'node' ? menu.row.node.name : menu.row.profile.name} actions`}
+          label={`${menu.row.type === 'node' ? menu.row.node.name : menu.row.type === 'folder' ? menu.row.folder.name : menu.row.profile.name} actions`}
           items={menuItems(menu.row)}
           onClose={() => setMenu(null)}
         />
@@ -664,6 +854,28 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
           }
           onClose={() => setTool(null)}
         />
+      )}
+      {folderTool?.kind === 'edit' && (
+        <FolderDialog folder={folderTool.folder} onClose={() => setFolderTool(null)} />
+      )}
+      {folderTool?.kind === 'move' && (
+        <MoveDialog profile={folderTool.profile} onClose={() => setFolderTool(null)} />
+      )}
+      {folderTool?.kind === 'delete' && (
+        <ConfirmDialog
+          title="Delete Folder"
+          confirmLabel="Delete"
+          danger
+          onClose={() => setFolderTool(null)}
+          onConfirm={async () => {
+            await useConnections.getState().removeFolder(folderTool.folder.id);
+          }}
+        >
+          <p>
+            Delete folder <strong>{folderTool.folder.name}</strong>? Its data sources are kept and
+            move to the top level.
+          </p>
+        </ConfirmDialog>
       )}
       {pendingDelete && (
         <ConfirmDialog

@@ -36,6 +36,7 @@ fn params() -> ConnectParams {
         connect_timeout: Duration::from_secs(5),
         read_only: false,
         application_name: "quarry-it-export".into(),
+        options: Default::default(),
     }
 }
 

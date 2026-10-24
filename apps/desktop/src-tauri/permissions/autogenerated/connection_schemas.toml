@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-connection-schemas"
+description = "Enables the connection_schemas command without any pre-configured scope."
+commands.allow = ["connection_schemas"]
+
+[[permission]]
+identifier = "deny-connection-schemas"
+description = "Denies the connection_schemas command without any pre-configured scope."
+commands.deny = ["connection_schemas"]

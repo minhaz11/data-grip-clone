@@ -17,6 +17,11 @@ interface MetadataState {
   /** Data sources whose tree may be out of date (DDL ran in a console). */
   stale: Record<string, boolean | undefined>;
   markStale(sourceId: string): void;
+  /** How many schemas each connected data source has, ignoring its schema scope (`null` while
+   * loading or when it could not be read). */
+  schemaTotals: Record<string, number | null | undefined>;
+  /** Reads a data source's schema total once per session. */
+  loadSchemaTotal(sourceId: string): Promise<void>;
 }
 
 // Bumped per key on refresh/reset so late responses for discarded requests are ignored.
@@ -61,7 +66,23 @@ export const useMetadata = create<MetadataState>((set, get) => {
     },
     resetSource: (sourceId) => {
       drop(sourceId, true);
-      set((s) => ({ stale: { ...s.stale, [sourceId]: undefined } }));
+      set((s) => ({
+        stale: { ...s.stale, [sourceId]: undefined },
+        schemaTotals: { ...s.schemaTotals, [sourceId]: undefined },
+      }));
+    },
+    schemaTotals: {},
+    async loadSchemaTotal(sourceId) {
+      if (get().schemaTotals[sourceId] !== undefined) {
+        return;
+      }
+      set((s) => ({ schemaTotals: { ...s.schemaTotals, [sourceId]: null } }));
+      try {
+        const all = await backend.metadataChildren(sourceId, { level: 'allSchemas' });
+        set((s) => ({ schemaTotals: { ...s.schemaTotals, [sourceId]: all.length } }));
+      } catch {
+        // Leave it unknown: the label then says only that a scope is set.
+      }
     },
     stale: {},
     markStale: (sourceId) => set((s) => ({ stale: { ...s.stale, [sourceId]: true } })),

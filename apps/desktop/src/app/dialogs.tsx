@@ -2,8 +2,6 @@ import type { ReactNode } from 'react';
 import { create } from 'zustand';
 import { ChoiceDialog, type Choice } from '../components/ui/ChoiceDialog';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
-import type { ConnectionProfile } from '../ipc/types';
-import { PasswordPrompt } from '../features/connections/PasswordPrompt';
 
 interface ConfirmRequest {
   title: string;
@@ -28,14 +26,12 @@ interface CustomRequest {
 interface DialogState {
   confirm: ConfirmRequest | null;
   choice: ChoiceRequest | null;
-  password: { profile: ConnectionProfile; resolve(connected: boolean): void } | null;
   custom: CustomRequest | null;
 }
 
 const useDialogs = create<DialogState>(() => ({
   confirm: null,
   choice: null,
-  password: null,
   custom: null,
 }));
 
@@ -47,11 +43,6 @@ export function askConfirm(request: Omit<ConfirmRequest, 'resolve'>): Promise<bo
 /** Resolves true once one of `choices` has run successfully, false on Cancel. */
 export function askChoice(request: Omit<ChoiceRequest, 'resolve'>): Promise<boolean> {
   return new Promise((resolve) => useDialogs.setState({ choice: { ...request, resolve } }));
-}
-
-/** Prompts for a password and connects; resolves true once connected. */
-export function askPasswordAndConnect(profile: ConnectionProfile): Promise<boolean> {
-  return new Promise((resolve) => useDialogs.setState({ password: { profile, resolve } }));
 }
 
 /**
@@ -73,7 +64,7 @@ export function askCustom<T>(
 
 /** Renders whichever app-level dialog is pending. Mounted once in App. */
 export function DialogHost() {
-  const { confirm, choice, password, custom } = useDialogs();
+  const { confirm, choice, custom } = useDialogs();
   return (
     <>
       {confirm && (
@@ -112,16 +103,6 @@ export function DialogHost() {
         custom.resolve(value);
         useDialogs.setState({ custom: null });
       })}
-      {password && (
-        <PasswordPrompt
-          profile={password.profile}
-          onConnected={() => password.resolve(true)}
-          onClose={() => {
-            password.resolve(false);
-            useDialogs.setState({ password: null });
-          }}
-        />
-      )}
     </>
   );
 }

@@ -44,6 +44,7 @@ mod tests {
             decl::<quarry_store::Settings>(&cfg),
             // Errors
             decl::<crate::error::AppError>(&cfg),
+            decl::<crate::error::HostKeyPrompt>(&cfg),
             decl::<quarry_db_core::ConnectErrorKind>(&cfg),
             // Connections (quarry-store, quarry-connections)
             decl::<quarry_store::Engine>(&cfg),
@@ -53,6 +54,12 @@ mod tests {
             decl::<quarry_store::ConnectionDraft>(&cfg),
             decl::<quarry_store::ConnectionProfile>(&cfg),
             decl::<quarry_connections::PasswordChange>(&cfg),
+            decl::<quarry_store::Folder>(&cfg),
+            decl::<quarry_store::SshAuthMethod>(&cfg),
+            decl::<quarry_store::SshProfileDraft>(&cfg),
+            decl::<quarry_store::SshProfile>(&cfg),
+            decl::<crate::connections::FilePurpose>(&cfg),
+            decl::<crate::connections::SshTest>(&cfg),
             // Sessions
             decl::<quarry_db_core::ServerInfo>(&cfg),
             decl::<crate::sessions::SessionStatus>(&cfg),

@@ -10,6 +10,7 @@ mod results;
 mod schema;
 mod sessions;
 mod transactions;
+mod tunnels;
 
 use std::sync::Arc;
 
@@ -38,13 +39,22 @@ pub fn run() {
                 Arc::clone(&store),
                 keyring,
             )));
+            app.manage(Arc::new(tunnels::Tunnels::new(Arc::clone(&store))));
             app.manage(Arc::new(quarry_workspace::Consoles::new(
                 dir.join("consoles"),
             )));
             app.manage(store);
             app.manage(Arc::new(exec::Jobs::default()));
             app.manage(Arc::new(results::Exports::default()));
-            app.manage(Arc::new(sessions::Sessions::new(Arc::new(PostgresAdapter))));
+            let sessions = Arc::new(sessions::Sessions::new(Arc::new(PostgresAdapter)));
+            app.manage(Arc::clone(&sessions));
+            // Auto-disconnect (per data source): checked twice a minute.
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    sessions.disconnect_idle(std::time::Instant::now()).await;
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -60,6 +70,19 @@ pub fn run() {
             connections::connection_test,
             connections::connection_connect,
             connections::connection_disconnect,
+            connections::connection_rename,
+            connections::connection_move,
+            connections::connection_schemas,
+            connections::folders_list,
+            connections::folder_create,
+            connections::folder_update,
+            connections::folder_delete,
+            connections::ssh_profiles_list,
+            connections::ssh_profile_create,
+            connections::ssh_profile_update,
+            connections::ssh_profile_delete,
+            connections::ssh_host_trust,
+            connections::file_pick,
             connections::sessions_list,
             connections::metadata_children,
             connections::object_details,

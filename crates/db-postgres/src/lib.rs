@@ -21,7 +21,8 @@ use quarry_db_core::{
     Cell, ColumnInfo, ConnectError, ConnectErrorKind, ConnectParams, DatabaseAdapter, DbError,
     DdlObject, DdlOptions, EditStatement, EditTarget, ExecOptions, MetaNode, MetadataRequest,
     Notice, NoticeSink, ObjectDetails, ObjectRef, OnClose, Refinement, RowChange, SchemaChange,
-    ServerInfo, Session, StatementOutcome, TableModel, TlsMode, TxMode, TxSettings, TxStatus,
+    SchemaScope, ServerInfo, Session, StatementOutcome, TableModel, TlsMode, TxMode, TxSettings,
+    TxStatus,
 };
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
@@ -99,6 +100,8 @@ pub struct PgSession {
     /// rather than with `SET statement_timeout`, which PostgreSQL switches off before the
     /// commit that materializes a `WITH HOLD` cursor (where queries do their work).
     statement_timeout_ms: AtomicU64,
+    /// Schemas `metadata` introspects; starts as the connect parameters' scope.
+    scope: std::sync::Mutex<SchemaScope>,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -443,8 +446,13 @@ impl Session for PgSession {
     }
 
     async fn metadata(&self, request: &MetadataRequest) -> Result<Vec<MetaNode>, DbError> {
-        self.with_client(async |client| metadata::load(client, request).await)
+        let scope = self.scope.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        self.with_client(async |client| metadata::load(client, request, &scope).await)
             .await
+    }
+
+    fn set_schema_scope(&self, scope: SchemaScope) {
+        *self.scope.lock().unwrap_or_else(|p| p.into_inner()) = scope;
     }
 
     async fn object_details(&self, object: &ObjectRef) -> Result<Option<ObjectDetails>, DbError> {
@@ -590,16 +598,20 @@ async fn open(
     let started = Instant::now();
     let deadline = params.connect_timeout;
 
-    // Resolve first so a bad host name is reported as DNS, not as a generic connect failure.
-    let addresses = match tokio::time::timeout(
-        deadline,
-        tokio::net::lookup_host((params.host.as_str(), params.port)),
-    )
-    .await
-    {
-        Err(_) => return Err(errors::timeout(params, deadline)),
-        Ok(Err(e)) => return Err(errors::dns(params, &e.to_string())),
-        Ok(Ok(addrs)) => addrs.take(MAX_ADDRESSES).collect::<Vec<SocketAddr>>(),
+    let addresses = match params.options.dial {
+        // A tunnel's local end: nothing to resolve.
+        Some(addr) => vec![addr],
+        // Resolve first so a bad host name is reported as DNS, not as a generic connect failure.
+        None => match tokio::time::timeout(
+            deadline,
+            tokio::net::lookup_host((params.host.as_str(), params.port)),
+        )
+        .await
+        {
+            Err(_) => return Err(errors::timeout(params, deadline)),
+            Ok(Err(e)) => return Err(errors::dns(params, &e.to_string())),
+            Ok(Ok(addrs)) => addrs.take(MAX_ADDRESSES).collect::<Vec<SocketAddr>>(),
+        },
     };
     if addresses.is_empty() {
         return Err(errors::dns(params, "no addresses"));
@@ -607,11 +619,12 @@ async fn open(
 
     let mut config = tokio_postgres::Config::new();
     for addr in &addresses {
-        // `host` stays the name (TLS server name); `hostaddr` skips a second lookup.
+        // `host` stays the name (TLS server name); `hostaddr` skips a second lookup. The cancel
+        // token keeps these too, so a cancel goes through a tunnel like the session does.
         config
             .host(&params.host)
             .hostaddr(addr.ip())
-            .port(params.port);
+            .port(addr.port());
     }
     config
         .user(&params.username)
@@ -633,8 +646,13 @@ async fn open(
     if params.read_only {
         config.options("-c default_transaction_read_only=on");
     }
+    if let Some(idle) = params.options.keepalive {
+        config.keepalives(true).keepalives_idle(idle);
+    }
 
-    let tls = MakeRustlsConnect::new(tls::client_config(params.tls).map_err(errors::tls_setup)?);
+    let tls = MakeRustlsConnect::new(
+        tls::client_config(params.tls, &params.options.tls_files).map_err(errors::tls_setup)?,
+    );
     let remaining = deadline.saturating_sub(started.elapsed());
     let (client, connection) =
         match tokio::time::timeout(remaining, config.connect(tls.clone())).await {
@@ -713,6 +731,21 @@ async fn open(
         read_only: row.get(5),
         latency_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
     };
+    let startup = params.options.startup_sql.trim();
+    if !startup.is_empty()
+        && let Err(e) = client.batch_execute(startup).await
+    {
+        closed.store(true, Ordering::SeqCst);
+        drop(client);
+        task.abort();
+        let db = errors::db_error(&e);
+        return Err(ConnectError {
+            kind: ConnectErrorKind::Other,
+            message: format!("Connected, but the startup SQL failed: {}", db.message),
+            hint: "Fix the startup SQL on the Options tab, or clear it.".into(),
+            sqlstate: db.sqlstate,
+        });
+    }
     Ok(PgSession {
         cancel_token: client.cancel_token(),
         tls,
@@ -721,6 +754,7 @@ async fn open(
         tx: std::sync::Mutex::new(TxState::default()),
         notices,
         statement_timeout_ms: AtomicU64::new(0),
+        scope: std::sync::Mutex::new(params.options.schema_scope.clone()),
         client: RwLock::new(Some(client)),
         info,
         closed,

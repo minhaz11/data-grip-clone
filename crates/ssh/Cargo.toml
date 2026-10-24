@@ -1,0 +1,20 @@
+[package]
+name = "quarry-ssh"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "SSH tunnels (local port forwards) for database connections, pure Rust (russh)."
+
+[dependencies]
+quarry-secrets.workspace = true
+russh = { version = "0.64.1", default-features = false, features = ["ring", "rsa", "flate2"] }
+thiserror.workspace = true
+tokio = { version = "1.53.3", features = ["net", "rt", "macros", "time", "io-util", "sync"] }
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros"] }
+
+[lints]
+workspace = true

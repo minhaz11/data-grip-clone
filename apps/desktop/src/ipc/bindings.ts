@@ -36,9 +36,28 @@ export type AppError = { kind: string, message: string, hint?: string, sqlstate?
 /**
  * Set when `kind == "connect"`: which connection failure it was.
  */
-connectKind?: ConnectErrorKind, };
+connectKind?: ConnectErrorKind, 
+/**
+ * Set for `ssh_host_unknown` and `ssh_host_changed`: the key to show the user.
+ */
+hostKey?: HostKeyPrompt, 
+/**
+ * `Some(true)` when the failure happened while opening the SSH tunnel, before the database
+ * was reached.
+ */
+tunnel?: boolean, };
 
-export type ConnectErrorKind = "dns" | "refused" | "timeout" | "auth" | "password_required" | "database_missing" | "tls" | "server_unavailable" | "other";
+export type HostKeyPrompt = { host: string, port: number, algorithm: string, 
+/**
+ * SHA-256 fingerprint as OpenSSH prints it (`SHA256:…`).
+ */
+fingerprint: string, 
+/**
+ * The fingerprint trusted before, when the key changed.
+ */
+expected?: string, };
+
+export type ConnectErrorKind = "dns" | "refused" | "timeout" | "auth" | "password_required" | "database_missing" | "tls" | "server_unavailable" | "ssh_host_unknown" | "ssh_host_changed" | "ssh_secret_required" | "ssh" | "other";
 
 export type Engine = "postgresql";
 
@@ -60,13 +79,53 @@ isolation: Isolation,
 /**
  * Record every statement run against this data source in the query history.
  */
-historyEnabled: boolean, };
+historyEnabled: boolean, 
+/**
+ * Folder in the Database Explorer; `None` is the top level.
+ */
+folderId: string | null, 
+/**
+ * Connect through this SSH profile's tunnel; `None` connects directly.
+ */
+sshProfileId: string | null, 
+/**
+ * PEM files (absolute paths) read at connect time: trusted CA, client certificate and key.
+ */
+tlsCaFile: string | null, tlsCertFile: string | null, tlsKeyFile: string | null, 
+/**
+ * TCP keep-alive idle time in seconds; 0 keeps the system default.
+ */
+keepaliveSecs: number, 
+/**
+ * Disconnect after this many idle minutes (no statement, no open transaction); 0 = never.
+ */
+autoDisconnectMins: number, 
+/**
+ * Statements run after every connect.
+ */
+startupSql: string, 
+/**
+ * Schemas the explorer and completion load; empty with an empty pattern means all.
+ */
+schemaNames: Array<string>, 
+/**
+ * Comma-separated wildcard patterns (`*`, `?`) for more schemas, e.g. `app_*`.
+ */
+schemaPattern: string, 
+/**
+ * The dialog shows the connection as a single URL instead of separate fields.
+ */
+urlOnly: boolean, };
 
 export type ConnectionProfile = { id: string, 
 /**
  * True when a password is in the OS credential store (save mode `forever`).
  */
-passwordSaved: boolean, createdAt: string, updatedAt: string, name: string, engine: Engine, host: string, port: number, database: string, username: string, sslMode: SslMode, connectTimeoutSecs: number, readOnly: boolean, environment: Environment, color: string | null, saveMode: SaveMode, 
+passwordSaved: boolean, 
+/**
+ * Position within its folder (explorer order).
+ */
+sortOrder: number, createdAt: string, updatedAt: string, name: string, engine: Engine, host: string, port: number, database: string, username: string, sslMode: SslMode, connectTimeoutSecs: number, readOnly: boolean, environment: Environment, color: string | null, saveMode: SaveMode, 
 /**
  * Transaction mode new sessions of this data source start in.
  */
@@ -78,9 +137,81 @@ isolation: Isolation,
 /**
  * Record every statement run against this data source in the query history.
  */
-historyEnabled: boolean, };
+historyEnabled: boolean, 
+/**
+ * Folder in the Database Explorer; `None` is the top level.
+ */
+folderId: string | null, 
+/**
+ * Connect through this SSH profile's tunnel; `None` connects directly.
+ */
+sshProfileId: string | null, 
+/**
+ * PEM files (absolute paths) read at connect time: trusted CA, client certificate and key.
+ */
+tlsCaFile: string | null, tlsCertFile: string | null, tlsKeyFile: string | null, 
+/**
+ * TCP keep-alive idle time in seconds; 0 keeps the system default.
+ */
+keepaliveSecs: number, 
+/**
+ * Disconnect after this many idle minutes (no statement, no open transaction); 0 = never.
+ */
+autoDisconnectMins: number, 
+/**
+ * Statements run after every connect.
+ */
+startupSql: string, 
+/**
+ * Schemas the explorer and completion load; empty with an empty pattern means all.
+ */
+schemaNames: Array<string>, 
+/**
+ * Comma-separated wildcard patterns (`*`, `?`) for more schemas, e.g. `app_*`.
+ */
+schemaPattern: string, 
+/**
+ * The dialog shows the connection as a single URL instead of separate fields.
+ */
+urlOnly: boolean, };
 
 export type PasswordChange = { "action": "keep" } | { "action": "set", "value": string } | { "action": "clear" };
+
+export type Folder = { id: string, name: string, color: string | null, sortOrder: number, };
+
+export type SshAuthMethod = "password" | "key" | "agent";
+
+export type SshProfileDraft = { name: string, host: string, port: number, username: string, auth: SshAuthMethod, 
+/**
+ * Private key file (absolute path) for `Key` auth.
+ */
+keyFile: string | null, 
+/**
+ * Where the password (`Password` auth) or key passphrase (`Key` auth) is kept.
+ */
+saveMode: SaveMode, };
+
+export type SshProfile = { id: string, 
+/**
+ * True when the password or passphrase is stored (for this run, with `untilRestart`).
+ */
+secretSaved: boolean, createdAt: string, updatedAt: string, name: string, host: string, port: number, username: string, auth: SshAuthMethod, 
+/**
+ * Private key file (absolute path) for `Key` auth.
+ */
+keyFile: string | null, 
+/**
+ * Where the password (`Password` auth) or key passphrase (`Key` auth) is kept.
+ */
+saveMode: SaveMode, };
+
+export type FilePurpose = "sshKey" | "tlsCa" | "tlsCert" | "tlsKey";
+
+export type SshTest = { 
+/**
+ * The SSH profile as edited; `None` uses the saved profile the draft refers to.
+ */
+profile?: SshProfileDraft, secret?: string, };
 
 export type ServerInfo = { 
 /**
@@ -120,7 +251,7 @@ export type QuitResolution = "commit" | "rollback";
 
 export type ObjectType = "table" | "view" | "materialized_view";
 
-export type MetadataRequest = { "level": "schemas" } | { "level": "schemaGroups", schema: string, } | { "level": "objects", schema: string, types: Array<ObjectType>, } | { "level": "objectGroups", schema: string, name: string, objectType: ObjectType, } | { "level": "columns", schema: string, table: string, } | { "level": "indexes", schema: string, table: string, } | { "level": "keys", schema: string, table: string, } | { "level": "foreignKeys", schema: string, table: string, } | { "level": "checks", schema: string, table: string, } | { "level": "triggers", schema: string, table: string, } | { "level": "routines", schema: string, } | { "level": "sequences", schema: string, } | { "level": "relations" } | { "level": "functions" };
+export type MetadataRequest = { "level": "schemas" } | { "level": "allSchemas" } | { "level": "schemaGroups", schema: string, } | { "level": "objects", schema: string, types: Array<ObjectType>, } | { "level": "objectGroups", schema: string, name: string, objectType: ObjectType, } | { "level": "columns", schema: string, table: string, } | { "level": "indexes", schema: string, table: string, } | { "level": "keys", schema: string, table: string, } | { "level": "foreignKeys", schema: string, table: string, } | { "level": "checks", schema: string, table: string, } | { "level": "triggers", schema: string, table: string, } | { "level": "routines", schema: string, } | { "level": "sequences", schema: string, } | { "level": "relations" } | { "level": "functions" };
 
 export type MetaKind = "schema" | "group" | "table" | "view" | "materialized_view" | "column" | "index" | "key" | "foreign_key" | "check" | "trigger" | "routine" | "sequence";
 

@@ -1,6 +1,6 @@
 import { KeyRound, RefreshCw } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
-import { askPasswordAndConnect } from '../../app/dialogs';
+import { connectSource } from '../connections/connectFlow';
 import { backend } from '../../ipc/client';
 import type { ColumnDetail, ForeignKeyDetail, ObjectDetails, ObjectRef } from '../../ipc/types';
 import { toAppError } from '../../lib/errors';
@@ -84,11 +84,9 @@ export function ObjectViewer({
       return;
     }
     setConnectError(null);
-    const error = await useSessions.getState().connect(source.id);
-    if (error?.connectKind === 'password_required') {
-      await askPasswordAndConnect(source);
-    } else if (error) {
-      setConnectError(error.message);
+    const outcome = await connectSource(source);
+    if (!outcome.ok && outcome.error) {
+      setConnectError(outcome.error.message);
     }
   }
 

@@ -1,5 +1,6 @@
 import { isConsole, useWorkspace } from '../../app/workspaceStore';
-import { askConfirm, askCustom, askPasswordAndConnect } from '../../app/dialogs';
+import { askConfirm, askCustom } from '../../app/dialogs';
+import { connectSource } from '../connections/connectFlow';
 import { useSettings } from '../../app/settingsStore';
 import type { Cell, Settings, StatementRequest } from '../../ipc/types';
 import { blockedOnReadOnly, classify, modifies } from '../../lib/sql/classify';
@@ -194,17 +195,18 @@ export async function runFromEditor(mode: RunMode): Promise<void> {
   }
 
   if (useSessions.getState().byId[source.id]?.state !== 'connected') {
-    const error = await useSessions.getState().connect(source.id);
-    if (error?.connectKind === 'password_required') {
-      if (!(await askPasswordAndConnect(source))) return;
-    } else if (error) {
-      exec.reject(
-        tab.id,
-        source.id,
-        source.name,
-        `Could not connect to "${source.name}": ${error.message}${error.hint ? ` ${error.hint}` : ''}`,
-      );
-      ws.setBottomCollapsed(false);
+    const outcome = await connectSource(source);
+    if (!outcome.ok) {
+      const error = outcome.error;
+      if (error) {
+        exec.reject(
+          tab.id,
+          source.id,
+          source.name,
+          `Could not connect to "${source.name}": ${error.message}${error.hint ? ` ${error.hint}` : ''}`,
+        );
+        ws.setBottomCollapsed(false);
+      }
       return;
     }
   }

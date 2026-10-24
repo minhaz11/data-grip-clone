@@ -262,6 +262,7 @@ pub async fn result_export(
     on_progress: Channel<u64>,
 ) -> Result<Option<ExportSummary>, AppError> {
     let live = sessions.get(&session).await?;
+    let _busy = sessions.busy(&session.source_id);
     let format = Format::from(format);
     let ext = format.extension();
     let suggested = format!("{}.{ext}", sanitize(&file_name));
@@ -340,6 +341,7 @@ pub async fn result_copy(
     on_progress: Channel<u64>,
 ) -> Result<Option<CopySummary>, AppError> {
     let live = sessions.get(&session).await?;
+    let _busy = sessions.busy(&session.source_id);
     let cancel = exports.start(&job);
     let outcome = quarry_io::copy_to_string(
         live.as_ref(),

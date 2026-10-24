@@ -6,9 +6,13 @@ mod details;
 mod exec;
 mod metadata;
 mod schema;
+mod scope;
 mod tx;
 
+use std::any::Any;
 use std::fmt;
+use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -30,6 +34,7 @@ pub use schema::{
     CheckModel, ColumnModel, DropObject, FkAction, ForeignKeyModel, Identity, IndexModel, KeyModel,
     RenameObject, SchemaChange, TableModel, TableName,
 };
+pub use scope::SchemaScope;
 pub use tx::{Isolation, TxMode, TxSettings, TxStatus};
 
 /// TLS policy, with libpq semantics: `Prefer`/`Require` encrypt without verifying the certificate;
@@ -56,6 +61,49 @@ pub struct ConnectParams {
     /// Ask the server to reject writes for this session (defence in depth; ADR-0002).
     pub read_only: bool,
     pub application_name: String,
+    pub options: ConnectOptions,
+}
+
+/// PEM files for TLS, read at connect time (their contents are never stored).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TlsFiles {
+    /// Trusted roots instead of the system store (libpq `sslrootcert`). With a CA file, `Require`
+    /// verifies the chain like `VerifyCa`, as libpq does.
+    pub ca: Option<PathBuf>,
+    /// Client certificate chain and its private key (libpq `sslcert`/`sslkey`), both or neither.
+    pub cert: Option<PathBuf>,
+    pub key: Option<PathBuf>,
+}
+
+/// Connection options beyond the endpoint and credentials.
+#[derive(Clone, Default)]
+pub struct ConnectOptions {
+    /// Connect here instead of resolving `host` (the local end of an SSH tunnel). `host` stays
+    /// the TLS server name, so certificate checks still name the real server.
+    pub dial: Option<SocketAddr>,
+    /// Held by every session opened with these parameters (forks and side connections too), so
+    /// whatever it owns, such as a tunnel, lives exactly as long as they do.
+    pub guard: Option<Arc<dyn Any + Send + Sync>>,
+    pub tls_files: TlsFiles,
+    /// TCP keep-alive idle time; `None` keeps the system default.
+    pub keepalive: Option<Duration>,
+    /// Statements run after every connect (session settings such as `SET search_path`).
+    pub startup_sql: String,
+    /// Schemas the explorer and completion introspect.
+    pub schema_scope: SchemaScope,
+}
+
+impl fmt::Debug for ConnectOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ConnectOptions")
+            .field("dial", &self.dial)
+            .field("guard", &self.guard.as_ref().map(|_| "…"))
+            .field("tls_files", &self.tls_files)
+            .field("keepalive", &self.keepalive)
+            .field("startup_sql_len", &self.startup_sql.len())
+            .field("schema_scope", &self.schema_scope)
+            .finish()
+    }
 }
 
 impl fmt::Debug for ConnectParams {
@@ -69,6 +117,7 @@ impl fmt::Debug for ConnectParams {
             .field("tls", &self.tls)
             .field("connect_timeout", &self.connect_timeout)
             .field("read_only", &self.read_only)
+            .field("options", &self.options)
             .finish()
     }
 }
@@ -110,6 +159,14 @@ pub enum ConnectErrorKind {
     Tls,
     /// The server is starting, shutting down, or at its connection limit.
     ServerUnavailable,
+    /// The SSH server's host key is not known yet: the user must check and trust it.
+    SshHostUnknown,
+    /// The SSH server presented a different host key than the trusted one (possible attack).
+    SshHostChanged,
+    /// The SSH password or key passphrase is not stored: the UI should ask for it.
+    SshSecretRequired,
+    /// The SSH tunnel could not be opened (unreachable SSH server, forwarding refused, bad key).
+    Ssh,
     /// Anything else (protocol errors, unexpected server responses).
     Other,
 }
@@ -221,6 +278,8 @@ pub trait Session: Send + Sync {
     }
     /// Delivers notices raised from now on to `sink` (or drops them with `None`).
     fn set_notice_sink(&self, _sink: Option<NoticeSink>) {}
+    /// Changes which schemas `metadata` introspects from now on (the profile was edited).
+    fn set_schema_scope(&self, _scope: SchemaScope) {}
     /// Cancels statements running longer than `ms` milliseconds (0 = no limit), for this session.
     async fn set_statement_timeout(&self, _ms: u64) -> Result<(), DbError> {
         Ok(())
@@ -302,6 +361,10 @@ mod tests {
             connect_timeout: Duration::from_secs(1),
             read_only: false,
             application_name: "quarry".into(),
+            options: ConnectOptions {
+                startup_sql: "SET role = 'hunter2'".into(),
+                ..Default::default()
+            },
         };
         let s = format!("{p:?}");
         assert!(!s.contains("hunter2") && s.contains("***"), "{s}");

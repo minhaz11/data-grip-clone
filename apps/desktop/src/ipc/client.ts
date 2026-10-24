@@ -15,6 +15,8 @@ import type {
   EditStatement,
   EditTarget,
   ExportSummary,
+  FilePurpose,
+  Folder,
   HistoryEntry,
   HistoryExportFormat,
   HistoryQuery,
@@ -34,6 +36,9 @@ import type {
   SessionState,
   SessionStatus,
   Settings,
+  SshProfile,
+  SshProfileDraft,
+  SshTest,
   StatusEvent,
   TxSettings,
   WorkspaceState,
@@ -55,14 +60,49 @@ export interface Backend {
   ): Promise<ConnectionProfile>;
   connectionDuplicate(id: string): Promise<ConnectionProfile>;
   connectionDelete(id: string): Promise<null>;
-  /** Tests a possibly unsaved draft; `id` reuses that profile's stored password. */
+  /**
+   * Tests a possibly unsaved draft; `id` reuses that profile's stored password. `ssh` is the SSH
+   * profile as edited (tested before it is saved) and its typed password or passphrase.
+   */
   connectionTest(
     draft: ConnectionDraft,
     id: string | null,
     password: string | null,
+    ssh: SshTest | null,
   ): Promise<ServerInfo>;
-  connectionConnect(id: string, password: string | null): Promise<ServerInfo>;
+  connectionConnect(
+    id: string,
+    password: string | null,
+    sshSecret: string | null,
+  ): Promise<ServerInfo>;
   connectionDisconnect(id: string): Promise<null>;
+  connectionRename(id: string, name: string): Promise<ConnectionProfile>;
+  /** Moves a data source into a folder (`null` = top level) at `index` among its data sources. */
+  connectionMove(id: string, folderId: string | null, index: number): Promise<null>;
+  /** Every schema of a draft's database (ignoring its schema scope), for the scope selector. */
+  connectionSchemas(
+    draft: ConnectionDraft,
+    id: string | null,
+    password: string | null,
+    ssh: SshTest | null,
+  ): Promise<string[]>;
+  foldersList(): Promise<Folder[]>;
+  folderCreate(name: string, color: string | null): Promise<Folder>;
+  folderUpdate(folderId: string, name: string, color: string | null): Promise<Folder>;
+  /** Deletes a folder; its data sources move to the top level. */
+  folderDelete(folderId: string): Promise<null>;
+  sshProfilesList(): Promise<SshProfile[]>;
+  sshProfileCreate(draft: SshProfileDraft, secret: string | null): Promise<SshProfile>;
+  sshProfileUpdate(
+    profileId: string,
+    draft: SshProfileDraft,
+    secret: PasswordChange,
+  ): Promise<SshProfile>;
+  sshProfileDelete(profileId: string): Promise<null>;
+  /** Trusts the host key the SSH server presented on the last attempt (by its fingerprint). */
+  sshHostTrust(host: string, port: number, fingerprint: string): Promise<null>;
+  /** Native open dialog; the chosen file's absolute path, or `null` if cancelled. */
+  filePick(purpose: FilePurpose): Promise<string | null>;
   sessionsList(): Promise<SessionStatus[]>;
   /** Subscribes to session lifecycle events; resolves to an unsubscribe function. */
   onConnectionStatus(cb: (e: StatusEvent) => void): Promise<() => void>;
@@ -181,10 +221,28 @@ const tauriBackend: Backend = {
     invoke<ConnectionProfile>('connection_update', { id, draft, password }),
   connectionDuplicate: (id) => invoke<ConnectionProfile>('connection_duplicate', { id }),
   connectionDelete: (id) => invoke<null>('connection_delete', { id }),
-  connectionTest: (draft, id, password) =>
-    invoke<ServerInfo>('connection_test', { draft, id, password }),
-  connectionConnect: (id, password) => invoke<ServerInfo>('connection_connect', { id, password }),
+  connectionTest: (draft, id, password, ssh) =>
+    invoke<ServerInfo>('connection_test', { draft, id, password, ssh }),
+  connectionConnect: (id, password, sshSecret) =>
+    invoke<ServerInfo>('connection_connect', { id, password, sshSecret }),
   connectionDisconnect: (id) => invoke<null>('connection_disconnect', { id }),
+  connectionRename: (id, name) => invoke<ConnectionProfile>('connection_rename', { id, name }),
+  connectionMove: (id, folderId, index) => invoke<null>('connection_move', { id, folderId, index }),
+  connectionSchemas: (draft, id, password, ssh) =>
+    invoke<string[]>('connection_schemas', { draft, id, password, ssh }),
+  foldersList: () => invoke<Folder[]>('folders_list'),
+  folderCreate: (name, color) => invoke<Folder>('folder_create', { name, color }),
+  folderUpdate: (folderId, name, color) =>
+    invoke<Folder>('folder_update', { folderId, name, color }),
+  folderDelete: (folderId) => invoke<null>('folder_delete', { folderId }),
+  sshProfilesList: () => invoke<SshProfile[]>('ssh_profiles_list'),
+  sshProfileCreate: (draft, secret) => invoke<SshProfile>('ssh_profile_create', { draft, secret }),
+  sshProfileUpdate: (profileId, draft, secret) =>
+    invoke<SshProfile>('ssh_profile_update', { profileId, draft, secret }),
+  sshProfileDelete: (profileId) => invoke<null>('ssh_profile_delete', { profileId }),
+  sshHostTrust: (host, port, fingerprint) =>
+    invoke<null>('ssh_host_trust', { host, port, fingerprint }),
+  filePick: (purpose) => invoke<string | null>('file_pick', { purpose }),
   sessionsList: () => invoke<SessionStatus[]>('sessions_list'),
   onConnectionStatus: (cb) => listen<StatusEvent>('connection-status', (e) => cb(e.payload)),
   metadataChildren: (id, request) => invoke<MetaNode[]>('metadata_children', { id, request }),

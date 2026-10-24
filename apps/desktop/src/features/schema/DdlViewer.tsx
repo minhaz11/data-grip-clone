@@ -1,6 +1,6 @@
 import { Copy, FileDown, RefreshCw, SquarePlus } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { askPasswordAndConnect } from '../../app/dialogs';
+import { connectSource } from '../connections/connectFlow';
 import { useSettings } from '../../app/settingsStore';
 import { useWorkspace } from '../../app/workspaceStore';
 import { backend } from '../../ipc/client';
@@ -90,12 +90,8 @@ export function DdlViewer({
       if (!source) {
         return null;
       }
-      const error = await useSessions.getState().connect(source.id);
-      if (error?.connectKind === 'password_required') {
-        await askPasswordAndConnect(source);
-        return null;
-      }
-      return error ? error.message : null;
+      const outcome = await connectSource(source);
+      return !outcome.ok && outcome.error ? outcome.error.message : null;
     });
 
   const toggle = (name: keyof DdlOptions) => (

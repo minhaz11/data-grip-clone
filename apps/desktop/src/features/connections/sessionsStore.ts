@@ -12,8 +12,11 @@ export type SessionState =
 interface SessionsStore {
   byId: Record<string, SessionState | undefined>;
   init(): Promise<() => void>;
-  /** Resolves with the error instead of throwing, so callers can branch on `connectKind`. */
-  connect(id: string, password?: string): Promise<AppError | null>;
+  /**
+   * Resolves with the error instead of throwing, so callers can branch on `connectKind`.
+   * `sshSecret` is the tunnel's password or key passphrase when it is not stored.
+   */
+  connect(id: string, password?: string, sshSecret?: string): Promise<AppError | null>;
   disconnect(id: string): Promise<void>;
   clear(id: string): void;
 }
@@ -38,11 +41,11 @@ export const useSessions = create<SessionsStore>((set, get) => {
       });
       return unlisten;
     },
-    async connect(id, password) {
+    async connect(id, password, sshSecret) {
       if (get().byId[id]?.state === 'connecting') return null;
       put(id, { state: 'connecting' });
       try {
-        const info = await backend.connectionConnect(id, password ?? null);
+        const info = await backend.connectionConnect(id, password ?? null, sshSecret ?? null);
         put(id, { state: 'connected', info });
         return null;
       } catch (e) {

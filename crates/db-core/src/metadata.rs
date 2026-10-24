@@ -21,8 +21,10 @@ pub enum ObjectType {
     rename_all_fields = "camelCase"
 )]
 pub enum MetadataRequest {
-    /// Top level of a data source: its schemas.
+    /// Top level of a data source: its schemas within the schema scope.
     Schemas,
+    /// Every schema the user can see, ignoring the schema scope (for the scope selector).
+    AllSchemas,
     /// Object groups inside a schema ("Tables", "Views", ...), with counts.
     SchemaGroups {
         schema: String,
@@ -71,10 +73,10 @@ pub enum MetadataRequest {
     Sequences {
         schema: String,
     },
-    /// Every table and view the user can see, flat, for completion. Nodes carry the schema in
-    /// `detail` and `key = "schema.name"`.
+    /// Every table and view the user can see in the schema scope, flat, for completion. Nodes
+    /// carry the schema in `detail` and `key = "schema.name"`.
     Relations,
-    /// Functions callable from SQL, flat, for completion: user schemas and the useful
+    /// Functions callable from SQL, flat, for completion: user schemas in scope and the useful
     /// `pg_catalog` ones (not type I/O, operator or internal-argument functions). Nodes carry
     /// the signature in `detail` and `key = "schema\u{1f}name(arguments)"`.
     Functions,

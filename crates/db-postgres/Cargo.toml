@@ -23,7 +23,8 @@ quarry-io.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 quarry-secrets = { path = "../secrets" }
-tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros"] }
+quarry-ssh.workspace = true
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "sync"] }
 
 [lints]
 workspace = true

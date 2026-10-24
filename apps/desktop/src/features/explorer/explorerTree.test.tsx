@@ -13,7 +13,7 @@ describe('explorer metadata tree', () => {
     tree.focus();
 
     await user.keyboard('{ArrowRight}'); // expand data source -> connects, loads schemas
-    expect(backend.connectionConnect).toHaveBeenCalledWith(p.id, null);
+    expect(backend.connectionConnect).toHaveBeenCalledWith(p.id, null, null);
     const shop = await screen.findByRole('treeitem', { name: 'shop, schema' });
     expect(screen.getByRole('treeitem', { name: /^Dev/ })).toHaveAttribute('aria-expanded', 'true');
 

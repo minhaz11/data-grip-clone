@@ -25,6 +25,7 @@
     },
     workspace: null,
     connections: [],
+    folders: [],
     consoles: new Map(),
     seq: 0,
     // Per session (sourceId + console): transaction settings and status.
@@ -172,12 +173,49 @@
         name: draft.name.trim(),
         id: `fake-${state.seq}`,
         passwordSaved: password !== null,
+        sortOrder: state.connections.filter((c) => c.folderId === draft.folderId).length,
         createdAt: now,
         updatedAt: now,
       };
       state.connections.push(profile);
       return profile;
     },
+    connection_rename: ({ id, name }) => {
+      const c = state.connections.find((x) => x.id === id);
+      c.name = name.trim();
+      return c;
+    },
+    connection_move: ({ id, folderId, index }) => {
+      const moved = state.connections.find((c) => c.id === id);
+      const siblings = state.connections
+        .filter((c) => c.folderId === folderId && c.id !== id)
+        .sort((a, b) => a.sortOrder - b.sortOrder);
+      siblings.splice(Math.min(index, siblings.length), 0, moved);
+      siblings.forEach((c, i) => {
+        c.folderId = folderId;
+        c.sortOrder = i;
+      });
+      state.connections.sort(
+        (a, b) =>
+          Number(a.folderId !== null) - Number(b.folderId !== null) ||
+          (a.folderId ?? '').localeCompare(b.folderId ?? '') ||
+          a.sortOrder - b.sortOrder,
+      );
+      return null;
+    },
+    folders_list: () => [...state.folders],
+    folder_create: ({ name, color }) => {
+      state.seq += 1;
+      const folder = { id: `folder-${state.seq}`, name, color, sortOrder: state.folders.length };
+      state.folders.push(folder);
+      return folder;
+    },
+    folder_update: ({ folderId, name, color }) => {
+      const folder = state.folders.find((f) => f.id === folderId);
+      Object.assign(folder, { name, color });
+      return folder;
+    },
+    ssh_profiles_list: () => [],
     connection_test: () => INFO,
     connection_connect: ({ id }) => {
       setTimeout(() => emit('connection-status', { state: 'connected', id, info: INFO }), 0);

@@ -50,7 +50,12 @@ describe('connectivity UI', () => {
     await user.type(within(dialog).getByLabelText('Password'), 'typed');
     await user.click(within(dialog).getByRole('button', { name: 'Test Connection' }));
 
-    expect(test).toHaveBeenCalledWith(expect.objectContaining({ name: 'Scratch' }), null, 'typed');
+    expect(test).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'Scratch' }),
+      null,
+      'typed',
+      null,
+    );
     const status = await within(dialog).findByRole('status');
     expect(status).toHaveTextContent('Connected — PostgreSQL 16.15');
     expect(status).toHaveTextContent('quarry@quarry_test · TLS on · 12 ms');
@@ -64,7 +69,7 @@ describe('connectivity UI', () => {
     await user.click(
       within(screen.getByRole('dialog')).getByRole('button', { name: 'Test Connection' }),
     );
-    expect(test).toHaveBeenCalledWith(expect.anything(), p.id, null);
+    expect(test).toHaveBeenCalledWith(expect.anything(), p.id, null, null);
   });
 
   it('renders categorized failures with hint and SQLSTATE', async () => {
@@ -112,7 +117,7 @@ describe('connectivity UI', () => {
     await user.keyboard('secret');
     await user.click(within(prompt).getByRole('button', { name: 'Connect' }));
 
-    expect(connect).toHaveBeenLastCalledWith(p.id, 'secret');
+    expect(connect).toHaveBeenLastCalledWith(p.id, 'secret', null);
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(
       screen.getByRole('treeitem', { name: /connected \(PostgreSQL 16\.15\)/ }),

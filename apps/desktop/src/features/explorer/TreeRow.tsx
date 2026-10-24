@@ -1,12 +1,16 @@
 import clsx from 'clsx';
+import { useEffect, useRef, useState } from 'react';
 import {
   ChevronDown,
   ChevronRight,
   Columns3,
   Database,
   Eye,
+  Folder as FolderIcon,
   FolderClosed,
+  FolderOpen,
   KeyRound,
+  Network,
   Layers,
   Link2,
   ListOrdered,
@@ -58,6 +62,9 @@ const KIND_LABEL: Record<MetaKind, string> = {
   sequence: 'sequence',
 };
 
+/** MIME type of a data source being dragged within the explorer. */
+export const DRAG_TYPE = 'application/x-quarry-data-source';
+
 interface Props {
   id: string;
   row: Row;
@@ -69,6 +76,14 @@ interface Props {
   onActivate(): void;
   onContextMenu(x: number, y: number): void;
   onRetry(): void;
+  /** Shows an inline name editor; `onRename(null)` cancels. */
+  renaming?: boolean;
+  onRename?(name: string | null): void;
+  /** "N of M schemas" (or similar) for a data source with a schema scope. */
+  scopeLabel?: string | null;
+  /** Data source rows can be dragged; folder and data source rows accept drops. */
+  onDragSource?(): void;
+  onDropSource?(): void;
 }
 
 export function TreeRow({
@@ -82,8 +97,14 @@ export function TreeRow({
   onActivate,
   onContextMenu,
   onRetry,
+  renaming = false,
+  onRename,
+  scopeLabel,
+  onDragSource,
+  onDropSource,
 }: Props) {
   const pad = { paddingLeft: 6 + (row.level - 1) * INDENT };
+  const [dropping, setDropping] = useState(false);
 
   if (row.type === 'status') {
     return (
@@ -120,9 +141,32 @@ export function TreeRow({
     );
   }
 
-  const expandable = row.type === 'source' || row.node.children !== undefined;
+  const expandable =
+    row.type === 'source' || row.type === 'folder' || row.node.children !== undefined;
   const Chevron = row.expanded ? ChevronDown : ChevronRight;
+  const dropTarget =
+    onDropSource && (row.type === 'folder' || row.type === 'source')
+      ? {
+          onDragOver: (e: React.DragEvent) => {
+            if (e.dataTransfer.types.includes(DRAG_TYPE)) {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+              setDropping(true);
+            }
+          },
+          onDragLeave: () => setDropping(false),
+          onDrop: (e: React.DragEvent) => {
+            setDropping(false);
+            if (e.dataTransfer.types.includes(DRAG_TYPE)) {
+              e.preventDefault();
+              e.stopPropagation();
+              onDropSource();
+            }
+          },
+        }
+      : {};
   const common = {
+    ...dropTarget,
     id,
     role: 'treeitem' as const,
     'aria-level': row.level,
@@ -153,6 +197,36 @@ export function TreeRow({
     <span className="w-4 shrink-0" />
   );
 
+  const name = (text: string) =>
+    renaming && onRename ? (
+      <RenameInput initial={text} onDone={onRename} />
+    ) : (
+      <Name text={text} highlight={highlight} />
+    );
+
+  if (row.type === 'folder') {
+    const f = row.folder;
+    const Icon = row.expanded ? FolderOpen : FolderIcon;
+    return (
+      <li
+        {...common}
+        aria-label={`${f.name}, folder, ${row.count} data source${row.count === 1 ? '' : 's'}`}
+        className={clsx(
+          'flex cursor-default items-center gap-1.5 border-l-[3px] py-[3px] pr-2',
+          selected ? 'bg-selected' : 'hover:bg-hover',
+          dropping && 'outline outline-1 -outline-offset-1 outline-accent',
+        )}
+        style={{ ...pad, paddingLeft: 3, borderLeftColor: f.color ?? 'transparent' }}
+        title={f.name}
+      >
+        {chevron}
+        <Icon size={14} className="shrink-0 text-muted" aria-hidden />
+        {name(f.name)}
+        <span className="shrink-0 text-[11px] text-muted">{row.count}</span>
+      </li>
+    );
+  }
+
   if (row.type === 'source') {
     const c = row.profile;
     const color = effectiveColor(c);
@@ -160,13 +234,24 @@ export function TreeRow({
     return (
       <li
         {...common}
-        aria-label={`${c.name}${c.readOnly ? ', read-only' : ''}${c.environment !== 'none' ? `, ${env?.label}` : ''}${sessionLabel(session)}`}
+        draggable={!!onDragSource && !renaming}
+        onDragStart={(e) => {
+          e.dataTransfer.setData(DRAG_TYPE, c.id);
+          e.dataTransfer.effectAllowed = 'move';
+          onDragSource?.();
+        }}
+        aria-label={`${c.name}${c.readOnly ? ', read-only' : ''}${c.environment !== 'none' ? `, ${env?.label}` : ''}${c.sshProfileId ? ', via SSH tunnel' : ''}${scopeLabel ? `, ${scopeLabel}` : ''}${sessionLabel(session)}`}
         className={clsx(
           'flex cursor-default items-center gap-1.5 border-l-[3px] py-[3px] pr-2',
           selected ? 'bg-selected' : 'hover:bg-hover',
+          dropping && 'shadow-[inset_0_2px_0_0_var(--color-accent)]',
         )}
-        style={{ ...pad, paddingLeft: 3, borderLeftColor: color ?? 'transparent' }}
-        title={`${c.name} — ${c.username}@${endpointLabel(c)}`}
+        style={{
+          ...pad,
+          paddingLeft: 3 + (row.level - 1) * INDENT,
+          borderLeftColor: color ?? 'transparent',
+        }}
+        title={`${c.name}: ${c.username}@${endpointLabel(c)}${c.sshProfileId ? ' (SSH tunnel)' : ''}`}
       >
         {chevron}
         <span className="relative shrink-0">
@@ -183,14 +268,20 @@ export function TreeRow({
             />
           )}
         </span>
-        <Name text={c.name} highlight={highlight} />
+        {name(c.name)}
         {c.readOnly && <Lock size={12} className="shrink-0 text-muted" aria-hidden />}
+        {c.sshProfileId && <Network size={12} className="shrink-0 text-muted" aria-hidden />}
         {c.environment === 'production' && (
           <span
             className="shrink-0 rounded bg-danger px-1 text-[10px] font-semibold uppercase text-danger-fg"
             style={color ? { background: color, color: readableTextOn(color) } : undefined}
           >
             prod
+          </span>
+        )}
+        {scopeLabel && (
+          <span className="shrink-0 rounded bg-panel-2 px-1 text-[10px] text-muted">
+            {scopeLabel}
           </span>
         )}
         <span className="ml-auto hidden min-w-0 shrink-[50] truncate pl-2 text-[11px] text-muted @[300px]:inline">
@@ -244,6 +335,46 @@ export function TreeRow({
         </span>
       )}
     </li>
+  );
+}
+
+/** Inline name editor: Enter or leaving the field saves, Escape cancels. */
+function RenameInput({ initial, onDone }: { initial: string; onDone(name: string | null): void }) {
+  const [value, setValue] = useState(initial);
+  const done = useRef(false);
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    ref.current?.focus();
+    ref.current?.select();
+  }, []);
+  const finish = (name: string | null) => {
+    if (!done.current) {
+      done.current = true;
+      onDone(name);
+    }
+  };
+  return (
+    <input
+      ref={ref}
+      aria-label="New name"
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        // Keys stay in the field: the tree must not navigate or run actions while renaming.
+        e.stopPropagation();
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          finish(value.trim() && value.trim() !== initial ? value.trim() : null);
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          finish(null);
+        }
+      }}
+      onBlur={() => finish(value.trim() && value.trim() !== initial ? value.trim() : null)}
+      className="min-w-0 flex-1 rounded border border-accent bg-bg px-1 py-0 text-fg outline-none"
+    />
   );
 }
 

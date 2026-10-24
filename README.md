@@ -63,14 +63,16 @@ npm run bindings
 ## Integration tests (disposable PostgreSQL)
 
 ```bash
-scripts/test-pg.sh up                               # quarry-test-pg on 127.0.0.1:55432, TLS on, throwaway password
+scripts/test-pg.sh up                               # quarry-test-pg on 127.0.0.1:55432 (TLS on) and quarry-test-ssh on 127.0.0.1:52222
 scripts/test-pg.sh seed                             # sample "shop" schema (cursor tests need it; also for browsing)
 cargo test -p quarry-db-postgres -- --ignored
 scripts/test-pg.sh down
 ```
 
 The harness refuses any endpoint other than `127.0.0.1:55432`, so it can never touch other
-databases. Credentials and the self-signed certificate live in `target/test-pg/` (gitignored).
+databases. The SSH container forwards to the database as `pg:5432` on a private Docker network.
+Throwaway credentials, a test CA (server certificate, client certificate for the role
+`quarry_cert`) and SSH keys live in `target/test-pg/` (gitignored).
 
 ## Releases
 
@@ -96,5 +98,6 @@ node scripts/release/version.mjs current            # version in the app files
 | `apps/desktop/src`         | React UI (`app/` shell, `features/<module>/`, `ipc/`)  |
 | `apps/desktop/src-tauri`   | Tauri entry crate: IPC commands, capability allow-list |
 | `crates/store`             | Local app storage (SQLite: settings, workspace state)  |
+| `crates/ssh`               | SSH tunnels for connections (pure Rust, russh)         |
 | `docs/reverse-engineering` | Evidence-tagged study of reference workflows           |
 | `docs/architecture`        | Overview, ADRs, MVP and milestones                     |

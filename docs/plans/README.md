@@ -44,7 +44,7 @@ is the human summary; refresh its Progress column from the script output when yo
 | 08  | [Editor gaps](08-editor.md)                                       | M4.7             | 03         | Done        | 100%     |
 | 09  | [Query history](09-query-history.md)                              | M5.1             | 03         | Done        | 100%     |
 | 10  | [Keymap and action registry](10-keymap-actions.md)                | M5.3             | 01         | Done        | 100%     |
-| 11  | [Connection gaps](11-connections.md)                              | M4.9             | 02         | Not started | 0%       |
+| 11  | [Connection gaps](11-connections.md)                              | M4.9             | 02         | Done        | 100%     |
 | 12  | [Layout, navigation and explorer](12-layout-navigation.md)        | M4.10            | 05, 10     | Not started | 0%       |
 | 13  | [CSV/JSON import](13-import.md)                                   | M5.4             | 06         | Not started | 0%       |
 | 14  | [Local file history](14-file-history.md)                          | M5.2             | -          | Not started | 0%       |

@@ -21,6 +21,31 @@ pub struct AppError {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, ts(optional))]
     pub connect_kind: Option<ConnectErrorKind>,
+    /// Set for `ssh_host_unknown` and `ssh_host_changed`: the key to show the user.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub host_key: Option<Box<HostKeyPrompt>>,
+    /// `Some(true)` when the failure happened while opening the SSH tunnel, before the database
+    /// was reached.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub tunnel: Option<bool>,
+}
+
+/// An SSH server's host key, for the "trust this host?" prompt.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct HostKeyPrompt {
+    pub host: String,
+    pub port: u16,
+    pub algorithm: String,
+    /// SHA-256 fingerprint as OpenSSH prints it (`SHA256:…`).
+    pub fingerprint: String,
+    /// The fingerprint trusted before, when the key changed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub expected: Option<String>,
 }
 
 impl AppError {
@@ -31,6 +56,8 @@ impl AppError {
             hint: None,
             sqlstate: None,
             connect_kind: None,
+            host_key: None,
+            tunnel: None,
         }
     }
 }
@@ -85,6 +112,8 @@ impl From<DbError> for AppError {
             hint: e.hint,
             sqlstate: e.sqlstate,
             connect_kind: None,
+            host_key: None,
+            tunnel: None,
         }
     }
 }
@@ -97,6 +126,8 @@ impl From<ConnectError> for AppError {
             hint: Some(e.hint),
             sqlstate: e.sqlstate,
             connect_kind: Some(e.kind),
+            host_key: None,
+            tunnel: None,
         }
     }
 }

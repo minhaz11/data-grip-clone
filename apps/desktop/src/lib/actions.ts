@@ -130,6 +130,24 @@ export const ACTIONS = [
     context: 'explorer',
     defaults: ['Shift+F10', 'ContextMenu'],
   },
+  {
+    id: 'explorer.rename',
+    title: 'Rename data source or folder',
+    context: 'explorer',
+    defaults: ['Shift+F6', 'F2'],
+  },
+  {
+    id: 'explorer.moveUp',
+    title: 'Move data source up',
+    context: 'explorer',
+    defaults: ['Alt+Shift+Up'],
+  },
+  {
+    id: 'explorer.moveDown',
+    title: 'Move data source down',
+    context: 'explorer',
+    defaults: ['Alt+Shift+Down'],
+  },
 ] as const satisfies readonly ActionDef[];
 
 export type ActionId = (typeof ACTIONS)[number]['id'];

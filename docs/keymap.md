@@ -45,3 +45,6 @@ typed (everywhere and in the SQL editor), a shortcut without Ctrl or Alt must be
 | Delete data source | Database Explorer | `Delete` | `Delete`, `⌘Backspace` |
 | Duplicate data source | Database Explorer | `Ctrl+D` | `⌘D` |
 | Context menu | Database Explorer | `Shift+F10`, `ContextMenu` | `⇧F10`, `ContextMenu` |
+| Rename data source or folder | Database Explorer | `Shift+F6`, `F2` | `⇧F6`, `F2` |
+| Move data source up | Database Explorer | `Alt+Shift+Up` | `⌥⇧Up` |
+| Move data source down | Database Explorer | `Alt+Shift+Down` | `⌥⇧Down` |
