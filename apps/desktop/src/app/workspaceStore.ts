@@ -6,6 +6,8 @@ import type {
   DdlObject,
   DdlTabState,
   GridLayout,
+  ImportFormat,
+  ImportPreset,
   ObjectRef,
   ObjectTabState,
   WorkspaceState,
@@ -55,6 +57,10 @@ interface WorkspaceStore {
   activeTabId: string | null;
   /** Recently closed tabs (this run only), newest last. */
   closed: ClosedTab[];
+  /** Saved import format options, by name. */
+  importPresets: ImportPreset[];
+  saveImportPreset(name: string, format: ImportFormat): void;
+  deleteImportPreset(name: string): void;
   explorerCollapsed: boolean;
   bottomCollapsed: boolean;
   layout: Record<string, Record<string, number>>;
@@ -181,6 +187,7 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => {
       explorerCollapsed: state.panels.explorerCollapsed,
       bottomCollapsed: state.panels.bottomCollapsed,
       layout: state.layout,
+      importPresets: state.importPresets ?? [],
       hydrated: true,
     });
   }
@@ -198,6 +205,15 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => {
     tabs: [],
     activeTabId: null,
     closed: [],
+    importPresets: [],
+    saveImportPreset: (name, format) =>
+      set((s) => ({
+        importPresets: [...s.importPresets.filter((p) => p.name !== name), { name, format }].sort(
+          (a, b) => a.name.localeCompare(b.name),
+        ),
+      })),
+    deleteImportPreset: (name) =>
+      set((s) => ({ importPresets: s.importPresets.filter((p) => p.name !== name) })),
     explorerCollapsed: false,
     bottomCollapsed: false,
     layout: {},
@@ -480,9 +496,11 @@ export function snapshot(
   s: Pick<
     WorkspaceStore,
     'layout' | 'explorerCollapsed' | 'bottomCollapsed' | 'tabs' | 'activeTabId'
-  >,
+  > &
+    Partial<Pick<WorkspaceStore, 'importPresets'>>,
 ): WorkspaceState {
   return {
+    ...(s.importPresets && s.importPresets.length > 0 ? { importPresets: s.importPresets } : {}),
     layout: s.layout,
     panels: { explorerCollapsed: s.explorerCollapsed, bottomCollapsed: s.bottomCollapsed },
     tabs: s.tabs.map((t) =>

@@ -46,7 +46,7 @@ is the human summary; refresh its Progress column from the script output when yo
 | 10  | [Keymap and action registry](10-keymap-actions.md)                | M5.3             | 01         | Done        | 100%     |
 | 11  | [Connection gaps](11-connections.md)                              | M4.9             | 02         | Done        | 100%     |
 | 12  | [Layout, navigation and explorer](12-layout-navigation.md)        | M4.10            | 05, 10     | Done        | 100%     |
-| 13  | [CSV/JSON import](13-import.md)                                   | M5.4             | 06         | Not started | 0%       |
+| 13  | [CSV/JSON import](13-import.md)                                   | M5.4             | 06         | Done        | 100%     |
 | 14  | [Local file history](14-file-history.md)                          | M5.2             | -          | Not started | 0%       |
 | 15  | [Snippets](15-snippets.md)                                        | M5.5             | 10         | Not started | 0%       |
 | 16  | [AI provider and settings](16-ai-provider.md)                     | M6.1             | 02         | Not started | 0%       |

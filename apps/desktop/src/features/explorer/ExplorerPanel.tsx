@@ -26,6 +26,7 @@ import { openTransactions } from '../exec/txStore';
 import { useMetadata } from './metadataStore';
 import { TreeRow } from './TreeRow';
 import { TypeFilter } from './TypeFilter';
+import { ImportWizard } from '../import/ImportWizard';
 import { useNotifications } from '../notifications/notifications';
 import { flattenTree, folderKey, ROOT_REQUEST, SEP, type Row } from './treeModel';
 import { useWorkspace } from '../../app/workspaceStore';
@@ -34,6 +35,7 @@ import type {
   DdlObject,
   DropObject,
   Folder,
+  ImportFile,
   MetaKind,
   ObjectRef,
   RenameObject,
@@ -100,6 +102,13 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
   >(null);
   const treeRef = useRef<HTMLUListElement>(null);
   const moveSource = useConnections((s) => s.move);
+  /** An open import wizard: its data source, target and (dropped) file. */
+  const [importing, setImporting] = useState<{
+    source: Profile;
+    schema: string;
+    table?: string;
+    file?: ImportFile;
+  } | null>(null);
 
   const rows = useMemo(
     () => flattenTree(items, children, expanded, filter, folders, hiddenKinds),
@@ -534,6 +543,70 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
     resetCatalog(sourceId);
   }
 
+  /** Where an import started from this row would go: its schema, and its table if it is one. */
+  function importTargetOf(row: Row): { schema: string; table?: string } | null {
+    if (row.type !== 'node') {
+      return null;
+    }
+    if (row.node.kind === 'schema') {
+      return { schema: row.node.name };
+    }
+    const object = objectOf(row);
+    return object?.objectType === 'table' ? { schema: object.schema, table: object.name } : null;
+  }
+
+  /** Opens the import wizard for a row, unless its data source cannot take writes. */
+  function startImport(row: Row, file?: ImportFile) {
+    const target = importTargetOf(row);
+    if (!target || row.type === 'folder') {
+      useNotifications
+        .getState()
+        .notify('Drop the file on a schema or a table in the Database Explorer.');
+      return;
+    }
+    if (row.profile.readOnly) {
+      useNotifications
+        .getState()
+        .notify(`${row.profile.name} is read-only: importing into it is not allowed.`, 'error');
+      return;
+    }
+    setImporting({ source: row.profile, ...target, file });
+  }
+
+  // Files dropped on the window (paths stay in Rust): the row under the drop is the target.
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  const startImportRef = useRef(startImport);
+  startImportRef.current = startImport;
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let live = true;
+    void backend
+      .onFileDropped((drop) => {
+        const el = document.elementFromPoint(drop.x, drop.y)?.closest('[role="treeitem"]');
+        const index = el ? Number(el.id.replace('tree-row-', '')) : -1;
+        const row = Number.isInteger(index) ? rowsRef.current[index] : undefined;
+        if (!row) {
+          useNotifications
+            .getState()
+            .notify('Drop the file on a schema or a table in the Database Explorer.');
+          return;
+        }
+        startImportRef.current(row, drop.file);
+      })
+      .then((u) => {
+        if (live) {
+          unlisten = u;
+        } else {
+          u();
+        }
+      });
+    return () => {
+      live = false;
+      unlisten?.();
+    };
+  }, []);
+
   /** Create/modify/drop/truncate/rename actions for a node (M4.5). */
   function schemaTools(row: Row): MenuItem[] {
     if (row.type !== 'node' || row.profile.readOnly) {
@@ -736,6 +809,9 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
             ]
           : []),
         ...(live ? schemaTools(row) : []),
+        ...(live && !row.profile.readOnly && importTargetOf(row)
+          ? [{ label: 'Import data from file…', onSelect: () => startImport(row) }]
+          : []),
         refreshItem,
         { label: 'Copy name', onSelect: () => void navigator.clipboard?.writeText(row.node.name) },
       ];
@@ -1141,6 +1217,15 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
             move to the top level.
           </p>
         </ConfirmDialog>
+      )}
+      {importing && (
+        <ImportWizard
+          source={importing.source}
+          schema={importing.schema}
+          table={importing.table}
+          file={importing.file}
+          onClose={() => setImporting(null)}
+        />
       )}
       {pendingDelete && (
         <ConfirmDialog

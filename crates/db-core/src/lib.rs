@@ -233,6 +233,19 @@ impl fmt::Display for DbError {
 
 impl std::error::Error for DbError {}
 
+/// Rows being loaded into a table with COPY, in one transaction on a separate connection, so the
+/// load is all or nothing and never mixes with a console's transaction.
+#[async_trait::async_trait]
+pub trait ImportSink: Send {
+    /// Writes rows in PostgreSQL COPY text format (tab-separated, `\N` for NULL, backslash
+    /// escapes, one row per line).
+    async fn write(&mut self, rows: Vec<u8>) -> Result<(), DbError>;
+    /// Ends the COPY and commits; returns how many rows were loaded.
+    async fn finish(self: Box<Self>) -> Result<u64, DbError>;
+    /// Rolls everything back, the setup statements included.
+    async fn abort(self: Box<Self>);
+}
+
 /// An open connection. Shared (`Arc`) so metadata and, later, query execution can run without
 /// holding the session registry lock.
 #[async_trait::async_trait]
@@ -275,6 +288,24 @@ pub trait Session: Send + Sync {
                 cancelled: false,
             })
         }
+    }
+    /// Starts loading rows into `table` (`columns` in this order): opens a separate connection,
+    /// begins a transaction, runs `setup` (such as CREATE TABLE) and starts a COPY.
+    async fn begin_import(
+        &self,
+        _setup: &[String],
+        _table: &TableName,
+        _columns: &[String],
+    ) -> Result<Box<dyn ImportSink>, DbError> {
+        Err(DbError {
+            message: "This data source does not support importing files.".into(),
+            detail: None,
+            hint: None,
+            sqlstate: None,
+            position: None,
+            connection_lost: false,
+            cancelled: false,
+        })
     }
     /// Delivers notices raised from now on to `sink` (or drops them with `None`).
     fn set_notice_sink(&self, _sink: Option<NoticeSink>) {}

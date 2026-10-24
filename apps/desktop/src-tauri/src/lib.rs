@@ -6,6 +6,7 @@ mod ddl;
 mod error;
 mod exec;
 mod history;
+mod import;
 mod results;
 mod schema;
 mod sessions;
@@ -46,6 +47,7 @@ pub fn run() {
             app.manage(store);
             app.manage(Arc::new(exec::Jobs::default()));
             app.manage(Arc::new(results::Exports::default()));
+            app.manage(Arc::new(import::Imports::default()));
             let sessions = Arc::new(sessions::Sessions::new(Arc::new(PostgresAdapter)));
             app.manage(Arc::clone(&sessions));
             // Auto-disconnect (per data source): checked twice a minute.
@@ -106,6 +108,11 @@ pub fn run() {
             history::history_delete,
             history::history_clear,
             history::history_export,
+            import::import_pick,
+            import::import_preview,
+            import::import_run,
+            import::import_cancel,
+            import::import_errors_save,
             results::result_page,
             results::result_close,
             results::result_refine,
@@ -125,6 +132,18 @@ pub fn run() {
         ])
         // Never lose an open transaction silently: ask the UI first (REQ-ERR-09).
         .on_window_event(|window, event| {
+            // Files dropped on the window: Rust keeps the paths, the UI gets ids (M5.4).
+            if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, position }) =
+                event
+            {
+                let scale = window.scale_factor().unwrap_or(1.0);
+                import::on_drop(
+                    window.app_handle(),
+                    paths,
+                    position.x / scale,
+                    position.y / scale,
+                );
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let open = window
                     .state::<Arc<sessions::Sessions>>()

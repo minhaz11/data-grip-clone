@@ -544,3 +544,109 @@ export type ExportOptions = { nullText?: string | null, quoteAll: boolean, heade
 table?: TableName | null, };
 
 export type CopySummary = { rows: number, bytes: number, };
+
+export type FileKind = "delimited" | "jsonArray" | "jsonLines";
+
+export type ImportFormat = { kind: FileKind, 
+/**
+ * An Encoding Standard label (`utf-8`, `windows-1252`, `utf-16le`, ...); `None` detects it.
+ */
+encoding: string | null, 
+/**
+ * Delimited files: the field separator.
+ */
+delimiter: string, quote: string, 
+/**
+ * A character that escapes the next one inside quotes; `None` means quotes are doubled.
+ */
+escape: string | null, 
+/**
+ * The first record holds the column names.
+ */
+header: boolean, 
+/**
+ * Removes spaces around unquoted values.
+ */
+trim: boolean, 
+/**
+ * An unquoted value equal to this is NULL (`\N`, `NULL`, ...).
+ */
+nullToken: string | null, 
+/**
+ * An unquoted empty value is NULL; a quoted empty one (`""`) stays an empty string.
+ */
+emptyIsNull: boolean, };
+
+export type Detected = { format: ImportFormat, 
+/**
+ * The encoding the sample was decoded with.
+ */
+encoding: string, };
+
+export type ErrorPolicy = "abort" | "skip" | "null";
+
+export type ColumnMapping = { 
+/**
+ * Index into the source columns.
+ */
+source: number, target: string, 
+/**
+ * The target column's type, for checking values before they are sent.
+ */
+typeName: string, };
+
+export type ImportPlan = { format: ImportFormat, 
+/**
+ * The file's columns, as the preview found them (JSON keys, or the header/positions).
+ */
+sourceColumns: Array<string>, mapping: Array<ColumnMapping>, table: TableName, 
+/**
+ * Statements run first in the same transaction (CREATE TABLE for a new table).
+ */
+setup: Array<string>, policy: ErrorPolicy, };
+
+export type ImportProgress = { rows: number, rejected: number, bytes: number, totalBytes: number, };
+
+export type Rejected = { 
+/**
+ * Line in the file (record number for a JSON array).
+ */
+line: number, column: string | null, message: string, 
+/**
+ * Loaded with NULL instead of left out.
+ */
+nulled: boolean, };
+
+export type ImportSummary = { rows: number, 
+/**
+ * The first rejected rows (at most `MAX_LISTED`); `rejected_count` has them all.
+ */
+rejected: Array<Rejected>, rejectedCount: number, 
+/**
+ * Values set to NULL under the NULL policy.
+ */
+nulled: number, elapsedMs: number, 
+/**
+ * Cancelled: nothing was loaded.
+ */
+cancelled: boolean, };
+
+export type ImportFile = { id: string, name: string, size: number, detected: Detected, };
+
+export type DroppedFile = { file: ImportFile, x: number, y: number, };
+
+export type ImportPreview = { columns: Array<string>, 
+/**
+ * The type each column's sample values fit best.
+ */
+inferred: Array<string>, rows: Array<Array<string | null>>, 
+/**
+ * Line of each preview row in the file.
+ */
+lines: Array<number>, 
+/**
+ * Rows the whole file probably has, from the sample's average size.
+ */
+estimatedRows: number, };
+
+export type ImportEvent = { "event": "progress" } & ImportProgress | { "event": "done" } & ImportSummary | { "event": "failed", error: AppError, };

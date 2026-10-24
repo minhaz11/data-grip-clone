@@ -38,6 +38,7 @@ ts-rs.workspace = true
 quarry-db-core = { workspace = true, features = ["ts"] }
 quarry-store = { workspace = true, features = ["ts"] }
 quarry-connections = { workspace = true, features = ["ts"] }
+quarry-io = { workspace = true, features = ["ts"] }
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "time"] }
 
 [lints]

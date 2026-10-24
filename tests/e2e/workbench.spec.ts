@@ -358,6 +358,30 @@ test.describe('accessibility', () => {
     await expect(app.getByRole('tab', { name: /customers/ })).toBeVisible();
   });
 
+  test('import wizard walks to a finished import with no WCAG A/AA violations', async ({ app }) => {
+    await createDataSource(app, 'Dev');
+    await app.getByRole('treeitem', { name: /^Dev/ }).click();
+    await app.getByRole('tree', { name: 'Data sources' }).press('ArrowRight');
+    const schema = app.getByRole('treeitem', { name: 'shop, schema' });
+    await schema.click({ button: 'right' });
+    await app.getByRole('menuitem', { name: 'Import data from file…' }).click();
+    const dialog = app.getByRole('dialog', { name: 'Import Data into Dev' });
+    await dialog.getByRole('button', { name: 'Choose File…' }).click();
+    await expect(dialog.getByRole('table', { name: 'File preview' })).toContainText('Ann');
+    await expectNoA11yViolations(app, '[role="dialog"]');
+    await dialog.getByRole('button', { name: 'Next' }).click();
+    await dialog.getByLabel('Table name').fill('people');
+    await dialog.getByRole('button', { name: 'Next' }).click();
+    await expect(dialog.getByRole('table', { name: 'Column mapping' })).toBeVisible();
+    await expectNoA11yViolations(app, '[role="dialog"]');
+    await dialog.getByRole('button', { name: 'Next' }).click();
+    await expect(dialog.getByLabel('Generated statements')).toContainText('CREATE TABLE');
+    await expectNoA11yViolations(app, '[role="dialog"]');
+    await dialog.getByRole('button', { name: 'Import' }).click();
+    await expect(dialog.getByRole('status')).toContainText('Imported 2 rows');
+    await expectNoA11yViolations(app, '[role="dialog"]');
+  });
+
   test('settings dialog has no WCAG A/AA violations', async ({ app }) => {
     await app.getByRole('button', { name: /^Settings/ }).click();
     await expect(app.getByRole('dialog')).toBeVisible();

@@ -127,6 +127,20 @@ mod tests {
             decl::<crate::results::ExportSummary>(&cfg),
             decl::<crate::results::ExportOptions>(&cfg),
             decl::<crate::results::CopySummary>(&cfg),
+            // Import
+            decl::<quarry_io::import::FileKind>(&cfg),
+            decl::<quarry_io::import::ImportFormat>(&cfg),
+            decl::<quarry_io::import::Detected>(&cfg),
+            decl::<quarry_io::import::ErrorPolicy>(&cfg),
+            decl::<quarry_io::import::ColumnMapping>(&cfg),
+            decl::<quarry_io::import::ImportPlan>(&cfg),
+            decl::<quarry_io::import::ImportProgress>(&cfg),
+            decl::<quarry_io::import::Rejected>(&cfg),
+            decl::<quarry_io::import::ImportSummary>(&cfg),
+            decl::<crate::import::ImportFile>(&cfg),
+            decl::<crate::import::DroppedFile>(&cfg),
+            decl::<crate::import::ImportPreview>(&cfg),
+            decl::<crate::import::ImportEvent>(&cfg),
         ];
         format!("{HEADER}\n{}", decls.join("\n"))
     }

@@ -2,7 +2,7 @@
  * IPC types. Everything that crosses IPC is generated from the Rust types into `bindings.ts`
  * (regenerate with `npm run bindings`); this file re-exports it and adds the few types the UI owns.
  */
-import type { DdlObject, ObjectRef, Settings } from './bindings';
+import type { DdlObject, ImportFormat, ObjectRef, Settings } from './bindings';
 
 export type * from './bindings';
 
@@ -92,10 +92,17 @@ export interface LegacyTabState {
   text: string;
 }
 
+/** A named set of file format options for imports. */
+export interface ImportPreset {
+  name: string;
+  format: ImportFormat;
+}
+
 /** Persisted workbench state restored on startup. */
 export interface WorkspaceState {
   layout: Record<string, Record<string, number>>;
   panels: { explorerCollapsed: boolean; bottomCollapsed: boolean };
   tabs: (ConsoleTabState | LegacyTabState | ObjectTabState | DdlTabState | DataTabState)[];
   activeTabId: string | null;
+  importPresets?: ImportPreset[];
 }

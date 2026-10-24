@@ -451,6 +451,32 @@ listed tests run green in CI.
     after a restart, the old chord stops working, conflicts and blocked Save, refusals, reset,
     search, editor actions only with editor focus); E2E (rebind and use in both browsers, axe).
   - Not yet: importing keymaps from other IDEs (out of scope); the search palette (step 12).
+- **M5.4 CSV/JSON import** ✅ (plan: `docs/plans/13-import.md`)
+  - **Wizard** from a schema (new table) or table (append) in the explorer, or by dropping a file
+    on one: File (format, encoding, delimiter, quote, escape, header, trim, NULL text, empty as
+    NULL, presets, live preview with inferred types and the row estimate), Target, Columns
+    (include, target column, type with suggestions, order), Review (CREATE TABLE built by the
+    schema tools, editable; error policy), Import (progress, rows/s, Cancel, summary with
+    rejected rows by line, Save Error Log).
+  - **Reading** in `quarry-io`: own streaming delimited parser (quoted `""` vs empty NULL,
+    doubled or escaped quotes, newlines in quotes, CR/LF, line numbers), BOM and encoding
+    detection with streaming transcoding, JSON arrays element by element and JSON lines.
+  - **Types**: inference over 1,000 sample rows (boolean, integer, bigint, numeric, date,
+    timestamp, timestamptz, uuid, jsonb, text); per-row checks against the target column type
+    (ranges, numeric precision, lengths, calendar dates, JSON) so Skip and NULL work and Abort
+    names the line.
+  - **Loading**: one COPY in one transaction on a side connection after the setup statements;
+    any failure or Cancel rolls back the table and the rows. Read-only sources refuse;
+    production sources confirm with the target and row estimate.
+  - **File access**: only paths picked in the native dialog or dropped on the window (received
+    by Rust); the WebView gets an id and a 200-row preview at most.
+  - Tests: unit (parser: quoting, NULL token vs empty, BOM, Latin-1, UTF-16, buffer boundaries,
+    unclosed quotes; JSON; inference; conversions; COPY encoding; mapping); integration (abort
+    leaves nothing, skip lists lines, NULL policy, new table plus load atomic, JSON by key,
+    read-only refused, 1M rows with about 1 MB peak memory growth, cancel leaves none); UI
+    (whole flow, presets, production confirmation, cancel, read-only refusal, drop target); E2E
+    (wizard with axe at every step).
+  - Not yet: Excel, Parquet, pg_dump, disabling triggers during load (REQ-IMPEX-09 to 11).
 - **M5.1 Query history** ✅ (plan: `docs/plans/09-query-history.md`)
   - **Recording**: the query job in Rust records every statement that reached the server
     (succeeded, failed or cancelled) with data source, console session, start time, duration,

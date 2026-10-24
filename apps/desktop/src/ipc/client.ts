@@ -14,8 +14,14 @@ import type {
   ExportOptions,
   EditStatement,
   EditTarget,
+  DroppedFile,
   ExportSummary,
   FilePurpose,
+  ImportEvent,
+  ImportFile,
+  ImportFormat,
+  ImportPlan,
+  ImportPreview,
   Folder,
   HistoryEntry,
   HistoryExportFormat,
@@ -154,6 +160,22 @@ export interface Backend {
   historyClear(connectionId: string): Promise<number>;
   /** Saves every entry matching `query` via the native dialog; the path, or `null` if cancelled. */
   historyExport(query: HistoryQuery, format: HistoryExportFormat): Promise<string | null>;
+  /** Native open dialog for a file to import; `null` if cancelled. */
+  importPick(): Promise<ImportFile | null>;
+  /** Columns, inferred types and the first `limit` rows of a chosen file. */
+  importPreview(fileId: string, format: ImportFormat, limit: number): Promise<ImportPreview>;
+  /** Starts an import; resolves to the job id. Progress and the outcome arrive on `onEvent`. */
+  importRun(
+    fileId: string,
+    sourceId: string,
+    plan: ImportPlan,
+    onEvent: (e: ImportEvent) => void,
+  ): Promise<string>;
+  importCancel(job: string): Promise<null>;
+  /** Saves a finished import's rejected rows as CSV; the path, or `null` if cancelled. */
+  importErrorsSave(job: string): Promise<string | null>;
+  /** Files dropped on the window (registered in Rust), with where they landed. */
+  onFileDropped(cb: (e: DroppedFile) => void): Promise<() => void>;
   /** Rows `[offset, offset + limit)` of a result cursor (limit ≤ 2000). */
   resultPage(session: SessionKey, cursor: string, offset: number, limit: number): Promise<Cell[][]>;
   resultClose(session: SessionKey, cursor: string): Promise<null>;
@@ -285,6 +307,17 @@ const tauriBackend: Backend = {
   historyDelete: (ids) => invoke<number>('history_delete', { ids }),
   historyClear: (connectionId) => invoke<number>('history_clear', { connectionId }),
   historyExport: (query, format) => invoke<string | null>('history_export', { query, format }),
+  importPick: () => invoke<ImportFile | null>('import_pick'),
+  importPreview: (fileId, format, limit) =>
+    invoke<ImportPreview>('import_preview', { fileId, format, limit }),
+  importRun: (fileId, sourceId, plan, onEvent) => {
+    const channel = new Channel<ImportEvent>();
+    channel.onmessage = onEvent;
+    return invoke<string>('import_run', { fileId, sourceId, plan, onEvent: channel });
+  },
+  importCancel: (job) => invoke<null>('import_cancel', { job }),
+  importErrorsSave: (job) => invoke<string | null>('import_errors_save', { job }),
+  onFileDropped: (cb) => listen<DroppedFile>('file-dropped', (e) => cb(e.payload)),
   resultPage: (session, cursor, offset, limit) =>
     invoke<Cell[][]>('result_page', { session, cursor, offset, limit }),
   resultClose: (session, cursor) => invoke<null>('result_close', { session, cursor }),

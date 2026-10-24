@@ -7,6 +7,7 @@ use std::io::{self, Write};
 
 use quarry_db_core::{Cell, ColumnInfo, TableName};
 
+pub mod import;
 mod stream;
 
 pub use stream::{

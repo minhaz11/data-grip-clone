@@ -304,6 +304,50 @@
       return null;
     },
     consoles_dir: () => '/fake/consoles',
+    import_pick: () => ({
+      id: 'file-1',
+      name: 'people.csv',
+      size: 2048,
+      detected: {
+        encoding: 'UTF-8',
+        format: {
+          kind: 'delimited',
+          encoding: null,
+          delimiter: ',',
+          quote: '"',
+          escape: null,
+          header: true,
+          trim: false,
+          nullToken: null,
+          emptyIsNull: true,
+        },
+      },
+    }),
+    import_preview: () => ({
+      columns: ['id', 'name'],
+      inferred: ['integer', 'text'],
+      rows: [
+        ['1', 'Ann'],
+        ['2', null],
+      ],
+      lines: [2, 3],
+      estimatedRows: 2,
+    }),
+    import_run: ({ onEvent }) => {
+      sendOnChannel(onEvent, [
+        { event: 'progress', rows: 2, rejected: 0, bytes: 2048, totalBytes: 2048 },
+        {
+          event: 'done',
+          rows: 2,
+          rejected: [],
+          rejectedCount: 0,
+          nulled: 0,
+          elapsedMs: 5,
+          cancelled: false,
+        },
+      ]);
+      return 'import-1';
+    },
     query_execute: ({ request, onEvent }) => {
       // Manual mode: the first statement opens a transaction (like the Rust session does).
       const current = sessionState(request.session);

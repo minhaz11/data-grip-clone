@@ -5,6 +5,7 @@ mod editability;
 mod edits;
 mod errors;
 mod exec;
+mod import;
 mod metadata;
 mod refine;
 mod schema_edit;
@@ -19,10 +20,10 @@ use std::time::{Duration, Instant};
 
 use quarry_db_core::{
     Cell, ColumnInfo, ConnectError, ConnectErrorKind, ConnectParams, DatabaseAdapter, DbError,
-    DdlObject, DdlOptions, EditStatement, EditTarget, ExecOptions, MetaNode, MetadataRequest,
-    Notice, NoticeSink, ObjectDetails, ObjectRef, OnClose, Refinement, RowChange, SchemaChange,
-    SchemaScope, ServerInfo, Session, StatementOutcome, TableModel, TlsMode, TxMode, TxSettings,
-    TxStatus,
+    DdlObject, DdlOptions, EditStatement, EditTarget, ExecOptions, ImportSink, MetaNode,
+    MetadataRequest, Notice, NoticeSink, ObjectDetails, ObjectRef, OnClose, Refinement, RowChange,
+    SchemaChange, SchemaScope, ServerInfo, Session, StatementOutcome, TableModel, TableName,
+    TlsMode, TxMode, TxSettings, TxStatus,
 };
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
@@ -345,6 +346,15 @@ impl Session for PgSession {
         let guard = self.client.read().await;
         let client = guard.as_ref().ok_or_else(errors::session_closed)?;
         self.execute_in_tx(client, sql, params, options).await
+    }
+
+    async fn begin_import(
+        &self,
+        setup: &[String],
+        table: &TableName,
+        columns: &[String],
+    ) -> Result<Box<dyn ImportSink>, DbError> {
+        Ok(Box::new(import::begin(self, setup, table, columns).await?))
     }
 
     fn set_notice_sink(&self, sink: Option<NoticeSink>) {
