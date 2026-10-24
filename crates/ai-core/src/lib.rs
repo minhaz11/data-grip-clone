@@ -172,11 +172,25 @@ impl AiError {
 
 pub type EventStream = BoxStream<'static, Result<AiEvent, AiError>>;
 
-/// An AI backend. Dropping the stream returned by `complete` cancels the request.
+/// A request rendered to the exact bytes the provider will send, so what the user previewed is
+/// what leaves the machine.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedRequest {
+    pub model: String,
+    pub body: String,
+}
+
+/// An AI backend. Dropping the stream returned by `send` cancels the request.
 pub trait AiProvider: Send + Sync {
     fn capabilities(&self) -> Capabilities;
-    /// Sends the request; the future resolves once the provider has accepted it.
-    fn complete(&self, request: CompletionRequest) -> BoxFuture<'_, Result<EventStream, AiError>>;
+    /// Renders a request without sending it (no network, no key).
+    fn prepare(&self, request: &CompletionRequest) -> PreparedRequest;
+    /// Sends exactly `prepared.body`; the future resolves once the provider has accepted it.
+    fn send(&self, prepared: PreparedRequest) -> BoxFuture<'_, Result<EventStream, AiError>>;
+    fn complete(&self, request: CompletionRequest) -> BoxFuture<'_, Result<EventStream, AiError>> {
+        let prepared = self.prepare(&request);
+        self.send(prepared)
+    }
     fn models(&self) -> BoxFuture<'_, Result<Vec<ModelInfo>, AiError>>;
 }
 
@@ -221,11 +235,15 @@ impl<P: AiProvider> AiProvider for Switched<P> {
         self.inner.capabilities()
     }
 
-    fn complete(&self, request: CompletionRequest) -> BoxFuture<'_, Result<EventStream, AiError>> {
+    fn prepare(&self, request: &CompletionRequest) -> PreparedRequest {
+        self.inner.prepare(request)
+    }
+
+    fn send(&self, prepared: PreparedRequest) -> BoxFuture<'_, Result<EventStream, AiError>> {
         if let Err(e) = self.switch.check() {
             return Box::pin(std::future::ready(Err(e)));
         }
-        self.inner.complete(request)
+        self.inner.send(prepared)
     }
 
     fn models(&self) -> BoxFuture<'_, Result<Vec<ModelInfo>, AiError>> {
@@ -258,7 +276,14 @@ mod tests {
             }
         }
 
-        fn complete(&self, _: CompletionRequest) -> BoxFuture<'_, Result<EventStream, AiError>> {
+        fn prepare(&self, request: &CompletionRequest) -> PreparedRequest {
+            PreparedRequest {
+                model: request.model.clone(),
+                body: request.messages[0].content.clone(),
+            }
+        }
+
+        fn send(&self, _: PreparedRequest) -> BoxFuture<'_, Result<EventStream, AiError>> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let events = vec![
                 Ok(AiEvent::Started { model: "m".into() }),

@@ -82,6 +82,78 @@ error?: string, };
 
 export type AiStreamEvent = { "type": "started", model: string, } | { "type": "text", text: string, } | { "type": "done", stopReason: StopReason | null, usage: Usage, } | { "type": "failed", error: AppError, };
 
+export type AiContextLevel = "none" | "schema" | "schemaAndRows";
+
+export type AiLogStatus = "sent" | "done" | "failed" | "cancelled";
+
+export type AiLogEntry = { id: number, 
+/**
+ * Unix milliseconds.
+ */
+createdAt: number, connectionId: string | null, connectionName: string, action: string, model: string, level: AiContextLevel, rowsSent: boolean, payload: string, status: AiLogStatus, response: string | null, error: string | null, inputTokens: number | null, outputTokens: number | null, finishedAt: number | null, };
+
+export type AiConsent = { connectionId: string, 
+/**
+ * What may be sent now; `none` until the user decides.
+ */
+level: AiContextLevel, 
+/**
+ * The user chose a level (remembered, or for this run of the app).
+ */
+decided: boolean, 
+/**
+ * Kept in app.db (otherwise it lasts until the app restarts).
+ */
+remembered: boolean, rowsAlways: boolean, 
+/**
+ * What the consent dialog preselects: `none` for production sources.
+ */
+suggested: AiContextLevel, };
+
+export type AiTask = { "kind": "ask", question: string, };
+
+export type AiPreviewRequest = { connectionId: string, task: AiTask, 
+/**
+ * The editor's statement or selection.
+ */
+sql: string, 
+/**
+ * Objects selected or referenced by the SQL (resolved by the editor).
+ */
+objects: Array<ObjectRef>, 
+/**
+ * The user confirmed sending sample rows for this request.
+ */
+includeRows: boolean, };
+
+export type OmitReason = "ignored" | "size" | "missing";
+
+export type AiOmitted = { name: string, reason: OmitReason, };
+
+export type AiRowTable = { table: string, columns: Array<string>, rows: number, };
+
+export type AiPreview = { payloadId: string, connectionId: string, model: string, level: AiContextLevel, 
+/**
+ * The exact request body that Send transmits.
+ */
+body: string, bytes: number, 
+/**
+ * Rough count (four bytes a token), for the size shown next to the payload.
+ */
+estimatedTokens: number, 
+/**
+ * Objects whose schema is included.
+ */
+objects: Array<string>, omitted: Array<AiOmitted>, 
+/**
+ * Sample rows included.
+ */
+rows: Array<AiRowTable>, 
+/**
+ * Sample rows that could be included after the row consent prompt (columns and cap).
+ */
+rowOffer: Array<AiRowTable>, };
+
 export type AppError = { kind: string, message: string, hint?: string, sqlstate?: string, 
 /**
  * Set when `kind == "connect"`: which connection failure it was.

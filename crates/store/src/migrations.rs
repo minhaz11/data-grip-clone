@@ -133,6 +133,32 @@ const MIGRATIONS: &[&str] = &[
      ) STRICT;
      CREATE UNIQUE INDEX snippets_abbreviation_unique
          ON snippets (abbreviation COLLATE NOCASE, dialect);",
+    // 8: AI consent per data source and the local AI request log (M6.2, ADR-0005). The log keeps
+    // request bodies exactly as sent; the API key is a header and never part of them.
+    "CREATE TABLE ai_consents (
+         connection_id TEXT PRIMARY KEY NOT NULL REFERENCES connections(id) ON DELETE CASCADE,
+         level         TEXT NOT NULL,
+         rows_always   INTEGER NOT NULL DEFAULT 0,
+         granted_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+     ) STRICT;
+     CREATE TABLE ai_request_log (
+         id              INTEGER PRIMARY KEY,
+         created_at      INTEGER NOT NULL,
+         connection_id   TEXT,
+         connection_name TEXT NOT NULL,
+         action          TEXT NOT NULL,
+         model           TEXT NOT NULL,
+         level           TEXT NOT NULL,
+         rows_sent       INTEGER NOT NULL,
+         payload         TEXT NOT NULL,
+         status          TEXT NOT NULL,
+         response        TEXT,
+         error           TEXT,
+         input_tokens    INTEGER,
+         output_tokens   INTEGER,
+         finished_at     INTEGER
+     ) STRICT;
+     CREATE INDEX ai_request_log_created ON ai_request_log (created_at);",
 ];
 
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;

@@ -1,7 +1,12 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type {
+  AiConsent,
+  AiContextLevel,
+  AiLogEntry,
   AiModels,
+  AiPreview,
+  AiPreviewRequest,
   AiSettings,
   AiStatus,
   AiStreamEvent,
@@ -77,6 +82,24 @@ export interface Backend {
   /** Streams a short test answer; resolves to the request id at once (for `aiCancel`). */
   aiTest(onEvent: (e: AiStreamEvent) => void): Promise<string>;
   aiCancel(requestId: string): Promise<null>;
+  /** Data sources with a consent decision (remembered, or for this run of the app). */
+  aiConsentsList(): Promise<AiConsent[]>;
+  aiConsentGet(connectionId: string): Promise<AiConsent>;
+  /** `remember` keeps it in app.db; otherwise it lasts until the app restarts. */
+  aiConsentSet(
+    connectionId: string,
+    level: AiContextLevel,
+    remember: boolean,
+    rowsAlways: boolean,
+  ): Promise<AiConsent>;
+  aiConsentRevoke(connectionId: string): Promise<AiConsent>;
+  /** Builds the exact request in Rust from the consent as it is now; Send takes its id. */
+  aiContextPreview(request: AiPreviewRequest): Promise<AiPreview>;
+  /** Sends a previewed request (once); resolves to the request id at once (for `aiCancel`). */
+  aiSend(payloadId: string, onEvent: (e: AiStreamEvent) => void): Promise<string>;
+  /** The local request log, newest first. */
+  aiLogList(limit: number): Promise<AiLogEntry[]>;
+  aiLogClear(): Promise<number>;
   connectionsList(): Promise<ConnectionProfile[]>;
   connectionCreate(draft: ConnectionDraft, password: string | null): Promise<ConnectionProfile>;
   connectionUpdate(
@@ -295,6 +318,19 @@ const tauriBackend: Backend = {
     return invoke<string>('ai_test', { onEvent: channel });
   },
   aiCancel: (requestId) => invoke<null>('ai_cancel', { requestId }),
+  aiConsentsList: () => invoke<AiConsent[]>('ai_consents_list'),
+  aiConsentGet: (connectionId) => invoke<AiConsent>('ai_consent_get', { connectionId }),
+  aiConsentSet: (connectionId, level, remember, rowsAlways) =>
+    invoke<AiConsent>('ai_consent_set', { connectionId, level, remember, rowsAlways }),
+  aiConsentRevoke: (connectionId) => invoke<AiConsent>('ai_consent_revoke', { connectionId }),
+  aiContextPreview: (request) => invoke<AiPreview>('ai_context_preview', { request }),
+  aiSend: (payloadId, onEvent) => {
+    const channel = new Channel<AiStreamEvent>();
+    channel.onmessage = onEvent;
+    return invoke<string>('ai_send', { payloadId, onEvent: channel });
+  },
+  aiLogList: (limit) => invoke<AiLogEntry[]>('ai_log_list', { limit }),
+  aiLogClear: () => invoke<number>('ai_log_clear'),
   connectionsList: () => invoke<ConnectionProfile[]>('connections_list'),
   connectionCreate: (draft, password) =>
     invoke<ConnectionProfile>('connection_create', { draft, password }),

@@ -50,7 +50,7 @@ is the human summary; refresh its Progress column from the script output when yo
 | 14  | [Local file history](14-file-history.md)                          | M5.2             | -          | Done        | 100%     |
 | 15  | [Snippets](15-snippets.md)                                        | M5.5             | 10         | Done        | 100%     |
 | 16  | [AI provider and settings](16-ai-provider.md)                     | M6.1             | 02         | Done        | 100%     |
-| 17  | [AI consent and context](17-ai-consent-context.md)                | M6.2             | 05, 16     | Not started | 0%       |
+| 17  | [AI consent and context](17-ai-consent-context.md)                | M6.2             | 05, 16     | Done        | 100%     |
 | 18  | [AI actions](18-ai-actions.md)                                    | M6.3             | 17         | Not started | 0%       |
 | 19  | [Hardening and release](19-hardening-release.md)                  | Phase 7          | all        | Not started | 0%       |
 | 20  | [Release automation](20-release-automation.md)                    | Release pipeline | -          | In progress | 57%      |

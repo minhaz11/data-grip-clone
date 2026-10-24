@@ -49,8 +49,8 @@ always as a preview they choose to insert, and always run through the normal gua
 
 ### IPC
 
-- [ ] Commands `ai_generate`, `ai_explain`, `ai_fix` (each takes a previewed payload id from step
-      17); bindings.
+- [ ] Task kinds `generate`, `explainQuery`, `explainError`, `fix` in `ai_context_preview` (step
+      17 sends every previewed payload through `ai_send`); bindings.
 
 ### Frontend
 

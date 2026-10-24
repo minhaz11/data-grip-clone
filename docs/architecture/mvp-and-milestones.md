@@ -555,6 +555,32 @@ listed tests run green in CI.
     trace level, `app.db`, or IPC responses); UI (write-only key, streamed test and cancel,
     workspace switch, ignore list); E2E (axe on Settings > AI); optional live call gated by
     `QUARRY_ANTHROPIC_TEST_KEY`.
+- **M6.2 AI consent and context** ✅ (plan: `docs/plans/17-ai-consent-context.md`)
+  - **Consent per data source**: SQL text only, SQL and schema, or SQL, schema and sample rows;
+    remembered in `app.db` (migration 8) or kept until restart; undecided means SQL text only,
+    and production sources preselect it. Sample rows are confirmed per request (tables, columns
+    and row cap shown) unless always allowed. Revoke in Settings > AI.
+  - **Context builder** in Rust: the editor text, the referenced tables and views (resolved in
+    the catalog by the editor), then their foreign-key neighbours, as CREATE TABLE text with
+    the ignore list applied (ignored tables dropped; ignored columns and every key, index,
+    check, default or foreign key naming them removed), capped at 60,000 characters with the
+    omissions listed; up to 5 sample rows from up to 3 tables, ignored columns never read.
+  - **What will be sent**: every request is previewed with its exact text, size and token
+    estimate; Send takes only the preview's id, once, and fails if the consent changed since.
+    The provider sends exactly the previewed bytes.
+  - **Request log** (`app.db`): time, data source, action, model, level, whether rows were sent,
+    the request text byte for byte, and the answer (or error, or "stopped"); viewable and
+    clearable in Settings > AI; the newest 500 are kept.
+  - **Ask AI** (Ctrl+Alt+A): consent, preview, send and a streamed answer that is never run;
+    hidden from the palette while AI is unavailable.
+  - Tests: unit (filtering of tables, columns, keys, indexes, checks and foreign keys; level
+    none sends only text; rows only at the rows level; schema cap; consent defaults, remember,
+    once and revoke; a different or reused payload id is rejected; a lowered or revoked consent
+    invalidates previews; the log equals the sent bytes and never holds the key; cancel is
+    logged); integration against PostgreSQL (ignore list across schema, neighbours and rows;
+    rows only after consent); UI (consent first, exact text, log equality, production default,
+    row prompt, revoke and log in Settings, hidden while off); E2E (axe on consent, preview
+    and answer).
 
 ### Phase 7 — Hardening and release
 

@@ -63,6 +63,8 @@ async fn streams_incrementally_with_the_right_headers() {
     assert!(head.contains(&format!("x-api-key: {}", KEY.to_ascii_lowercase())));
     assert!(head.contains("anthropic-version: 2026-10-21"));
     assert!(head.contains("anthropic-beta: server-side-fallback-2026-07-01"));
+    // The bytes sent are exactly the prepared (previewable) body.
+    assert_eq!(got.body, quarry_ai_anthropic::prepare(&request()).body);
     let body: serde_json::Value = serde_json::from_str(&got.body).expect("json body");
     assert_eq!(body["stream"], true);
     assert_eq!(body["messages"][0]["content"], "Say OK");

@@ -38,6 +38,23 @@
     // AI: like the Rust side, only whether a key is stored is known, never the key.
     ai: { enabled: false, model: 'claude-sonnet-5-5', disabledWorkspaces: [], ignore: [] },
     aiKeyStored: false,
+    aiConsents: new Map(),
+    aiPrepared: new Map(),
+    aiLog: [],
+  };
+
+  const aiConsent = (connectionId) => {
+    const chosen = state.aiConsents.get(connectionId);
+    const production =
+      state.connections.find((c) => c.id === connectionId)?.environment === 'production';
+    return {
+      connectionId,
+      level: chosen?.level ?? 'none',
+      decided: chosen !== undefined,
+      remembered: chosen?.remembered ?? false,
+      rowsAlways: chosen?.rowsAlways ?? false,
+      suggested: production ? 'none' : 'schema',
+    };
   };
 
   const aiStatus = () => ({
@@ -361,6 +378,97 @@
       return 'ai-1';
     },
     ai_cancel: () => null,
+    ai_consents_list: () => [...state.aiConsents.keys()].map(aiConsent),
+    ai_consent_get: ({ connectionId }) => aiConsent(connectionId),
+    ai_consent_set: ({ connectionId, level, remember, rowsAlways }) => {
+      state.aiConsents.set(connectionId, { level, remembered: remember, rowsAlways });
+      return aiConsent(connectionId);
+    },
+    ai_consent_revoke: ({ connectionId }) => {
+      state.aiConsents.delete(connectionId);
+      return aiConsent(connectionId);
+    },
+    ai_context_preview: ({ request }) => {
+      const level = aiConsent(request.connectionId).level;
+      const objects = level === 'none' ? [] : request.objects.map((o) => `${o.schema}.${o.name}`);
+      const content = [
+        'Database: PostgreSQL 16.4',
+        ...(request.sql.trim() ? [`SQL in the editor:\n${request.sql}`] : []),
+        `Request: ${request.task.question}`,
+      ].join('\n\n');
+      const body = JSON.stringify(
+        {
+          model: state.ai.model,
+          max_tokens: 16000,
+          stream: true,
+          messages: [{ role: 'user', content }],
+        },
+        null,
+        2,
+      );
+      state.seq += 1;
+      const payloadId = `payload-${state.seq}`;
+      state.aiPrepared.set(payloadId, { connectionId: request.connectionId, level, body });
+      return {
+        payloadId,
+        connectionId: request.connectionId,
+        model: state.ai.model,
+        level,
+        body,
+        bytes: body.length,
+        estimatedTokens: Math.ceil(body.length / 4),
+        objects,
+        omitted: [],
+        rows: [],
+        rowOffer: [],
+      };
+    },
+    ai_send: ({ payloadId, onEvent }) => {
+      const prepared = state.aiPrepared.get(payloadId);
+      state.aiPrepared.delete(payloadId);
+      if (!prepared) {
+        return reject('ai_preview_expired', 'This preview is no longer valid.');
+      }
+      state.seq += 1;
+      state.aiLog.unshift({
+        id: state.seq,
+        createdAt: Date.now(),
+        connectionId: prepared.connectionId,
+        connectionName: state.connections.find((c) => c.id === prepared.connectionId)?.name ?? '',
+        action: 'ask',
+        model: state.ai.model,
+        level: prepared.level,
+        rowsSent: false,
+        payload: prepared.body,
+        status: 'done',
+        response: 'SELECT 1;',
+        error: null,
+        inputTokens: 20,
+        outputTokens: 2,
+        finishedAt: Date.now(),
+      });
+      sendOnChannel(onEvent, [
+        { type: 'started', model: state.ai.model },
+        { type: 'text', text: '```sql\nSELECT 1;\n```' },
+        {
+          type: 'done',
+          stopReason: 'end_turn',
+          usage: {
+            inputTokens: 20,
+            outputTokens: 2,
+            cacheReadInputTokens: 0,
+            cacheCreationInputTokens: 0,
+          },
+        },
+      ]);
+      return 'ai-2';
+    },
+    ai_log_list: ({ limit }) => state.aiLog.slice(0, limit),
+    ai_log_clear: () => {
+      const n = state.aiLog.length;
+      state.aiLog = [];
+      return n;
+    },
     revisions_list: () => [],
     import_pick: () => ({
       id: 'file-1',

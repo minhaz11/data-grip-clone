@@ -121,6 +121,12 @@ export const ACTIONS = [
     defaults: ['Alt+Shift+H'],
   },
   {
+    id: 'ai.ask',
+    title: 'Ask AI about the SQL',
+    context: 'global',
+    defaults: ['Ctrl+Alt+A'],
+  },
+  {
     id: 'view.hideAllPanels',
     title: 'Hide or show all panels',
     context: 'global',

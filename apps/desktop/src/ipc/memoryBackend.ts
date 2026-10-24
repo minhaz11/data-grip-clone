@@ -3,8 +3,12 @@ import {
   AI_FALLBACK_MODELS,
   DEFAULT_AI_SETTINGS,
   DEFAULT_SETTINGS,
+  type AiConsent,
+  type AiContextLevel,
+  type AiLogEntry,
   type AiSettings,
   type AiStatus,
+  type AiStreamEvent,
   type ConnectionDraft,
   type ConnectionProfile,
   type Folder,
@@ -42,6 +46,76 @@ export function createMemoryBackend(): Backend {
     workspaceId: AI_WORKSPACE_ID,
     active: aiSettings.enabled && !aiSettings.disabledWorkspaces.includes(AI_WORKSPACE_ID),
   });
+  const aiConsents = new Map<
+    string,
+    { level: AiContextLevel; remembered: boolean; rowsAlways: boolean }
+  >();
+  const aiPrepared = new Map<
+    string,
+    { connectionId: string; level: AiContextLevel; rowsSent: boolean; body: string }
+  >();
+  const aiLog: AiLogEntry[] = [];
+  const dropPrepared = (connectionId: string) => {
+    for (const [id, p] of aiPrepared) {
+      if (p.connectionId === connectionId) {
+        aiPrepared.delete(id);
+      }
+    }
+  };
+  const aiLogIds = new Map<string, number>();
+  const aiConsent = (connectionId: string): AiConsent => {
+    const chosen = aiConsents.get(connectionId);
+    const production = connections.find((c) => c.id === connectionId)?.environment === 'production';
+    return {
+      connectionId,
+      level: chosen?.level ?? 'none',
+      decided: chosen !== undefined,
+      remembered: chosen?.remembered ?? false,
+      rowsAlways: chosen?.rowsAlways ?? false,
+      suggested: production ? 'none' : 'schema',
+    };
+  };
+  const aiRefusal = () => {
+    if (!aiStatus().active) {
+      return fail('ai_disabled', 'AI features are turned off');
+    }
+    if (!aiKeyStored) {
+      return fail('ai_no_key', 'no API key is stored; add one in Settings > AI');
+    }
+    return null;
+  };
+  /** Streams `pieces` as the Rust side would, one event per step. */
+  const aiStream = async (
+    pieces: string[],
+    onEvent: (e: AiStreamEvent) => void,
+    onDone?: () => void,
+  ): Promise<string> => {
+    seq += 1;
+    const id = `ai-${seq}`;
+    const steps: (() => void)[] = [
+      () => onEvent({ type: 'started', model: aiSettings.model }),
+      ...pieces.map((text) => () => onEvent({ type: 'text', text })),
+      () => {
+        aiTimers.delete(id);
+        onDone?.();
+        onEvent({
+          type: 'done',
+          stopReason: 'end_turn',
+          usage: {
+            inputTokens: 20,
+            outputTokens: 2,
+            cacheReadInputTokens: 0,
+            cacheCreationInputTokens: 0,
+          },
+        });
+      },
+    ];
+    aiTimers.set(
+      id,
+      steps.map((step, i) => setTimeout(step, (i + 1) * AI_STEP_MS)),
+    );
+    return id;
+  };
   const consoles = new Map<string, string>();
   // Local history: what the Rust side keeps in app.db, minus the automatic policy.
   const revisions: { id: number; console: string; info: RevisionInfo; text: string }[] = [];
@@ -149,42 +223,150 @@ export function createMemoryBackend(): Backend {
     },
     aiModels: async () => ({ models: structuredClone(AI_FALLBACK_MODELS), live: false }),
     aiTest: async (onEvent) => {
-      if (!aiStatus().active) {
-        return fail('ai_disabled', 'AI features are turned off');
+      const refused = aiRefusal();
+      if (refused) {
+        return refused;
       }
-      if (!aiKeyStored) {
-        return fail('ai_no_key', 'no API key is stored; add one in Settings > AI');
-      }
-      seq += 1;
-      const id = `ai-${seq}`;
-      const steps: (() => void)[] = [
-        () => onEvent({ type: 'started', model: aiSettings.model }),
-        () => onEvent({ type: 'text', text: 'O' }),
-        () => onEvent({ type: 'text', text: 'K' }),
-        () => {
-          aiTimers.delete(id);
-          onEvent({
-            type: 'done',
-            stopReason: 'end_turn',
-            usage: {
-              inputTokens: 20,
-              outputTokens: 2,
-              cacheReadInputTokens: 0,
-              cacheCreationInputTokens: 0,
-            },
-          });
-        },
-      ];
-      aiTimers.set(
-        id,
-        steps.map((step, i) => setTimeout(step, (i + 1) * AI_STEP_MS)),
-      );
-      return id;
+      return aiStream(['O', 'K'], onEvent);
     },
     aiCancel: async (requestId) => {
       aiTimers.get(requestId)?.forEach(clearTimeout);
       aiTimers.delete(requestId);
+      const entry = aiLog.find((e) => e.id === aiLogIds.get(requestId));
+      if (entry && entry.status === 'sent') {
+        entry.status = 'cancelled';
+        entry.finishedAt = Date.now();
+      }
       return null;
+    },
+    aiConsentsList: async () => [...aiConsents.keys()].sort().map(aiConsent),
+    aiConsentGet: async (connectionId) =>
+      find(connectionId) ? aiConsent(connectionId) : fail('not_found', 'data source not found'),
+    aiConsentSet: async (connectionId, level, remember, rowsAlways) => {
+      if (!find(connectionId)) {
+        return fail('not_found', 'data source not found');
+      }
+      if (rowsAlways && (!remember || level !== 'schemaAndRows')) {
+        return fail('invalid', 'Sample rows can be always allowed only for a remembered choice.');
+      }
+      aiConsents.set(connectionId, { level, remembered: remember, rowsAlways });
+      dropPrepared(connectionId);
+      return aiConsent(connectionId);
+    },
+    aiConsentRevoke: async (connectionId) => {
+      aiConsents.delete(connectionId);
+      dropPrepared(connectionId);
+      return aiConsent(connectionId);
+    },
+    aiContextPreview: async (request) => {
+      if (!aiStatus().active) {
+        return fail('ai_disabled', 'AI features are turned off');
+      }
+      const consent = aiConsent(request.connectionId);
+      const level = consent.level;
+      // No catalog here: the referenced objects stand in for their schema.
+      const objects = level === 'none' ? [] : request.objects.map((o) => `${o.schema}.${o.name}`);
+      const rowOffer =
+        level === 'schemaAndRows'
+          ? objects.slice(0, 3).map((table) => ({ table, columns: ['id'], rows: 5 }))
+          : [];
+      const withRows = rowOffer.length > 0 && (request.includeRows || consent.rowsAlways);
+      const parts = ['Database: PostgreSQL'];
+      if (objects.length > 0) {
+        parts.push(`Schema of the objects involved:\n${objects.map((o) => `-- ${o}`).join('\n')}`);
+      }
+      if (withRows) {
+        parts.push(...rowOffer.map((t) => `Sample rows from ${t.table} (1 rows):\nid\n1`));
+      }
+      if (request.sql.trim()) {
+        parts.push(`SQL in the editor:\n${request.sql}`);
+      }
+      parts.push(`Request: ${request.task.question}`);
+      const body = JSON.stringify(
+        {
+          model: aiSettings.model,
+          max_tokens: 16000,
+          stream: true,
+          messages: [{ role: 'user', content: parts.join('\n\n') }],
+        },
+        null,
+        2,
+      );
+      seq += 1;
+      const payloadId = `payload-${seq}`;
+      aiPrepared.set(payloadId, {
+        connectionId: request.connectionId,
+        level,
+        rowsSent: withRows,
+        body,
+      });
+      return {
+        payloadId,
+        connectionId: request.connectionId,
+        model: aiSettings.model,
+        level,
+        body,
+        bytes: new TextEncoder().encode(body).length,
+        estimatedTokens: Math.ceil(new TextEncoder().encode(body).length / 4),
+        objects,
+        omitted: [],
+        rows: withRows ? rowOffer.map((t) => ({ ...t, rows: 1 })) : [],
+        rowOffer: withRows ? [] : rowOffer,
+      };
+    },
+    aiSend: async (payloadId, onEvent) => {
+      const refused = aiRefusal();
+      if (refused) {
+        return refused;
+      }
+      const prepared = aiPrepared.get(payloadId);
+      aiPrepared.delete(payloadId);
+      if (!prepared) {
+        return fail(
+          'ai_preview_expired',
+          'This preview is no longer valid. Preview the request again.',
+        );
+      }
+      seq += 1;
+      const logId = seq;
+      aiLog.unshift({
+        id: logId,
+        createdAt: Date.now(),
+        connectionId: prepared.connectionId,
+        connectionName: find(prepared.connectionId)?.name ?? '',
+        action: 'ask',
+        model: aiSettings.model,
+        level: prepared.level,
+        rowsSent: prepared.rowsSent,
+        payload: prepared.body,
+        status: 'sent',
+        response: null,
+        error: null,
+        inputTokens: null,
+        outputTokens: null,
+        finishedAt: null,
+      });
+      const answer = ['Here is ', 'the query:\n```sql\nSELECT 1;\n```'];
+      const id = await aiStream(answer, onEvent, () => {
+        const entry = aiLog.find((e) => e.id === logId);
+        if (entry) {
+          Object.assign(entry, {
+            status: 'done',
+            response: answer.join(''),
+            inputTokens: 20,
+            outputTokens: 2,
+            finishedAt: Date.now(),
+          });
+        }
+      });
+      aiLogIds.set(id, logId);
+      return id;
+    },
+    aiLogList: async (limit) => structuredClone(aiLog.slice(0, limit)),
+    aiLogClear: async () => {
+      const n = aiLog.length;
+      aiLog.length = 0;
+      return n;
     },
     settingsGet: async () => settings,
     settingsSet: async (next) => (settings = { ...next }),

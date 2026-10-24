@@ -11,7 +11,7 @@ use std::time::Duration;
 use futures_util::future::BoxFuture;
 use futures_util::{StreamExt, stream};
 use quarry_ai_core::{
-    AiError, AiProvider, Capabilities, CompletionRequest, EventStream, ModelInfo,
+    AiError, AiProvider, Capabilities, CompletionRequest, EventStream, ModelInfo, PreparedRequest,
 };
 use quarry_secrets::SecretString;
 use serde::Deserialize;
@@ -44,6 +44,30 @@ const FALLBACK_CAPABLE: &[&str] = &[
     "claude-sonnet-5-5",
 ];
 const FALLBACK_BETA: &str = "server-side-fallback-2026-07-01";
+
+fn body(request: &CompletionRequest) -> serde_json::Value {
+    let mut body = json!({
+        "model": request.model,
+        "max_tokens": request.max_tokens,
+        "stream": true,
+        "messages": request.messages,
+    });
+    if let Some(system) = &request.system {
+        body["system"] = json!(system);
+    }
+    if FALLBACK_CAPABLE.contains(&request.model.as_str()) {
+        body["fallbacks"] = json!("default");
+    }
+    body
+}
+
+/// The exact request body for `request`, pretty-printed so a preview is readable.
+pub fn prepare(request: &CompletionRequest) -> PreparedRequest {
+    PreparedRequest {
+        model: request.model.clone(),
+        body: serde_json::to_string_pretty(&body(request)).unwrap_or_default(),
+    }
+}
 
 pub fn fallback_models() -> Vec<ModelInfo> {
     FALLBACK_MODELS
@@ -166,22 +190,6 @@ impl AnthropicProvider {
         };
         map_error(Some(status), &kind, self.scrub(message), retry_after)
     }
-
-    fn body(request: &CompletionRequest) -> serde_json::Value {
-        let mut body = json!({
-            "model": request.model,
-            "max_tokens": request.max_tokens,
-            "stream": true,
-            "messages": request.messages,
-        });
-        if let Some(system) = &request.system {
-            body["system"] = json!(system);
-        }
-        if FALLBACK_CAPABLE.contains(&request.model.as_str()) {
-            body["fallbacks"] = json!("default");
-        }
-        body
-    }
 }
 
 #[derive(Deserialize)]
@@ -212,12 +220,17 @@ impl AiProvider for AnthropicProvider {
         }
     }
 
-    fn complete(&self, request: CompletionRequest) -> BoxFuture<'_, Result<EventStream, AiError>> {
+    fn prepare(&self, request: &CompletionRequest) -> PreparedRequest {
+        prepare(request)
+    }
+
+    fn send(&self, prepared: PreparedRequest) -> BoxFuture<'_, Result<EventStream, AiError>> {
         Box::pin(async move {
             let mut builder = self
                 .headers(self.http.post(self.url("/v1/messages")))
-                .json(&Self::body(&request));
-            if FALLBACK_CAPABLE.contains(&request.model.as_str()) {
+                .header("content-type", "application/json")
+                .body(prepared.body);
+            if FALLBACK_CAPABLE.contains(&prepared.model.as_str()) {
                 builder = builder.header("anthropic-beta", FALLBACK_BETA);
             }
             let response = builder.send().await.map_err(|e| self.network_error(&e))?;
@@ -345,7 +358,7 @@ mod tests {
             messages: vec![Message::user("count orders")],
             max_tokens: 1024,
         };
-        let body = AnthropicProvider::body(&request);
+        let body = super::body(&request);
         assert_eq!(body["stream"], true);
         assert_eq!(body["model"], "claude-sonnet-5-5");
         assert_eq!(body["system"], "You write PostgreSQL.");
@@ -360,7 +373,7 @@ mod tests {
             system: None,
             ..request
         };
-        let body = AnthropicProvider::body(&haiku);
+        let body = super::body(&haiku);
         assert!(body.get("fallbacks").is_none());
         assert!(body.get("system").is_none());
     }

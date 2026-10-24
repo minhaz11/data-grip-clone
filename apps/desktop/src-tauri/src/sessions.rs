@@ -306,6 +306,12 @@ impl Sessions {
 
     /// The open session for `key`, if any. The registry lock is released before the caller uses
     /// it. Counts as use of the data source (for auto-disconnect).
+    /// Registers an already open session (tests connect without an `AppHandle`).
+    #[cfg(test)]
+    pub(crate) async fn insert_for_test(&self, key: SessionKey, session: Arc<dyn Session>) {
+        self.live.lock().await.insert(key, session);
+    }
+
     pub async fn get(&self, key: &SessionKey) -> Result<Arc<dyn Session>, AppError> {
         self.touch(&key.source_id);
         self.peek(key).await

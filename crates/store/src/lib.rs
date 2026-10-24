@@ -2,6 +2,7 @@
 //! through typed commands. Secrets are never stored here (ADR-0003).
 
 pub mod ai;
+pub mod ai_requests;
 pub mod connections;
 pub mod history;
 mod migrations;
@@ -17,6 +18,9 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 pub use ai::{AiIgnoreKind, AiIgnoreRule, AiSettings, DEFAULT_AI_MODEL};
+pub use ai_requests::{
+    AiContextLevel, AiLogDraft, AiLogEntry, AiLogOutcome, AiLogStatus, StoredConsent,
+};
 pub use connections::{
     ConnectionDraft, ConnectionProfile, Engine, Environment, Folder, SaveMode, SslMode,
 };

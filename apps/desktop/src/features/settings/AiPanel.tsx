@@ -3,6 +3,7 @@ import { errorMessage } from '../../app/settingsStore';
 import { backend } from '../../ipc/client';
 import type { AiIgnoreKind, AiModels, AiSettings, AiStreamEvent } from '../../ipc/types';
 import { AI_FALLBACK_MODELS } from '../../ipc/types';
+import { AiActivity } from '../ai/AiActivity';
 import { useAi } from '../ai/aiStore';
 
 const input = 'rounded border border-border bg-bg px-2 py-1';
@@ -394,6 +395,8 @@ export function AiPanel() {
           </button>
         </form>
       </section>
+
+      <AiActivity />
 
       {notice && (
         <p role="status" className="text-muted">

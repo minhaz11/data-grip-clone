@@ -10,16 +10,19 @@ use std::time::Instant;
 use futures_util::StreamExt;
 use quarry_ai_anthropic::{AnthropicProvider, Options};
 use quarry_ai_core::{
-    AiError, AiEvent, AiProvider, CompletionRequest, KillSwitch, Message, ModelInfo, StopReason,
-    Switched, Usage,
+    AiError, AiEvent, AiProvider, CompletionRequest, KillSwitch, Message, ModelInfo,
+    PreparedRequest, StopReason, Switched, Usage,
 };
 use quarry_secrets::{CredentialStore, SecretString};
-use quarry_store::{AiSettings, Store};
+use quarry_store::{AiContextLevel, AiLogOutcome, AiLogStatus, AiSettings, Store};
 use serde::Serialize;
 use tauri::State;
 use tauri::ipc::Channel;
 
 use crate::error::AppError;
+
+pub mod context;
+pub mod requests;
 
 /// Keyring account of the Anthropic API key (ADR-0003).
 pub const KEY_ACCOUNT: &str = "ai:anthropic:api-key";
@@ -91,7 +94,17 @@ pub struct Ai {
     keyring: Arc<dyn CredentialStore>,
     switch: Arc<KillSwitch>,
     options: Options,
-    running: Mutex<HashMap<String, tokio::task::AbortHandle>>,
+    running: Mutex<HashMap<String, Running>>,
+    /// Consents chosen "this time" (not remembered): until restart or revoke.
+    once: Mutex<HashMap<String, AiContextLevel>>,
+    /// Previewed requests waiting for Send, by payload id.
+    prepared: Mutex<HashMap<String, requests::Prepared>>,
+}
+
+/// A request in flight: its task, and its request log entry if it has one.
+struct Running {
+    task: tokio::task::AbortHandle,
+    log_id: Option<i64>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -126,6 +139,8 @@ impl Ai {
             switch,
             options,
             running: Mutex::new(HashMap::new()),
+            once: Mutex::new(HashMap::new()),
+            prepared: Mutex::new(HashMap::new()),
         })
     }
 
@@ -237,61 +252,138 @@ impl Ai {
     where
         F: Fn(AiStreamEvent) + Send + 'static,
     {
+        self.start_prepared(quarry_ai_anthropic::prepare(&request), None, sink)
+            .await
+    }
+
+    /// Sends a prepared request exactly as rendered; with `log_id`, its outcome is recorded in
+    /// the request log.
+    async fn start_prepared<F>(
+        self: &Arc<Self>,
+        prepared: PreparedRequest,
+        log_id: Option<i64>,
+        sink: F,
+    ) -> Result<String, AppError>
+    where
+        F: Fn(AiStreamEvent) + Send + 'static,
+    {
         let this = Arc::clone(self);
         let provider = tauri::async_runtime::spawn_blocking(move || this.provider())
             .await
             .map_err(|e| AppError::new("internal", format!("AI task failed: {e}")))??;
         let id = uuid::Uuid::new_v4().to_string();
-        let model = request.model.clone();
+        let model = prepared.model.clone();
         let this = Arc::clone(self);
         let task_id = id.clone();
-        // Spawned with the lock held, so the task cannot finish (and remove itself) before its
-        // abort handle is registered.
+        // Spawned with the lock held, so the task cannot finish (and remove itself) before it is
+        // registered.
         let mut running = lock(&self.running);
         let task = tauri::async_runtime::spawn(async move {
             let started = Instant::now();
-            let failed = |e: AiError| {
-                tracing::warn!(request = %task_id, kind = e.kind(), "AI request failed");
-                AiStreamEvent::Failed { error: e.into() }
-            };
-            match provider.complete(request).await {
+            let mut answer = String::new();
+            let outcome = match provider.send(prepared).await {
                 Ok(mut events) => {
+                    let mut outcome = None;
                     while let Some(event) = events.next().await {
                         match event {
                             Ok(event) => {
-                                if let AiEvent::Done { usage, stop_reason } = &event {
-                                    tracing::info!(
-                                        request = %task_id,
-                                        model = %model,
-                                        input_tokens = usage.input_tokens,
-                                        output_tokens = usage.output_tokens,
-                                        stop = ?stop_reason,
-                                        ms = started.elapsed().as_millis() as u64,
-                                        "AI request finished"
-                                    );
+                                match &event {
+                                    AiEvent::Text { text } => answer.push_str(text),
+                                    AiEvent::Done { usage, stop_reason } => {
+                                        tracing::info!(
+                                            request = %task_id,
+                                            model = %model,
+                                            input_tokens = usage.input_tokens,
+                                            output_tokens = usage.output_tokens,
+                                            stop = ?stop_reason,
+                                            ms = u64::try_from(started.elapsed().as_millis())
+                                                .unwrap_or(u64::MAX),
+                                            "AI request finished"
+                                        );
+                                        outcome = Some(Ok(*usage));
+                                    }
+                                    AiEvent::Started { .. } => {}
                                 }
                                 sink(event.into());
                             }
                             Err(e) => {
-                                sink(failed(e));
+                                outcome = Some(Err(e));
                                 break;
                             }
                         }
                     }
+                    outcome
+                        .unwrap_or_else(|| Err(AiError::Protocol("the answer ended early".into())))
                 }
-                Err(e) => sink(failed(e)),
+                Err(e) => Err(e),
+            };
+            if let Err(e) = &outcome {
+                tracing::warn!(request = %task_id, kind = e.kind(), "AI request failed");
             }
-            lock(&this.running).remove(&task_id);
+            let logged = lock(&this.running).remove(&task_id).and_then(|r| r.log_id);
+            if let Some(log_id) = logged {
+                let record = match &outcome {
+                    Ok(usage) => AiLogOutcome {
+                        status: AiLogStatus::Done,
+                        response: Some(answer),
+                        error: None,
+                        input_tokens: Some(usage.input_tokens),
+                        output_tokens: Some(usage.output_tokens),
+                        finished_at: crate::exec::unix_millis(),
+                    },
+                    Err(e) => AiLogOutcome {
+                        status: AiLogStatus::Failed,
+                        response: (!answer.is_empty()).then_some(answer),
+                        error: Some(e.to_string()),
+                        input_tokens: None,
+                        output_tokens: None,
+                        finished_at: crate::exec::unix_millis(),
+                    },
+                };
+                this.finish_log(log_id, record).await;
+            }
+            if let Err(e) = outcome {
+                sink(AiStreamEvent::Failed { error: e.into() });
+            }
         });
-        running.insert(id.clone(), task.inner().abort_handle());
+        running.insert(
+            id.clone(),
+            Running {
+                task: task.inner().abort_handle(),
+                log_id,
+            },
+        );
         Ok(id)
+    }
+
+    async fn finish_log(self: &Arc<Self>, log_id: i64, outcome: AiLogOutcome) {
+        let store = Arc::clone(&self.store);
+        let written =
+            tauri::async_runtime::spawn_blocking(move || store.ai_log_finish(log_id, &outcome))
+                .await;
+        if !matches!(written, Ok(Ok(()))) {
+            tracing::warn!(log = log_id, "could not record the AI request outcome");
+        }
     }
 
     /// Stops a request: its task is aborted, which drops the stream and closes the connection.
     pub fn cancel(&self, request_id: &str) -> bool {
         match lock(&self.running).remove(request_id) {
-            Some(handle) => {
-                handle.abort();
+            Some(r) => {
+                r.task.abort();
+                if let Some(log_id) = r.log_id {
+                    let outcome = AiLogOutcome {
+                        status: AiLogStatus::Cancelled,
+                        response: None,
+                        error: None,
+                        input_tokens: None,
+                        output_tokens: None,
+                        finished_at: crate::exec::unix_millis(),
+                    };
+                    if self.store.ai_log_finish(log_id, &outcome).is_err() {
+                        tracing::warn!(log = log_id, "could not record the AI cancellation");
+                    }
+                }
                 tracing::info!(request = %request_id, "AI request cancelled");
                 true
             }
@@ -300,8 +392,9 @@ impl Ai {
     }
 
     fn cancel_all(&self) {
-        for (_, handle) in lock(&self.running).drain() {
-            handle.abort();
+        let ids: Vec<String> = lock(&self.running).keys().cloned().collect();
+        for id in ids {
+            self.cancel(&id);
         }
     }
 
@@ -377,23 +470,25 @@ pub fn ai_cancel(ai: AiState<'_>, request_id: String) {
     ai.cancel(&request_id);
 }
 
+/// Shared by the AI tests: a stand-in API and an `Ai` pointed at it.
 #[cfg(test)]
-mod tests {
+pub(crate) mod testing {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
     use quarry_secrets::MemoryStore;
-    use quarry_store::{AiIgnoreKind, AiIgnoreRule};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
-    use tokio::sync::mpsc;
 
     use super::*;
 
-    const KEY: &str = "sk-ant-api03-LEAK-CANARY-ai-7f3c";
-
     /// A stand-in API that counts connections and streams `OK` slowly until the client leaves.
-    async fn api() -> (String, Arc<AtomicUsize>) {
+    pub async fn api() -> (String, Arc<AtomicUsize>) {
+        api_streaming(200).await
+    }
+
+    /// Like [`api`], with `deltas` pieces of text 20 ms apart.
+    pub async fn api_streaming(deltas: usize) -> (String, Arc<AtomicUsize>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let url = format!("http://{}", listener.local_addr().expect("addr"));
         let count = Arc::new(AtomicUsize::new(0));
@@ -407,7 +502,7 @@ mod tests {
                     let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n";
                     let start = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"model\":\"claude-sonnet-5-5\",\"usage\":{\"input_tokens\":5}}}\n\n";
                     let _ = socket.write_all(format!("{head}{start}").as_bytes()).await;
-                    for _ in 0..200 {
+                    for _ in 0..deltas {
                         let delta = "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"OK\"}}\n\n";
                         if socket.write_all(delta.as_bytes()).await.is_err() {
                             return;
@@ -422,7 +517,7 @@ mod tests {
         (url, count)
     }
 
-    fn ai_with(store: Arc<Store>, url: &str) -> Arc<Ai> {
+    pub fn ai_with(store: Arc<Store>, url: &str) -> Arc<Ai> {
         let keyring: Arc<dyn CredentialStore> = Arc::new(MemoryStore::default());
         Arc::new(
             Ai::new(
@@ -436,6 +531,20 @@ mod tests {
             .expect("ai"),
         )
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::Ordering;
+    use std::time::Duration;
+
+    use quarry_store::{AiIgnoreKind, AiIgnoreRule};
+    use tokio::sync::mpsc;
+
+    use super::testing::{ai_with, api};
+    use super::*;
+
+    const KEY: &str = "sk-ant-api03-LEAK-CANARY-ai-7f3c";
 
     fn enabled() -> AiSettings {
         AiSettings {

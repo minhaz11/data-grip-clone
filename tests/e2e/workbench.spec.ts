@@ -455,6 +455,39 @@ test.describe('accessibility', () => {
     await expectNoA11yViolations(app, '[role="dialog"]');
   });
 
+  test('Ask AI asks for consent, previews the exact request, and has no WCAG A/AA violations', async ({
+    app,
+  }) => {
+    await app.getByRole('button', { name: /^Settings/ }).click();
+    const settings = app.getByRole('dialog', { name: 'Settings' });
+    await settings.getByRole('tab', { name: 'AI' }).click();
+    await settings.getByRole('checkbox', { name: 'Enable AI features' }).check();
+    await settings.getByRole('button', { name: 'Add Key' }).click();
+    await settings.getByLabel('Anthropic API key').fill('sk-ant-e2e-key');
+    await settings.getByRole('button', { name: 'Save Key' }).click();
+    await expect(settings.getByText('Stored in the system credential store.')).toBeVisible();
+    await settings.getByRole('button', { name: 'Cancel' }).last().click();
+
+    await createDataSource(app, 'AI Dev');
+    await consoleWith(app, 'AI Dev', 'select 1');
+    await app.keyboard.press('ControlOrMeta+Alt+A');
+    const ask = app.getByRole('dialog', { name: 'Ask AI' });
+    await ask.getByLabel('Question or request').fill('What does this do?');
+    await ask.getByRole('button', { name: 'Preview Request' }).click();
+    const consent = app.getByRole('dialog', { name: 'AI context for AI Dev' });
+    await expect(consent.getByRole('radio', { name: /^SQL and schema/ })).toBeChecked();
+    await expectNoA11yViolations(app, '[role="dialog"]');
+    await consent.getByRole('radio', { name: /^SQL text only/ }).check();
+    await consent.getByRole('button', { name: 'Continue' }).click();
+    const preview = ask.getByRole('region', { name: 'What will be sent' });
+    await preview.getByText('What will be sent (exact text)').click();
+    await expect(preview.getByLabel('Request text')).toContainText('What does this do?');
+    await expectNoA11yViolations(app, '[role="dialog"]');
+    await ask.getByRole('button', { name: 'Send' }).click();
+    await expect(ask.getByRole('log', { name: 'Answer' })).toContainText('SELECT 1;');
+    await expectNoA11yViolations(app, '[role="dialog"]');
+  });
+
   test('settings dialog has no WCAG A/AA violations', async ({ app }) => {
     await app.getByRole('button', { name: /^Settings/ }).click();
     await expect(app.getByRole('dialog')).toBeVisible();
