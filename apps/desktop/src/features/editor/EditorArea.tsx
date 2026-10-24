@@ -1,6 +1,10 @@
 import clsx from 'clsx';
-import { AlignLeft, ListChecks, Play, Square, X } from 'lucide-react';
-import { useCallback, useState } from 'react';
+import { AlignLeft, ChevronDown, ListChecks, Pin, Play, Square, X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ContextMenu, type MenuItem } from '../../components/ui/ContextMenu';
+import { backend } from '../../ipc/client';
+import { revealInTree } from '../navigation/objects';
+import { deleteConsole, duplicateConsole, renameConsole } from './ConsoleDialogs';
 import { useSettings } from '../../app/settingsStore';
 import { isConsole, useWorkspace, type ConsoleTab, type EditorTab } from '../../app/workspaceStore';
 import { DataTab } from '../data/DataTab';
@@ -18,16 +22,130 @@ import { TxControls } from '../exec/TxControls';
 import { changeSource, closeConsole } from '../exec/txGuards';
 import { keyOf, sessionOf, useTx } from '../exec/txStore';
 
+let consolesDir: Promise<string> | null = null;
+
+/** Where console files live, read once (for tab tooltips). */
+function useConsolesDir(): string | null {
+  const [dir, setDir] = useState<string | null>(null);
+  useEffect(() => {
+    consolesDir ??= backend.consolesDir().catch(() => '');
+    let live = true;
+    void consolesDir.then((d) => live && setDir(d || null));
+    return () => {
+      live = false;
+    };
+  }, []);
+  return dir;
+}
+
+/** Closes tabs one by one; each console with an open transaction asks first. */
+async function closeTabs(ids: string[]) {
+  for (const id of ids) {
+    await closeConsole(id);
+  }
+}
+
 export function EditorArea({ theme }: { theme: 'light' | 'dark' }) {
   const keymap = useKeymap();
   const tabs = useWorkspace((s) => s.tabs);
   const activeTabId = useWorkspace((s) => s.activeTabId);
   const activate = useWorkspace((s) => s.activate);
+  const closedCount = useWorkspace((s) => s.closed.length);
   const closeTab = closeConsole;
   const newConsole = useWorkspace((s) => s.newConsole);
   const sources = useConnections((s) => s.items);
   const selectedSourceId = useConnections((s) => s.selectedId);
   const active = tabs.find((t) => t.id === activeTabId);
+  const dir = useConsolesDir();
+  const [menu, setMenu] = useState<{ x: number; y: number; tabId: string | null } | null>(null);
+  const tablistRef = useRef<HTMLDivElement>(null);
+
+  const pathOf = (tab: ConsoleTab) =>
+    dir ? `${dir}${dir.includes('\\') ? '\\' : '/'}${tab.console}.sql` : `${tab.console}.sql`;
+
+  function focusTab(id: string) {
+    activate(id);
+    // After the render that makes it the roving tab stop.
+    setTimeout(() => document.getElementById(`tab-${id}`)?.focus(), 0);
+  }
+
+  function menuItems(tab: EditorTab): MenuItem[] {
+    const index = tabs.findIndex((t) => t.id === tab.id);
+    const unpinned = (list: EditorTab[]) => list.filter((t) => !t.pinned).map((t) => t.id);
+    const items: MenuItem[] = [
+      {
+        label: 'Close',
+        shortcut: shortcutLabel('tab.close', keymap),
+        onSelect: () => void closeTab(tab.id),
+      },
+      {
+        label: 'Close others',
+        onSelect: () => void closeTabs(unpinned(tabs.filter((t) => t.id !== tab.id))),
+      },
+      {
+        label: 'Close tabs to the right',
+        onSelect: () => void closeTabs(unpinned(tabs.slice(index + 1))),
+      },
+      { label: 'Close all', onSelect: () => void closeTabs(unpinned(tabs)) },
+      {
+        label: tab.pinned ? 'Unpin tab' : 'Pin tab',
+        onSelect: () => useWorkspace.getState().setPinned(tab.id, !tab.pinned),
+      },
+    ];
+    if (closedCount > 0) {
+      items.push({
+        label: 'Reopen closed tab',
+        shortcut: shortcutLabel('tab.reopenClosed', keymap),
+        onSelect: () => void useWorkspace.getState().reopenClosed(),
+      });
+    }
+    if (isConsole(tab)) {
+      items.push(
+        { label: 'Rename console…', onSelect: () => void renameConsole(tab.id) },
+        { label: 'Duplicate console', onSelect: () => void duplicateConsole(tab.id) },
+        { label: 'Copy path', onSelect: () => void navigator.clipboard?.writeText(pathOf(tab)) },
+        { label: 'Delete console…', danger: true, onSelect: () => void deleteConsole(tab.id) },
+      );
+    } else if (tab.kind === 'object' || tab.kind === 'data') {
+      const o = tab.object;
+      items.push({
+        label: 'Reveal in explorer',
+        onSelect: () =>
+          revealInTree({
+            sourceId: tab.sourceId,
+            schema: o.schema,
+            name: o.name,
+            kind: o.objectType,
+          }),
+      });
+    }
+    return items;
+  }
+
+  function onTabKeyDown(e: React.KeyboardEvent, tab: EditorTab) {
+    const index = tabs.findIndex((t) => t.id === tab.id);
+    let next: EditorTab | undefined;
+    if (e.key === 'ArrowRight') {
+      next = tabs[(index + 1) % tabs.length];
+    } else if (e.key === 'ArrowLeft') {
+      next = tabs[(index - 1 + tabs.length) % tabs.length];
+    } else if (e.key === 'Home') {
+      next = tabs[0];
+    } else if (e.key === 'End') {
+      next = tabs[tabs.length - 1];
+    } else if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
+      e.preventDefault();
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      setMenu({ x: rect.left, y: rect.bottom, tabId: tab.id });
+      return;
+    } else {
+      return;
+    }
+    e.preventDefault();
+    if (next) {
+      focusTab(next.id);
+    }
+  }
 
   if (tabs.length === 0) {
     return (
@@ -49,74 +167,119 @@ export function EditorArea({ theme }: { theme: 'light' | 'dark' }) {
 
   return (
     <section aria-label="Editor" className="flex h-full flex-col bg-bg">
-      <div
-        role="tablist"
-        aria-label="Open editors"
-        className="flex h-8 shrink-0 overflow-x-auto border-b border-border bg-panel"
-      >
-        {tabs.map((tab) => {
-          const selected = tab.id === activeTabId;
-          const source = sources.find((s) => s.id === tab.sourceId);
-          const color = source ? effectiveColor(source) : null;
-          return (
-            <div
-              key={tab.id}
-              role="presentation"
-              className={clsx(
-                'group flex items-center border-r border-border',
-                selected
-                  ? 'bg-bg text-fg shadow-[inset_0_-2px_0_var(--q-accent)]'
-                  : 'text-muted hover:bg-hover',
-              )}
-              style={color ? { borderTop: `2px solid ${color}` } : undefined}
-              onAuxClick={(e) => e.button === 1 && void closeTab(tab.id)}
-            >
-              <button
-                type="button"
-                role="tab"
-                id={`tab-${tab.id}`}
-                aria-selected={selected}
-                aria-controls="editor-tabpanel"
-                tabIndex={selected ? 0 : -1}
-                onClick={() => activate(tab.id)}
-                title={[
-                  tabTitle(tab),
-                  source && `Data source: ${source.name}`,
-                  isConsole(tab) && tab.saveError,
-                ]
-                  .filter(Boolean)
-                  .join('\n')}
-                className="h-full pl-3 pr-1 font-mono text-[12px]"
+      <div className="flex h-8 shrink-0 border-b border-border bg-panel">
+        <div
+          ref={tablistRef}
+          role="tablist"
+          aria-label="Open editors"
+          className="flex min-w-0 flex-1 overflow-x-auto"
+        >
+          {tabs.map((tab) => {
+            const selected = tab.id === activeTabId;
+            const source = sources.find((s) => s.id === tab.sourceId);
+            const color = source ? effectiveColor(source) : null;
+            return (
+              <div
+                key={tab.id}
+                role="presentation"
+                className={clsx(
+                  'group flex items-center border-r border-border',
+                  selected
+                    ? 'bg-bg text-fg shadow-[inset_0_-2px_0_var(--q-accent)]'
+                    : 'text-muted hover:bg-hover',
+                )}
+                style={color ? { borderTop: `2px solid ${color}` } : undefined}
+                onAuxClick={(e) => e.button === 1 && void closeTab(tab.id)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setMenu({ x: e.clientX, y: e.clientY, tabId: tab.id });
+                }}
               >
-                {tabLabel(tab)}
-                {isConsole(tab) && tab.save === 'error' && (
-                  <span className="ml-1 text-danger" aria-label="save failed">
-                    !
-                  </span>
-                )}
-                {isConsole(tab) && (tab.save === 'pending' || tab.save === 'saving') && (
-                  <span className="ml-1" aria-label="unsaved changes">
-                    •
-                  </span>
-                )}
-                {isConsole(tab) && <TabTxBadge tab={tab} />}
-              </button>
-              {/* Mouse affordance only: a tablist may contain only tabs, so keyboard and screen-reader
+                <button
+                  type="button"
+                  role="tab"
+                  id={`tab-${tab.id}`}
+                  aria-selected={selected}
+                  aria-controls="editor-tabpanel"
+                  tabIndex={selected ? 0 : -1}
+                  onClick={() => activate(tab.id)}
+                  onKeyDown={(e) => onTabKeyDown(e, tab)}
+                  title={[
+                    isConsole(tab) ? pathOf(tab) : tabTitle(tab),
+                    source && `Data source: ${source.name}`,
+                    tab.pinned && 'Pinned',
+                    isConsole(tab) && tab.saveError,
+                  ]
+                    .filter(Boolean)
+                    .join('\n')}
+                  className="flex h-full items-center pl-3 pr-1 font-mono text-[12px]"
+                >
+                  {tab.pinned && (
+                    <Pin size={11} className="mr-1 shrink-0 text-muted" aria-label="pinned" />
+                  )}
+                  {tabLabel(tab)}
+                  {isConsole(tab) && tab.save === 'error' && (
+                    <span className="ml-1 text-danger" aria-label="save failed">
+                      !
+                    </span>
+                  )}
+                  {isConsole(tab) && (tab.save === 'pending' || tab.save === 'saving') && (
+                    <span className="ml-1" aria-label="unsaved changes">
+                      •
+                    </span>
+                  )}
+                  {isConsole(tab) && <TabTxBadge tab={tab} />}
+                </button>
+                {/* Mouse affordance only: a tablist may contain only tabs, so keyboard and screen-reader
                   users close the active tab with the tab.close shortcut instead. */}
-              <button
-                type="button"
-                tabIndex={-1}
-                aria-hidden
-                title={`Close (${shortcutLabel('tab.close', keymap)})`}
-                onClick={() => void closeTab(tab.id)}
-                className="mr-1 rounded p-0.5 opacity-60 hover:bg-hover hover:opacity-100"
-              >
-                <X size={12} aria-hidden />
-              </button>
-            </div>
-          );
-        })}
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  aria-hidden
+                  title={`Close (${shortcutLabel('tab.close', keymap)})`}
+                  onClick={() => void closeTab(tab.id)}
+                  className="mr-1 rounded p-0.5 opacity-60 hover:bg-hover hover:opacity-100"
+                >
+                  <X size={12} aria-hidden />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        <button
+          type="button"
+          aria-label={`All tabs (${tabs.length})`}
+          title="All tabs"
+          aria-haspopup="menu"
+          onClick={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            setMenu({ x: rect.left - 160, y: rect.bottom, tabId: null });
+          }}
+          className="flex shrink-0 items-center gap-0.5 border-l border-border px-1.5 text-[11px] text-muted hover:bg-hover hover:text-fg"
+        >
+          {tabs.length}
+          <ChevronDown size={12} aria-hidden />
+        </button>
       </div>
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          label={menu.tabId ? 'Tab actions' : 'All tabs'}
+          items={
+            menu.tabId
+              ? (() => {
+                  const tab = tabs.find((t) => t.id === menu.tabId);
+                  return tab ? menuItems(tab) : [];
+                })()
+              : tabs.map((t) => ({
+                  label: `${t.id === activeTabId ? '• ' : ''}${tabLabel(t)}`,
+                  onSelect: () => focusTab(t.id),
+                }))
+          }
+          onClose={() => setMenu(null)}
+        />
+      )}
       {isConsole(active) && <ConsolePane key={active.id} tab={active} theme={theme} />}
       {active?.kind === 'object' && (
         <ObjectViewer

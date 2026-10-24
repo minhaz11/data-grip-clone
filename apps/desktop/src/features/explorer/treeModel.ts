@@ -2,6 +2,7 @@ import type {
   AppError,
   ConnectionProfile,
   Folder,
+  MetaKind,
   MetaNode,
   MetadataRequest,
 } from '../../ipc/types';
@@ -62,6 +63,21 @@ export type Row =
 
 export const childKey = (parentKey: string, node: MetaNode) => `${parentKey}${SEP}${node.key}`;
 
+/** The object kind each schema group holds, for the explorer's type filter. */
+export const GROUP_KIND: Record<string, MetaKind> = {
+  'g:tables': 'table',
+  'g:views': 'view',
+  'g:matviews': 'materialized_view',
+  'g:routines': 'routine',
+  'g:sequences': 'sequence',
+};
+
+/** Whether the type filter hides `node` (an object of a hidden kind, or its group). */
+export function hiddenBy(kinds: ReadonlySet<MetaKind>, node: MetaNode): boolean {
+  const grouped = node.kind === 'group' ? GROUP_KIND[node.key] : undefined;
+  return kinds.has(node.kind) || (grouped !== undefined && kinds.has(grouped));
+}
+
 /** Key of a folder row; cannot collide with data source ids (UUIDs). */
 export const folderKey = (folderId: string) => `#folder${SEP}${folderId}`;
 
@@ -80,6 +96,7 @@ export function flattenTree(
   expanded: Record<string, boolean | undefined>,
   filter: string,
   folders: Folder[] = [],
+  hiddenKinds: ReadonlySet<MetaKind> = new Set(),
 ): Row[] {
   const rows: Row[] = [];
   const needle = filter.trim().toLowerCase();
@@ -144,9 +161,10 @@ export function flattenTree(
     }
     if (loaded?.status !== 'loaded') return;
 
+    const shown = loaded.nodes.filter((n) => !hiddenBy(hiddenKinds, n));
     const visible = needle
-      ? loaded.nodes.filter((n) => matches(n.name) || subtreeMatches(childKey(parentKey, n)))
-      : loaded.nodes;
+      ? shown.filter((n) => matches(n.name) || subtreeMatches(childKey(parentKey, n)))
+      : shown;
     visible.forEach((node, i) => {
       const key = childKey(parentKey, node);
       const open = node.children !== undefined && (needle ? subtreeMatches(key) : !!expanded[key]);

@@ -40,6 +40,34 @@ pub async fn console_read(consoles: Store<'_>, name: String) -> Result<String, A
     run(&consoles, move |c| c.read(&name)).await
 }
 
+/// Renames a console file; fails if `new_name` is taken.
+#[tauri::command]
+pub async fn console_rename(
+    consoles: Store<'_>,
+    name: String,
+    new_name: String,
+) -> Result<(), AppError> {
+    run(&consoles, move |c| c.rename(&name, &new_name)).await
+}
+
+/// Copies a console; returns the copy's name.
+#[tauri::command]
+pub async fn console_duplicate(consoles: Store<'_>, name: String) -> Result<String, AppError> {
+    run(&consoles, move |c| c.duplicate(&name)).await
+}
+
+/// Deletes a console file (only regular files inside the consoles directory).
+#[tauri::command]
+pub async fn console_delete(consoles: Store<'_>, name: String) -> Result<(), AppError> {
+    run(&consoles, move |c| c.delete(&name)).await
+}
+
+/// Where console files live, for tab tooltips.
+#[tauri::command]
+pub async fn consoles_dir(consoles: Store<'_>) -> Result<String, AppError> {
+    Ok(consoles.dir().display().to_string())
+}
+
 #[tauri::command]
 pub async fn console_write(
     consoles: Store<'_>,

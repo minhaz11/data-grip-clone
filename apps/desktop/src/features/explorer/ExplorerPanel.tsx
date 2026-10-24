@@ -1,4 +1,12 @@
-import { Database, FolderPlus, Plus, Search, X } from 'lucide-react';
+import {
+  ChevronsDownUp,
+  ChevronsUpDown,
+  Database,
+  FolderPlus,
+  Plus,
+  Search,
+  X,
+} from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { ContextMenu, type MenuItem } from '../../components/ui/ContextMenu';
@@ -17,6 +25,8 @@ import { disconnectSource, resolveTransactions } from '../exec/txGuards';
 import { openTransactions } from '../exec/txStore';
 import { useMetadata } from './metadataStore';
 import { TreeRow } from './TreeRow';
+import { TypeFilter } from './TypeFilter';
+import { useNotifications } from '../notifications/notifications';
 import { flattenTree, folderKey, ROOT_REQUEST, SEP, type Row } from './treeModel';
 import { useWorkspace } from '../../app/workspaceStore';
 import type {
@@ -24,6 +34,7 @@ import type {
   DdlObject,
   DropObject,
   Folder,
+  MetaKind,
   ObjectRef,
   RenameObject,
   TableName,
@@ -53,6 +64,13 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
   const { children, expanded, setExpanded, load, refresh, resetSource } = useMetadata();
   const schemaTotals = useMetadata((s) => s.schemaTotals);
   const loadSchemaTotal = useMetadata((s) => s.loadSchemaTotal);
+  const refreshedAt = useMetadata((s) => s.refreshedAt);
+  const reveal = useMetadata((s) => s.reveal);
+  /** Object kinds the type filter hides. */
+  const [hiddenKinds, setHiddenKinds] = useState<Set<MetaKind>>(new Set());
+  /** Rows chosen for bulk actions (Ctrl/Shift+click, Shift+arrows), besides the current row. */
+  const [marked, setMarked] = useState<Set<string>>(new Set());
+  const [anchor, setAnchor] = useState<string | null>(null);
 
   const [filter, setFilter] = useState('');
   const [pickedKey, setSelectedKey] = useState<string | null>(null);
@@ -84,8 +102,8 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
   const moveSource = useConnections((s) => s.move);
 
   const rows = useMemo(
-    () => flattenTree(items, children, expanded, filter, folders),
-    [items, children, expanded, filter, folders],
+    () => flattenTree(items, children, expanded, filter, folders, hiddenKinds),
+    [items, children, expanded, filter, folders, hiddenKinds],
   );
   // The picked row wins while it is a folder or belongs to the selected data source; when the
   // source selection changes elsewhere (e.g. a just-created or duplicated source), that source's
@@ -142,15 +160,117 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
       ?.scrollIntoView?.({ block: 'nearest' });
   }, [selectedKey]);
 
-  function select(row: Row | undefined) {
+  /**
+   * Makes `row` the current row. `extend` marks every row from the anchor to it (Shift);
+   * `toggle` adds or removes it from the marked rows (Ctrl/Cmd); otherwise marks are cleared.
+   */
+  function select(row: Row | undefined, how: 'replace' | 'extend' | 'toggle' = 'replace') {
     if (!row) {
       return;
+    }
+    if (how === 'extend') {
+      const from = rows.findIndex((r) => r.key === (anchor ?? selectedKey));
+      const to = rows.findIndex((r) => r.key === row.key);
+      const [a, b] = from < 0 ? [to, to] : [Math.min(from, to), Math.max(from, to)];
+      setMarked(new Set(rows.slice(a, b + 1).map((r) => r.key)));
+      if (anchor === null) {
+        setAnchor(selectedKey);
+      }
+    } else if (how === 'toggle') {
+      const next = new Set(marked.size === 0 && selectedKey ? [selectedKey] : marked);
+      const removed = next.delete(row.key);
+      if (!removed) {
+        next.add(row.key);
+      }
+      setMarked(next);
+      setAnchor(row.key);
+      // Toggling a row off keeps the current row on one that is still marked.
+      const keep = removed ? [...next].pop() : undefined;
+      if (keep !== undefined) {
+        setSelectedKey(keep);
+        return;
+      }
+    } else {
+      setMarked(new Set());
+      setAnchor(row.key);
     }
     setSelectedKey(row.key);
     if (row.type !== 'folder' && row.profile.id !== selectedSourceId) {
       selectSource(row.profile.id);
     }
   }
+
+  /** Marked node rows of the same data source as `row` (for bulk actions), in tree order. */
+  function bulkNodes(row: Row): Row[] {
+    if (row.type === 'folder' || !marked.has(row.key)) {
+      return [];
+    }
+    return rows.filter(
+      (r) => marked.has(r.key) && r.type === 'node' && r.profile.id === row.profile.id,
+    );
+  }
+
+  // Reveal a node asked for elsewhere (palette, editor, tabs): expand the way and select it.
+  useEffect(() => {
+    if (!reveal) {
+      return;
+    }
+    const { sourceId, path } = reveal;
+    const target = path[path.length - 1];
+    const found = rows.find((r) => r.key === target);
+    if (found) {
+      // After this render: selecting is a state change of its own.
+      const timer = setTimeout(() => {
+        useMetadata.getState().clearReveal();
+        // Focus first: focusing an unselected tree selects its first row.
+        treeRef.current?.focus();
+        select(found);
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+    const profile = items.find((p) => p.id === sourceId);
+    if (!profile) {
+      useMetadata.getState().clearReveal();
+      return;
+    }
+    if (sessions[sourceId]?.state !== 'connected') {
+      if (sessions[sourceId]?.state !== 'connecting') {
+        void runConnect(profile).then((ok) => {
+          if (!ok) {
+            useMetadata.getState().clearReveal();
+          }
+        });
+      }
+      return;
+    }
+    // Expand each level on the way; a loaded level without the next key ends the search.
+    for (let i = 0; i < path.length - 1; i++) {
+      const key = path[i] ?? '';
+      const next = path[i + 1] ?? '';
+      if (!expanded[key]) {
+        setExpanded(key, true);
+        return;
+      }
+      const loaded = children[key];
+      if (
+        loaded?.status === 'loaded' &&
+        !loaded.nodes.some((n) => `${key}${SEP}${n.key}` === next)
+      ) {
+        useMetadata.getState().clearReveal();
+        useNotifications
+          .getState()
+          .notify(
+            'The object is not in the explorer: it may be outside the schema scope or hidden by the type filter.',
+          );
+        return;
+      }
+      if (loaded?.status === 'error') {
+        useMetadata.getState().clearReveal();
+        return;
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run as the tree loads
+  }, [reveal, rows, sessions, expanded, children]);
 
   async function commitRename(row: Row, name: string | null) {
     setRenaming(null);
@@ -268,6 +388,15 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
     return row.type !== 'status' && row.expanded;
   }
 
+  /** Reloads everything loaded below a data source (catalog for completion too). */
+  function forceRefresh(row: Row) {
+    if (row.type === 'folder' || sessions[row.profile.id]?.state !== 'connected') {
+      return;
+    }
+    refresh(row.profile.id);
+    resetCatalog(row.profile.id);
+  }
+
   function refreshRow(row: Row) {
     if (row.type === 'status' || row.type === 'folder') return;
     if (row.type === 'source' && sessions[row.profile.id]?.state !== 'connected') return;
@@ -351,6 +480,36 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
       };
     }
     return null;
+  }
+
+  async function copyDdls(sourceId: string, objects: DdlObject[]) {
+    try {
+      const script = await backend.ddlGenerate(sourceId, objects, {
+        qualify: true,
+        owner: false,
+        grants: false,
+      });
+      await navigator.clipboard?.writeText(script);
+    } catch (e) {
+      setActionError(toAppError(e).message);
+    }
+  }
+
+  /** Show DDL for the marked rows, or the current one. */
+  function goToDdl(row: Row) {
+    const bulk = bulkNodes(row);
+    const targets = (bulk.length > 1 ? bulk : [row])
+      .map((r) => ddlOf(r))
+      .filter((d): d is NonNullable<typeof d> => d !== null);
+    if (row.type === 'folder' || targets.length === 0) {
+      return;
+    }
+    const first = targets[0];
+    void useWorkspace.getState().openDdl(
+      row.profile.id,
+      targets.map((d) => d.object),
+      targets.length === 1 && first ? first.title : `${targets.length} objects`,
+    );
   }
 
   async function copyDdl(row: Row, target: { object: DdlObject }) {
@@ -511,6 +670,40 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
       shortcut: shortcutLabel('explorer.refresh', keymap),
       onSelect: () => refreshRow(row),
     };
+    const bulk = bulkNodes(row);
+    if (bulk.length > 1) {
+      const ddls = bulk.map((r) => ddlOf(r)).filter((d): d is NonNullable<typeof d> => d !== null);
+      const sourceId = row.profile.id;
+      const names = bulk.map((r) => (r.type === 'node' ? r.node.name : ''));
+      return [
+        ...(ddls.length > 0
+          ? [
+              {
+                label: `Show DDL of ${ddls.length} objects`,
+                shortcut: shortcutLabel('explorer.goToDdl', keymap),
+                onSelect: () =>
+                  void useWorkspace.getState().openDdl(
+                    sourceId,
+                    ddls.map((d) => d.object),
+                    `${ddls.length} objects`,
+                  ),
+              },
+              {
+                label: `Copy DDL of ${ddls.length} objects`,
+                onSelect: () =>
+                  void copyDdls(
+                    sourceId,
+                    ddls.map((d) => d.object),
+                  ),
+              },
+            ]
+          : []),
+        {
+          label: `Copy ${names.length} names`,
+          onSelect: () => void navigator.clipboard?.writeText(names.join('\n')),
+        },
+      ];
+    }
     if (row.type === 'node') {
       const info = quickInfoOf(row);
       const ddl = ddlOf(row);
@@ -535,6 +728,7 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
           ? [
               {
                 label: 'Show DDL',
+                shortcut: shortcutLabel('explorer.goToDdl', keymap),
                 onSelect: () =>
                   void useWorkspace.getState().openDdl(row.profile.id, [ddl.object], ddl.title),
               },
@@ -553,7 +747,16 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
       live
         ? { label: 'Disconnect', onSelect: () => void disconnectSource(p.id) }
         : { label: 'Connect', onSelect: () => void runConnect(p) },
-      ...(state === 'connected' ? [refreshItem] : []),
+      ...(state === 'connected'
+        ? [
+            refreshItem,
+            {
+              label: 'Force refresh',
+              shortcut: shortcutLabel('explorer.forceRefresh', keymap),
+              onSelect: () => forceRefresh(row),
+            },
+          ]
+        : []),
       { label: 'Properties…', shortcut: 'Enter', onSelect: () => onEdit(p) },
       {
         label: 'Rename',
@@ -605,6 +808,14 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
         : undefined,
     'explorer.moveUp': source ? () => step(source, -1) : undefined,
     'explorer.moveDown': source ? () => step(source, 1) : undefined,
+    'explorer.goToDdl': current ? () => goToDdl(current) : undefined,
+    'explorer.forceRefresh': current ? () => forceRefresh(current) : undefined,
+    'explorer.collapseAll': () =>
+      useMetadata.getState().collapseAll(folders.map((f) => folderKey(f.id))),
+    'explorer.expandAll':
+      current && current.type !== 'status'
+        ? () => useMetadata.getState().expandLoaded(current.key)
+        : undefined,
     'explorer.contextMenu': current
       ? () => {
           const rect = treeRef.current
@@ -620,7 +831,8 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
       return;
     }
     // Tree navigation (WAI-ARIA tree pattern, not rebindable).
-    const move = (i: number) => select(rows[Math.max(0, Math.min(rows.length - 1, i))]);
+    const move = (i: number) =>
+      select(rows[Math.max(0, Math.min(rows.length - 1, i))], e.shiftKey ? 'extend' : 'replace');
     const row = selected;
     if (e.key === 'ArrowDown') move(selectedIndex + 1);
     else if (e.key === 'ArrowUp') move(selectedIndex < 0 ? 0 : selectedIndex - 1);
@@ -649,6 +861,25 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
         <h2 className="flex-1 text-[11px] font-semibold uppercase tracking-wide text-muted">
           Database Explorer
         </h2>
+        <TypeFilter hidden={hiddenKinds} onChange={setHiddenKinds} />
+        <IconButton
+          label="Collapse all"
+          shortcut={shortcutLabel('explorer.collapseAll', keymap)}
+          onClick={() => useMetadata.getState().collapseAll(folders.map((f) => folderKey(f.id)))}
+        >
+          <ChevronsDownUp size={14} aria-hidden />
+        </IconButton>
+        <IconButton
+          label="Expand all loaded below the selection"
+          shortcut={shortcutLabel('explorer.expandAll', keymap)}
+          onClick={() =>
+            selected && selected.type !== 'status'
+              ? useMetadata.getState().expandLoaded(selected.key)
+              : undefined
+          }
+        >
+          <ChevronsUpDown size={14} aria-hidden />
+        </IconButton>
         <IconButton label="New folder" onClick={() => void newFolder()}>
           <FolderPlus size={15} aria-hidden />
         </IconButton>
@@ -674,6 +905,26 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
               if (e.key === 'Escape' && filter) {
                 e.stopPropagation();
                 setFilter('');
+              } else if ((e.key === 'Enter' || e.key === 'F3') && filter.trim()) {
+                // Next (or with Shift previous) row whose name matches, wrapping around.
+                e.preventDefault();
+                const needle = filter.trim().toLowerCase();
+                const nameOf = (r: Row) =>
+                  r.type === 'node'
+                    ? r.node.name
+                    : r.type === 'folder'
+                      ? r.folder.name
+                      : r.type === 'source'
+                        ? r.profile.name
+                        : '';
+                const step = e.shiftKey ? -1 : 1;
+                for (let i = 1; i <= rows.length; i++) {
+                  const r = rows[(selectedIndex + step * i + rows.length * 2) % rows.length];
+                  if (r && nameOf(r).toLowerCase().includes(needle)) {
+                    select(r);
+                    break;
+                  }
+                }
               } else if (e.key === 'ArrowDown') {
                 e.preventDefault();
                 treeRef.current?.focus();
@@ -750,6 +1001,7 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
           ref={treeRef}
           role="tree"
           aria-label="Data sources"
+          aria-multiselectable
           tabIndex={0}
           aria-activedescendant={selected ? `tree-row-${selectedIndex}` : undefined}
           onKeyDown={onTreeKeyDown}
@@ -772,20 +1024,33 @@ export function ExplorerPanel({ onNew, onEdit }: Props) {
               key={row.key}
               id={`tree-row-${i}`}
               row={row}
-              selected={row.key === selectedKey}
+              selected={row.key === selectedKey || marked.has(row.key)}
               session={row.type === 'folder' ? undefined : sessions[row.profile.id]}
               highlight={filter.trim()}
-              onSelect={() => select(row)}
+              onSelect={(e) =>
+                select(
+                  row,
+                  e?.shiftKey ? 'extend' : e && (e.ctrlKey || e.metaKey) ? 'toggle' : 'replace',
+                )
+              }
               onToggle={() => void toggle(row)}
               onActivate={() => {
                 if (row.type === 'source') onEdit(row.profile);
                 else if (row.type === 'folder' || !openViewer(row)) void toggle(row);
               }}
               onContextMenu={(x, y) => {
-                select(row);
+                // A right-click inside the marked rows keeps them for a bulk action.
+                if (!marked.has(row.key)) {
+                  select(row);
+                }
                 if (row.type !== 'status') setMenu({ x, y, row });
               }}
               onRetry={() => row.type === 'status' && refresh(row.parentKey)}
+              onCancel={() =>
+                row.type === 'status' &&
+                void useMetadata.getState().cancelLoad(row.parentKey, row.profile.id)
+              }
+              refreshedAt={row.type === 'source' ? refreshedAt[row.profile.id] : undefined}
               renaming={renaming === row.key}
               onRename={(name) => void commitRename(row, name)}
               scopeLabel={row.type === 'source' ? scopeOf(row.profile) : null}

@@ -148,6 +148,13 @@
           { key: 'c:id', kind: 'column', name: 'id', detail: 'int4', flags: ['pk', 'not null'] },
           { key: 'c:email', kind: 'column', name: 'email', detail: 'text' },
         ];
+      case 'catalog':
+        return ['customers', 'orders'].map((name) => ({
+          key: `shop\u001fo:${name}`,
+          kind: 'table',
+          name,
+          detail: 'shop',
+        }));
       default:
         return [];
     }
@@ -278,6 +285,25 @@
       state.consoles.set(name, text);
       return null;
     },
+    console_rename: ({ name, newName }) => {
+      const text = state.consoles.get(name) ?? '';
+      state.consoles.delete(name);
+      state.consoles.set(newName, text);
+      return null;
+    },
+    console_duplicate: ({ name }) => {
+      let copy = `${name} copy`;
+      for (let n = 2; state.consoles.has(copy); n++) {
+        copy = `${name} copy ${n}`;
+      }
+      state.consoles.set(copy, state.consoles.get(name) ?? '');
+      return copy;
+    },
+    console_delete: ({ name }) => {
+      state.consoles.delete(name);
+      return null;
+    },
+    consoles_dir: () => '/fake/consoles',
     query_execute: ({ request, onEvent }) => {
       // Manual mode: the first statement opens a transaction (like the Rust session does).
       const current = sessionState(request.session);

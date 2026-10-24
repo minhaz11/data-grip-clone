@@ -130,6 +130,19 @@ export interface Backend {
   consoleCreate(preferred: string | null): Promise<string>;
   consoleRead(name: string): Promise<string>;
   consoleWrite(name: string, text: string): Promise<null>;
+  /** Renames a console file; rejects if `newName` is taken. */
+  consoleRename(name: string, newName: string): Promise<null>;
+  /** Copies a console; resolves to the copy's name. */
+  consoleDuplicate(name: string): Promise<string>;
+  /** Deletes a console file. */
+  consoleDelete(name: string): Promise<null>;
+  /** The directory console files live in (for tooltips). */
+  consolesDir(): Promise<string>;
+  /**
+   * Cancels a slow explorer load on the shared session; `false` when a statement runs there (then
+   * nothing is cancelled on the server).
+   */
+  metadataCancel(id: string): Promise<boolean>;
   /** Starts a query job; resolves to its id at once. Progress arrives through `onEvent`. */
   queryExecute(request: ExecRequest, onEvent: (e: ExecEvent) => void): Promise<string>;
   queryCancel(jobId: string): Promise<null>;
@@ -257,6 +270,11 @@ const tauriBackend: Backend = {
   consoleCreate: (preferred) => invoke<string>('console_create', { preferred }),
   consoleRead: (name) => invoke<string>('console_read', { name }),
   consoleWrite: (name, text) => invoke<null>('console_write', { name, text }),
+  consoleRename: (name, newName) => invoke<null>('console_rename', { name, newName }),
+  consoleDuplicate: (name) => invoke<string>('console_duplicate', { name }),
+  consoleDelete: (name) => invoke<null>('console_delete', { name }),
+  consolesDir: () => invoke<string>('consoles_dir'),
+  metadataCancel: (id) => invoke<boolean>('metadata_cancel', { id }),
   queryExecute: (request, onEvent) => {
     const channel = new Channel<ExecEvent>();
     channel.onmessage = onEvent;

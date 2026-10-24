@@ -343,6 +343,21 @@ test.describe('accessibility', () => {
     expect(move?.args).toMatchObject({ folderId: expect.stringMatching(/^folder-/) });
   });
 
+  test('search palette finds objects and has no WCAG A/AA violations', async ({ app }) => {
+    await createDataSource(app, 'Dev');
+    await app.getByRole('treeitem', { name: /^Dev/ }).click();
+    await app.getByRole('tree', { name: 'Data sources' }).press('ArrowRight');
+    await expect(app.getByRole('treeitem', { name: 'shop, schema' })).toBeVisible();
+
+    await app.keyboard.press('ControlOrMeta+Shift+A');
+    const dialog = app.getByRole('dialog', { name: 'Search Everywhere' });
+    await dialog.getByRole('combobox').fill('cust');
+    await expect(dialog.getByRole('option', { name: /customers/ })).toBeVisible();
+    await expectNoA11yViolations(app, '[role="dialog"]');
+    await app.keyboard.press('Enter');
+    await expect(app.getByRole('tab', { name: /customers/ })).toBeVisible();
+  });
+
   test('settings dialog has no WCAG A/AA violations', async ({ app }) => {
     await app.getByRole('button', { name: /^Settings/ }).click();
     await expect(app.getByRole('dialog')).toBeVisible();

@@ -88,7 +88,9 @@ impl From<ConnectionError> for AppError {
 impl From<ConsoleError> for AppError {
     fn from(e: ConsoleError) -> Self {
         let kind = match e {
-            ConsoleError::InvalidName(_) | ConsoleError::TooLarge(_) => "invalid",
+            ConsoleError::InvalidName(_) | ConsoleError::TooLarge(_) | ConsoleError::Exists(_) => {
+                "invalid"
+            }
             ConsoleError::NotFound(_) => "not_found",
             ConsoleError::Io(_) => "storage",
         };

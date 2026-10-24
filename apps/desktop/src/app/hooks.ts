@@ -22,6 +22,10 @@ export function useKeybindings(handlers: Partial<Record<ActionId, () => void>>) 
       if (isModifierOnly(e) || isCapturingShortcut(e.target)) {
         return;
       }
+      // A modal dialog owns the keyboard: app shortcuts wait until it is closed.
+      if (e.target instanceof Element && e.target.closest('[aria-modal="true"]')) {
+        return;
+      }
       const id = resolveAction(chordOf(e), contextOf(e.target), currentKeymap());
       const handler = id ? handlers[id] : undefined;
       if (handler) {

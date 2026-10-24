@@ -28,6 +28,8 @@ export type Cell = string | null;
 export interface ConsoleTabState {
   id: string;
   kind?: 'console';
+  /** Kept first and by Close others / Close all. */
+  pinned?: boolean;
   /** Console file name (without `.sql`). */
   console: string;
   /** Data source the console runs against, if bound. */
@@ -53,6 +55,7 @@ export interface GridLayout {
 export interface ObjectTabState {
   id: string;
   kind: 'object';
+  pinned?: boolean;
   sourceId: string;
   object: ObjectRef;
 }
@@ -61,6 +64,7 @@ export interface ObjectTabState {
 export interface DdlTabState {
   id: string;
   kind: 'ddl';
+  pinned?: boolean;
   sourceId: string;
   objects: DdlObject[];
   /** What the DDL is for, e.g. `shop.orders`. */
@@ -71,6 +75,7 @@ export interface DdlTabState {
 export interface DataTabState {
   id: string;
   kind: 'data';
+  pinned?: boolean;
   sourceId: string;
   object: ObjectRef;
   /** Condition after WHERE, as typed; empty for all rows. */

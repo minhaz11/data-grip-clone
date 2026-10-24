@@ -31,9 +31,18 @@ typed (everywhere and in the SQL editor), a shortcut without Ctrl or Alt must be
 | Run whole console | Everywhere | `Ctrl+Shift+F10` | `⇧⌘F10` |
 | Stop the running query | Everywhere | `Ctrl+F2` | `⌘F2` |
 | Query history | Everywhere | `Ctrl+Alt+E` | `⌥⌘E` |
+| Search everywhere (objects, consoles, actions) | Everywhere | `Ctrl+Shift+A` | `⇧⌘A` |
+| Go to database object | Everywhere | `Ctrl+N` | `⌘O` |
+| Recent tabs | Everywhere | `Ctrl+E` | `⌘E` |
+| Back | Everywhere | `Ctrl+Alt+Left` | `⌘[` |
+| Forward | Everywhere | `Ctrl+Alt+Right` | `⌘]` |
+| Reopen closed tab | Everywhere | `Ctrl+Shift+T` | `⇧⌘T` |
+| Hide or show all panels | Everywhere | `Ctrl+Shift+F12` | `⇧⌘F12` |
 | Format SQL | SQL editor | `Ctrl+Alt+L` | `⌥⌘L` |
 | Next error | SQL editor | `F8` | `F8` |
 | Previous error | SQL editor | `Shift+F8` | `⇧F8` |
+| Go to DDL of the object at the caret | SQL editor | `Ctrl+B` | `⌘B` |
+| Reveal the object at the caret in the Database Explorer | SQL editor | `Alt+F1` | `⌥F1` |
 | Select all cells | Result grid | `Ctrl+A` | `⌘A` |
 | Copy selected cells | Result grid | `Ctrl+C` | `⌘C` |
 | Edit cell | Result grid | `Enter`, `F2` | `Enter`, `F2` |
@@ -48,3 +57,7 @@ typed (everywhere and in the SQL editor), a shortcut without Ctrl or Alt must be
 | Rename data source or folder | Database Explorer | `Shift+F6`, `F2` | `⇧F6`, `F2` |
 | Move data source up | Database Explorer | `Alt+Shift+Up` | `⌥⇧Up` |
 | Move data source down | Database Explorer | `Alt+Shift+Down` | `⌥⇧Down` |
+| Show DDL | Database Explorer | `Ctrl+B` | `⌘B` |
+| Force refresh (reload everything loaded) | Database Explorer | `Ctrl+Shift+F5` | `⇧⌘F5` |
+| Collapse all | Database Explorer | `Ctrl+-` | `⌘-` |
+| Expand all loaded levels below the selection | Database Explorer | `Ctrl+=` | `⌘=` |

@@ -63,7 +63,15 @@ export function StatusBar({ theme }: { theme: 'light' | 'dark' }) {
           {isConsole(activeTab) && activeTab.ownSession ? ' · own session' : ''}
         </span>
       )}
+      {isConsole(activeTab) && activeTab.sourceId && (
+        <span aria-label="Current schema">Schema: {activeTab.schema ?? 'server default'}</span>
+      )}
       <div className="flex-1" />
+      {isConsole(activeTab) && (
+        <span aria-label="Encoding" title="Consoles are saved as UTF-8">
+          UTF-8
+        </span>
+      )}
       {hasActiveTab && caret && (
         <span aria-label="Cursor position">
           Ln {caret.line}, Col {caret.column}

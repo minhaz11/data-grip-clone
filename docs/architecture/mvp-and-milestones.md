@@ -389,6 +389,42 @@ listed tests run green in CI.
     label and reload); E2E (axe on every dialog tab and the folder tree, drag into a folder).
   - Not yet: Windows agent (OpenSSH pipe, then Pageant) is built but untested; jump hosts;
     encrypted client keys for TLS; nested folders.
+- **M4.10 Layout, navigation and explorer** ✅ (plan: `docs/plans/12-layout-navigation.md`)
+  - **Search everywhere** (Ctrl+Shift+A; Go to object Ctrl+N, Cmd+O on macOS): tables, views,
+    routines and sequences of every connected data source, console files and actions, ranked
+    exact, prefix, word start, substring, then fuzzy; `schema.name` matches both parts;
+    `/tables`, `/views`, `/routines`, `/sequences`, `/objects`, `/consoles`, `/actions` narrow
+    (Tab completes). Enter opens (table viewer, or DDL for routines and sequences),
+    Ctrl+Enter opens data, Shift+Enter shows DDL, Alt+Enter reveals in the explorer.
+  - **Go to DDL** (Ctrl+B) from the editor resolves the name at the caret through the
+    statement's aliases and table names, then the catalog (console schema, `public`, unique
+    match); a bare column goes to the statement's table that has it. Ctrl+B in the explorer shows
+    DDL of the selection. Alt+F1 reveals the object at the caret in the explorer, connecting and
+    expanding the way.
+  - **Tabs**: context menu (Close, Close others, Close to the right, Close all, Pin, Reopen
+    closed, Rename, Duplicate, Copy path, Delete for consoles, Reveal for viewers), pinned tabs
+    first and kept, an All tabs list, path tooltips, arrow keys between tabs. Reopen closed
+    (Ctrl+Shift+T) keeps 20 tabs and reads console text from the file again.
+  - **Consoles**: rename (never replaces another console; same tab, editor and undo history),
+    duplicate, delete (asks first; only regular files inside the consoles directory, links
+    refused). A console without a data source asks which one to attach when run.
+  - **Navigation**: Back/Forward across tabs with caret positions (Ctrl+Alt+Left/Right, Cmd+[
+    and Cmd+]), Recent tabs (Ctrl+E) with recently closed consoles; Escape in the explorer or
+    results panel returns to the editor; Hide all panels (Ctrl+Shift+F12) toggles both.
+  - **Status bar**: current schema and encoding (UTF-8) of the active console.
+  - **Explorer**: Shift/Ctrl+click and Shift+arrows mark several objects for Show DDL, Copy
+    DDL or Copy names; object type filter; Collapse all, Expand loaded levels; Force refresh
+    with the last refresh time in the tooltip; Cancel on loading rows (server cancel only when
+    no statement runs on the shared session); Enter/F3 and Shift+Enter/Shift+F3 in the filter
+    jump between matches.
+  - Also: app shortcuts are suspended while a modal dialog has focus.
+  - Tests: unit (ranking, prefixes, 1,000 tables in well under 100 ms; console rename, duplicate
+    and delete incl. a symlink); integration (`catalog` level); UI (reopen closed restores text,
+    rename keeps editor and binding, delete asks, pinned tabs, tab keys and list, back/forward
+    and recent, attach, Escape and hide panels, status bar, palette open/data/DDL/consoles/
+    actions/reveal, Go to DDL through aliases, explorer filter, collapse/expand, multi-select,
+    match navigation, cancel, force refresh); E2E (palette with axe in both browsers).
+  - Not yet: undocking panels, editor split, bookmarks (Later backlog).
 - Table viewer (columns/indexes/constraints/FKs), DDL generation, create/alter forms with DDL preview,
   destructive-operation confirmation.
 

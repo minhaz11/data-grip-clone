@@ -575,3 +575,51 @@ async fn schema_scope_limits_introspection() {
         .await
         .expect("cleanup");
 }
+
+#[tokio::test]
+#[ignore = "needs scripts/test-pg.sh up"]
+async fn catalog_lists_relations_sequences_and_user_routines() {
+    let db = admin().await;
+    db.batch_execute(
+        "DROP SCHEMA IF EXISTS it_catalog CASCADE;
+         CREATE SCHEMA it_catalog;
+         CREATE TABLE it_catalog.orders (id serial PRIMARY KEY);
+         CREATE VIEW it_catalog.recent AS SELECT * FROM it_catalog.orders;
+         CREATE MATERIALIZED VIEW it_catalog.totals AS SELECT count(*) FROM it_catalog.orders;
+         CREATE SEQUENCE it_catalog.ticket_no;
+         CREATE FUNCTION it_catalog.price(qty integer, rate numeric) RETURNS numeric
+           LANGUAGE sql AS 'select qty * rate';",
+    )
+    .await
+    .expect("fixture");
+    let s = session().await;
+    let all = s.metadata(&Req::Catalog).await.expect("catalog");
+    let ours: Vec<(&str, MetaKind)> = all
+        .iter()
+        .filter(|n| n.detail.as_deref() == Some("it_catalog"))
+        .map(|n| (n.key.as_str(), n.kind))
+        .collect();
+    assert_eq!(
+        ours,
+        [
+            ("it_catalog\u{1f}o:orders", MetaKind::Table),
+            ("it_catalog\u{1f}q:orders_id_seq", MetaKind::Sequence),
+            (
+                "it_catalog\u{1f}r:price(qty integer, rate numeric)",
+                MetaKind::Routine
+            ),
+            ("it_catalog\u{1f}o:recent", MetaKind::View),
+            ("it_catalog\u{1f}q:ticket_no", MetaKind::Sequence),
+            ("it_catalog\u{1f}o:totals", MetaKind::MaterializedView),
+        ]
+    );
+    // System schemas stay out; extension-owned routines too (none here).
+    assert!(
+        all.iter()
+            .all(|n| n.detail.as_deref() != Some("pg_catalog"))
+    );
+    s.close().await;
+    db.batch_execute("DROP SCHEMA it_catalog CASCADE")
+        .await
+        .expect("cleanup");
+}

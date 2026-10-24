@@ -75,6 +75,46 @@ export const ACTIONS = [
   },
   { id: 'query.cancel', title: 'Stop the running query', context: 'global', defaults: ['Ctrl+F2'] },
   { id: 'history.open', title: 'Query history', context: 'global', defaults: ['Ctrl+Alt+E'] },
+  {
+    id: 'search.everywhere',
+    title: 'Search everywhere (objects, consoles, actions)',
+    context: 'global',
+    defaults: ['Ctrl+Shift+A'],
+  },
+  {
+    id: 'search.objects',
+    title: 'Go to database object',
+    context: 'global',
+    defaults: ['Ctrl+N'],
+    mac: ['Ctrl+O'],
+  },
+  { id: 'nav.recent', title: 'Recent tabs', context: 'global', defaults: ['Ctrl+E'] },
+  {
+    id: 'nav.back',
+    title: 'Back',
+    context: 'global',
+    defaults: ['Ctrl+Alt+Left'],
+    mac: ['Ctrl+['],
+  },
+  {
+    id: 'nav.forward',
+    title: 'Forward',
+    context: 'global',
+    defaults: ['Ctrl+Alt+Right'],
+    mac: ['Ctrl+]'],
+  },
+  {
+    id: 'tab.reopenClosed',
+    title: 'Reopen closed tab',
+    context: 'global',
+    defaults: ['Ctrl+Shift+T'],
+  },
+  {
+    id: 'view.hideAllPanels',
+    title: 'Hide or show all panels',
+    context: 'global',
+    defaults: ['Ctrl+Shift+F12'],
+  },
   // Editor
   { id: 'editor.format', title: 'Format SQL', context: 'editor', defaults: ['Ctrl+Alt+L'] },
   { id: 'editor.nextError', title: 'Next error', context: 'editor', defaults: ['F8'] },
@@ -83,6 +123,18 @@ export const ACTIONS = [
     title: 'Previous error',
     context: 'editor',
     defaults: ['Shift+F8'],
+  },
+  {
+    id: 'editor.goToDdl',
+    title: 'Go to DDL of the object at the caret',
+    context: 'editor',
+    defaults: ['Ctrl+B'],
+  },
+  {
+    id: 'editor.revealInTree',
+    title: 'Reveal the object at the caret in the Database Explorer',
+    context: 'editor',
+    defaults: ['Alt+F1'],
   },
   // Result grid
   { id: 'grid.selectAll', title: 'Select all cells', context: 'grid', defaults: ['Ctrl+A'] },
@@ -147,6 +199,20 @@ export const ACTIONS = [
     title: 'Move data source down',
     context: 'explorer',
     defaults: ['Alt+Shift+Down'],
+  },
+  { id: 'explorer.goToDdl', title: 'Show DDL', context: 'explorer', defaults: ['Ctrl+B'] },
+  {
+    id: 'explorer.forceRefresh',
+    title: 'Force refresh (reload everything loaded)',
+    context: 'explorer',
+    defaults: ['Ctrl+Shift+F5'],
+  },
+  { id: 'explorer.collapseAll', title: 'Collapse all', context: 'explorer', defaults: ['Ctrl+-'] },
+  {
+    id: 'explorer.expandAll',
+    title: 'Expand all loaded levels below the selection',
+    context: 'explorer',
+    defaults: ['Ctrl+='],
   },
 ] as const satisfies readonly ActionDef[];
 

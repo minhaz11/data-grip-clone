@@ -68,14 +68,19 @@ export const DRAG_TYPE = 'application/x-quarry-data-source';
 interface Props {
   id: string;
   row: Row;
+  /** Selected: the current row or one of the marked rows. */
   selected: boolean;
   session: SessionState | undefined;
   highlight: string;
-  onSelect(): void;
+  onSelect(e?: React.MouseEvent): void;
   onToggle(): void;
   onActivate(): void;
   onContextMenu(x: number, y: number): void;
   onRetry(): void;
+  /** Stops waiting for a loading level. */
+  onCancel?(): void;
+  /** When a data source's tree was last loaded (epoch ms), for its tooltip. */
+  refreshedAt?: number;
   /** Shows an inline name editor; `onRename(null)` cancels. */
   renaming?: boolean;
   onRename?(name: string | null): void;
@@ -97,6 +102,8 @@ export function TreeRow({
   onActivate,
   onContextMenu,
   onRetry,
+  onCancel,
+  refreshedAt,
   renaming = false,
   onRename,
   scopeLabel,
@@ -123,6 +130,18 @@ export function TreeRow({
         {row.status === 'loading' && (
           <>
             <LoaderCircle size={12} className="animate-spin" aria-hidden /> Loading…
+            {onCancel && (
+              <button
+                type="button"
+                className="text-accent underline"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onCancel();
+                }}
+              >
+                Cancel
+              </button>
+            )}
           </>
         )}
         {row.status === 'empty' && <span className="italic">Empty</span>}
@@ -174,7 +193,7 @@ export function TreeRow({
     'aria-expanded': expandable ? row.expanded : undefined,
     'aria-posinset': row.posinset,
     'aria-setsize': row.setsize,
-    onClick: onSelect,
+    onClick: (e: React.MouseEvent) => onSelect(e),
     onDoubleClick: onActivate,
     onContextMenu: (e: React.MouseEvent) => {
       e.preventDefault();
@@ -251,7 +270,12 @@ export function TreeRow({
           paddingLeft: 3 + (row.level - 1) * INDENT,
           borderLeftColor: color ?? 'transparent',
         }}
-        title={`${c.name}: ${c.username}@${endpointLabel(c)}${c.sshProfileId ? ' (SSH tunnel)' : ''}`}
+        title={[
+          `${c.name}: ${c.username}@${endpointLabel(c)}${c.sshProfileId ? ' (SSH tunnel)' : ''}`,
+          refreshedAt && `Refreshed at ${new Date(refreshedAt).toLocaleTimeString()}`,
+        ]
+          .filter(Boolean)
+          .join('\n')}
       >
         {chevron}
         <span className="relative shrink-0">

@@ -14,6 +14,8 @@ pub enum ConsoleError {
     InvalidName(String),
     #[error("console \"{0}\" does not exist")]
     NotFound(String),
+    #[error("a console named \"{0}\" already exists")]
+    Exists(String),
     #[error("console is {0} bytes; the limit is {MAX_CONSOLE_BYTES}")]
     TooLarge(usize),
     #[error("console file error: {0}")]
@@ -100,6 +102,73 @@ impl Consoles {
             .collect();
         names.sort();
         Ok(names)
+    }
+
+    /// Renames a console file. Never replaces another console: the new name must be free.
+    pub fn rename(&self, from: &str, to: &str) -> Result<(), ConsoleError> {
+        let source = self.existing(from)?;
+        let target = self.path(to)?;
+        if from == to {
+            return Ok(());
+        }
+        // A hard link fails if the target exists, so this cannot clobber a console that appeared
+        // meanwhile; then the old name is removed. Case-only renames on case-insensitive file
+        // systems are the same file: a plain rename does those.
+        if from.to_lowercase() == to.to_lowercase() {
+            // On a case-sensitive file system both names may exist as separate consoles.
+            if self.list()?.iter().any(|n| n == to) {
+                return Err(ConsoleError::Exists(to.to_owned()));
+            }
+            fs::rename(&source, &target)?;
+            return Ok(());
+        }
+        match fs::hard_link(&source, &target) {
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                return Err(ConsoleError::Exists(to.to_owned()));
+            }
+            other => other?,
+        }
+        fs::remove_file(&source)?;
+        Ok(())
+    }
+
+    /// Copies a console under the lowest free name `<name> copy`, `<name> copy 2`, ...
+    pub fn duplicate(&self, name: &str) -> Result<String, ConsoleError> {
+        let text = self.read(name)?;
+        let base: String = name.chars().take(90).collect();
+        for n in 1.. {
+            let candidate = if n == 1 {
+                format!("{base} copy")
+            } else {
+                format!("{base} copy {n}")
+            };
+            if self.try_create(&candidate)? {
+                self.write(&candidate, &text)?;
+                return Ok(candidate);
+            }
+        }
+        unreachable!("an unbounded range always yields a free name")
+    }
+
+    /// Deletes a console file. Only regular files directly in the consoles directory are removed:
+    /// names are validated, and a symbolic link is refused rather than followed.
+    pub fn delete(&self, name: &str) -> Result<(), ConsoleError> {
+        let path = self.existing(name)?;
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    /// The path of an existing console that is a regular file (not a link).
+    fn existing(&self, name: &str) -> Result<PathBuf, ConsoleError> {
+        let path = self.path(name)?;
+        match fs::symlink_metadata(&path) {
+            Ok(m) if m.file_type().is_file() => Ok(path),
+            Ok(_) => Err(ConsoleError::NotFound(name.to_owned())),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                Err(ConsoleError::NotFound(name.to_owned()))
+            }
+            Err(e) => Err(e.into()),
+        }
     }
 
     fn try_create(&self, name: &str) -> Result<bool, ConsoleError> {
@@ -215,6 +284,60 @@ mod tests {
             );
         }
         assert!(validate("orders report v1.2-draft_3").is_ok());
+    }
+
+    #[test]
+    fn rename_never_replaces_another_console() {
+        let (_d, c) = consoles();
+        let a = c.create(Some("a")).expect("a");
+        c.write(&a, "select 'a'").expect("write");
+        c.create(Some("b")).expect("b");
+        assert!(matches!(c.rename("a", "b"), Err(ConsoleError::Exists(_))));
+        assert_eq!(c.read("a").expect("a kept"), "select 'a'");
+        c.rename("a", "report v2").expect("rename");
+        assert_eq!(c.read("report v2").expect("moved"), "select 'a'");
+        assert!(matches!(c.read("a"), Err(ConsoleError::NotFound(_))));
+        c.rename("report v2", "Report V2").expect("case only");
+        assert_eq!(c.read("Report V2").expect("case"), "select 'a'");
+        assert!(matches!(
+            c.rename("ghost", "x"),
+            Err(ConsoleError::NotFound(_))
+        ));
+        assert!(matches!(
+            c.rename("b", "../x"),
+            Err(ConsoleError::InvalidName(_))
+        ));
+    }
+
+    #[test]
+    fn duplicate_copies_text_under_a_free_name() {
+        let (_d, c) = consoles();
+        c.create(Some("q")).expect("q");
+        c.write("q", "select 1").expect("write");
+        assert_eq!(c.duplicate("q").expect("1"), "q copy");
+        assert_eq!(c.duplicate("q").expect("2"), "q copy 2");
+        assert_eq!(c.read("q copy 2").expect("read"), "select 1");
+    }
+
+    #[test]
+    fn delete_removes_only_regular_console_files() {
+        let (dir, c) = consoles();
+        c.create(Some("gone")).expect("create");
+        c.delete("gone").expect("delete");
+        assert!(matches!(c.delete("gone"), Err(ConsoleError::NotFound(_))));
+        assert!(matches!(
+            c.delete("../outside"),
+            Err(ConsoleError::InvalidName(_))
+        ));
+        // A link named like a console is refused, and its target survives.
+        #[cfg(unix)]
+        {
+            let outside = dir.path().join("outside.sql");
+            fs::write(&outside, "keep me").expect("outside");
+            std::os::unix::fs::symlink(&outside, c.dir().join("link.sql")).expect("symlink");
+            assert!(matches!(c.delete("link"), Err(ConsoleError::NotFound(_))));
+            assert_eq!(fs::read_to_string(&outside).expect("kept"), "keep me");
+        }
     }
 
     #[test]

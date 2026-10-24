@@ -80,6 +80,10 @@ pub enum MetadataRequest {
     /// `pg_catalog` ones (not type I/O, operator or internal-argument functions). Nodes carry
     /// the signature in `detail` and `key = "schema\u{1f}name(arguments)"`.
     Functions,
+    /// Every table, view, materialized view, foreign table, sequence and user routine in the
+    /// schema scope, flat, for the search palette. Nodes carry the schema in `detail`; routine
+    /// keys are `r:name(identity arguments)`, others `o:name`.
+    Catalog,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

@@ -40,6 +40,12 @@ export const MAX_PARAMS = 50;
 /** Column layouts kept per tab; the oldest go first. */
 export const MAX_GRID_LAYOUTS = 20;
 
+/** Closed tabs that Reopen closed tab can bring back, newest last. */
+export const MAX_CLOSED = 20;
+
+/** A closed tab as it can be reopened: its persisted state (console text stays in its file). */
+export type ClosedTab = WorkspaceState['tabs'][number];
+
 function sameObject(a: ObjectRef, b: ObjectRef): boolean {
   return a.schema === b.schema && a.name === b.name && a.objectType === b.objectType;
 }
@@ -47,6 +53,8 @@ function sameObject(a: ObjectRef, b: ObjectRef): boolean {
 interface WorkspaceStore {
   tabs: EditorTab[];
   activeTabId: string | null;
+  /** Recently closed tabs (this run only), newest last. */
+  closed: ClosedTab[];
   explorerCollapsed: boolean;
   bottomCollapsed: boolean;
   layout: Record<string, Record<string, number>>;
@@ -68,6 +76,18 @@ interface WorkspaceStore {
   /** Stores (or with `null` forgets) a result's column layout in its tab. */
   setGridLayout(id: string, signature: string, layout: GridLayout | null): void;
   closeTab(id: string): Promise<void>;
+  /** Reopens the most recently closed tab (a console reads its file again); its id, if any. */
+  reopenClosed(): Promise<string | null>;
+  /** Pins or unpins a tab; pinned tabs come first and are kept by Close others / Close all. */
+  setPinned(id: string, pinned: boolean): void;
+  /** Opens an existing console file in a tab (or activates the tab showing it). */
+  openConsole(name: string, sourceId?: string | null): Promise<string>;
+  /** Renames a console's file; the tab, its editor and undo history stay as they are. */
+  renameConsole(id: string, newName: string): Promise<void>;
+  /** Copies a console's file and opens the copy, bound to the same data source. */
+  duplicateConsole(id: string): Promise<string>;
+  /** Deletes a console's file and closes its tab without saving (the caller asks first). */
+  deleteConsole(id: string): Promise<void>;
   activate(id: string): void;
   cycleTab(delta: 1 | -1): void;
   updateText(id: string, text: string): void;
@@ -165,9 +185,19 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => {
     });
   }
 
+  function persisted(tab: EditorTab): ClosedTab | undefined {
+    return snapshot({ ...get(), tabs: [tab] }).tabs[0];
+  }
+
+  /** Appends a tab and activates it. */
+  function addTab(tab: EditorTab) {
+    set((s) => ({ tabs: [...s.tabs, tab], activeTabId: tab.id, caret: null }));
+  }
+
   return {
     tabs: [],
     activeTabId: null,
+    closed: [],
     explorerCollapsed: false,
     bottomCollapsed: false,
     layout: {},
@@ -183,23 +213,134 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => {
     async newConsole(sourceId = null) {
       const name = await backend.consoleCreate(null);
       const id = newId();
-      set((s) => ({
-        tabs: [...s.tabs, { id, console: name, sourceId, text: '', save: 'saved' }],
-        activeTabId: id,
-        caret: null,
-      }));
+      addTab({ id, console: name, sourceId, text: '', save: 'saved' });
       return id;
     },
 
     async closeTab(id) {
       await saveNow(id);
+      const tab = get().tabs.find((t) => t.id === id);
+      const closedState = tab ? persisted(tab) : undefined;
       set((s) => {
         const index = s.tabs.findIndex((t) => t.id === id);
-        if (index < 0) return s;
+        if (index < 0) {
+          return s;
+        }
         const tabs = s.tabs.filter((t) => t.id !== id);
         let activeTabId = s.activeTabId;
-        if (activeTabId === id) activeTabId = (tabs[index] ?? tabs[index - 1])?.id ?? null;
-        return { tabs, activeTabId, caret: activeTabId === s.activeTabId ? s.caret : null };
+        if (activeTabId === id) {
+          activeTabId = (tabs[index] ?? tabs[index - 1])?.id ?? null;
+        }
+        const closed = closedState ? [...s.closed, closedState].slice(-MAX_CLOSED) : s.closed;
+        return {
+          tabs,
+          activeTabId,
+          closed,
+          caret: activeTabId === s.activeTabId ? s.caret : null,
+        };
+      });
+    },
+
+    async reopenClosed() {
+      const closed = [...get().closed];
+      const last = closed.pop();
+      set({ closed });
+      if (!last || !('id' in last)) {
+        return null;
+      }
+      // A new id: the old one may still be referenced by stale results.
+      const id = newId();
+      if (
+        'kind' in last &&
+        (last.kind === 'object' || last.kind === 'ddl' || last.kind === 'data')
+      ) {
+        addTab({ ...last, id, pinned: false });
+        return id;
+      }
+      if ('console' in last) {
+        try {
+          const text = await backend.consoleRead(last.console);
+          addTab({ ...last, id, pinned: false, text, save: 'saved' });
+          return id;
+        } catch (e) {
+          set((s) => ({
+            notices: [
+              ...s.notices,
+              `Could not reopen console "${last.console}": ${toAppError(e).message}`,
+            ],
+          }));
+        }
+      }
+      return null;
+    },
+
+    setPinned(id, pinned) {
+      set((s) => {
+        const tabs = s.tabs.map((t) => (t.id === id ? { ...t, pinned } : t));
+        // Pinned tabs first, each group keeping its order.
+        return { tabs: [...tabs.filter((t) => t.pinned), ...tabs.filter((t) => !t.pinned)] };
+      });
+    },
+
+    async openConsole(name, sourceId = null) {
+      const existing = get().tabs.find((t) => isConsole(t) && t.console === name);
+      if (existing) {
+        get().activate(existing.id);
+        return existing.id;
+      }
+      const text = await backend.consoleRead(name);
+      const id = newId();
+      addTab({ id, console: name, sourceId, text, save: 'saved' });
+      return id;
+    },
+
+    async renameConsole(id, newName) {
+      const tab = get().tabs.find((t) => t.id === id);
+      if (!isConsole(tab) || tab.console === newName) {
+        return;
+      }
+      // Pending edits go to the old name first, so nothing typed is lost in the move.
+      await saveNow(id);
+      await backend.consoleRename(tab.console, newName);
+      patchTab(id, { console: newName });
+    },
+
+    async duplicateConsole(id) {
+      const tab = get().tabs.find((t) => t.id === id);
+      if (!isConsole(tab)) {
+        throw new Error('Only consoles can be duplicated.');
+      }
+      await saveNow(id);
+      const name = await backend.consoleDuplicate(tab.console);
+      const copy = newId();
+      addTab({
+        id: copy,
+        console: name,
+        sourceId: tab.sourceId,
+        schema: tab.schema,
+        text: tab.text,
+        save: 'saved',
+      });
+      return copy;
+    },
+
+    async deleteConsole(id) {
+      const tab = get().tabs.find((t) => t.id === id);
+      if (!isConsole(tab)) {
+        return;
+      }
+      // No save: the file is going away.
+      clearTimeout(timers.get(id));
+      timers.delete(id);
+      await backend.consoleDelete(tab.console);
+      set((s) => {
+        const index = s.tabs.findIndex((t) => t.id === id);
+        const tabs = s.tabs.filter((t) => t.id !== id);
+        const activeTabId =
+          s.activeTabId === id ? ((tabs[index] ?? tabs[index - 1])?.id ?? null) : s.activeTabId;
+        // A deleted console cannot be reopened.
+        const closed = s.closed.filter((c) => !('console' in c) || c.console !== tab.console);
+        return { tabs, activeTabId, closed };
       });
     },
 
@@ -350,19 +491,27 @@ export function snapshot(
             id: t.id,
             console: t.console,
             sourceId: t.sourceId,
+            ...(t.pinned ? { pinned: true } : {}),
             ...(t.ownSession ? { ownSession: t.ownSession } : {}),
             ...(t.schema ? { schema: t.schema } : {}),
             ...layouts(t),
             ...(t.params && Object.keys(t.params).length > 0 ? { params: t.params } : {}),
           }
         : t.kind === 'object'
-          ? { id: t.id, kind: 'object' as const, sourceId: t.sourceId, object: t.object }
+          ? {
+              id: t.id,
+              kind: 'object' as const,
+              sourceId: t.sourceId,
+              object: t.object,
+              ...(t.pinned ? { pinned: true } : {}),
+            }
           : t.kind === 'data'
             ? {
                 id: t.id,
                 kind: 'data' as const,
                 sourceId: t.sourceId,
                 object: t.object,
+                ...(t.pinned ? { pinned: true } : {}),
                 ...(t.where ? { where: t.where } : {}),
                 ...(t.orderBy ? { orderBy: t.orderBy } : {}),
                 ...layouts(t),
@@ -373,6 +522,7 @@ export function snapshot(
                 sourceId: t.sourceId,
                 objects: t.objects,
                 title: t.title,
+                ...(t.pinned ? { pinned: true } : {}),
               },
     ),
     activeTabId: s.activeTabId,

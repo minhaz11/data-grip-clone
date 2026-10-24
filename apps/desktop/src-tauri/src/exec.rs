@@ -158,6 +158,11 @@ pub(crate) fn unix_millis() -> i64 {
 }
 
 impl Jobs {
+    /// Whether a query job is running in session `key`.
+    pub async fn running_in(&self, key: &SessionKey) -> bool {
+        self.running.lock().await.values().any(|j| &j.key == key)
+    }
+
     async fn start(
         self: &Arc<Self>,
         app: &AppHandle,

@@ -208,6 +208,32 @@ const FUNCTIONS: &str = concat!(
     LIMIT 5000"
 );
 
+/// Names for the search palette: relations, sequences and user routines (not from extensions).
+const CATALOG: &str = concat!(
+    "
+    SELECT n.nspname, c.relname, c.relkind::text, NULL::text
+    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f', 'S') AND NOT c.relispartition
+      AND n.nspname <> 'information_schema' AND n.nspname !~ '^pg_'
+      AND has_schema_privilege(n.oid, 'USAGE')
+      AND ",
+    in_scope!(),
+    "
+    UNION ALL
+    SELECT n.nspname, p.proname, 'fn', pg_get_function_identity_arguments(p.oid)
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname <> 'information_schema' AND n.nspname !~ '^pg_'
+      AND has_schema_privilege(n.oid, 'USAGE')
+      AND NOT EXISTS (SELECT 1 FROM pg_depend d
+                      WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid
+                        AND d.deptype = 'e')
+      AND ",
+    in_scope!(),
+    "
+    ORDER BY 1, 2
+    LIMIT 50000"
+);
+
 const INDEXES: &str = "
     SELECT i.relname, pg_get_indexdef(x.indexrelid), x.indisunique, x.indisprimary
     FROM pg_index x
@@ -674,6 +700,26 @@ pub async fn load(
                     _ => MetaKind::Table,
                 };
                 MetaNode::new(format!("{schema}.{name}"), kind, name).detail(Some(schema))
+            })
+            .collect(),
+
+        Req::Catalog => client
+            .query(CATALOG, &[names, patterns])
+            .await?
+            .iter()
+            .map(|r| {
+                let schema: String = r.get(0);
+                let name: String = r.get(1);
+                let kind: String = r.get(2);
+                let args: Option<String> = r.get(3);
+                let (key, meta_kind) = match (kind.as_str(), args) {
+                    ("fn", Some(args)) => (format!("r:{name}({args})"), MetaKind::Routine),
+                    ("v", _) => (format!("o:{name}"), MetaKind::View),
+                    ("m", _) => (format!("o:{name}"), MetaKind::MaterializedView),
+                    ("S", _) => (format!("q:{name}"), MetaKind::Sequence),
+                    _ => (format!("o:{name}"), MetaKind::Table),
+                };
+                MetaNode::new(format!("{schema}\u{1f}{key}"), meta_kind, name).detail(Some(schema))
             })
             .collect(),
 

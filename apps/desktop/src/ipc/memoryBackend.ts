@@ -322,6 +322,38 @@ export function createMemoryBackend(): Backend {
     },
     consoleRead: async (name) =>
       consoles.get(name) ?? fail('not_found', `console "${name}" does not exist`),
+    consoleRename: async (name, newName) => {
+      if (!consoles.has(name)) {
+        return fail('not_found', `console "${name}" does not exist`);
+      }
+      if (name !== newName && consoles.has(newName)) {
+        return fail('invalid', `a console named "${newName}" already exists`);
+      }
+      const text = consoles.get(name) ?? '';
+      consoles.delete(name);
+      consoles.set(newName, text);
+      return null;
+    },
+    consoleDuplicate: async (name) => {
+      const text = consoles.get(name);
+      if (text === undefined) {
+        return fail('not_found', `console "${name}" does not exist`);
+      }
+      let copy = `${name} copy`;
+      for (let n = 2; consoles.has(copy); n++) {
+        copy = `${name} copy ${n}`;
+      }
+      consoles.set(copy, text);
+      return copy;
+    },
+    consoleDelete: async (name) => {
+      if (!consoles.delete(name)) {
+        return fail('not_found', `console "${name}" does not exist`);
+      }
+      return null;
+    },
+    consolesDir: async () => '(browser memory)',
+    metadataCancel: async () => false,
     consoleWrite: async (name, text) => {
       if (!consoles.has(name)) {
         return fail('not_found', `console "${name}" does not exist`);

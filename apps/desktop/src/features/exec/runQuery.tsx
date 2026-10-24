@@ -1,6 +1,8 @@
 import { isConsole, useWorkspace } from '../../app/workspaceStore';
 import { askConfirm, askCustom } from '../../app/dialogs';
 import { connectSource } from '../connections/connectFlow';
+import { askAttach } from '../editor/ConsoleDialogs';
+import { changeSource } from './txGuards';
 import { useSettings } from '../../app/settingsStore';
 import type { Cell, Settings, StatementRequest } from '../../ipc/types';
 import { blockedOnReadOnly, classify, modifies } from '../../lib/sql/classify';
@@ -87,9 +89,28 @@ export async function runFromEditor(mode: RunMode): Promise<void> {
 
   const source = useConnections.getState().items.find((s) => s.id === tab.sourceId);
   if (!source) {
-    exec.reject(tab.id, '', '', 'Choose a data source for this console in the toolbar first.');
-    ws.setBottomCollapsed(false);
-    return;
+    // A scratch console: attach it to a data source first.
+    const all = useConnections.getState().items;
+    if (all.length === 0) {
+      exec.reject(
+        tab.id,
+        '',
+        '',
+        'Choose a data source for this console: create one first (New data source).',
+      );
+      ws.setBottomCollapsed(false);
+      return;
+    }
+    const picked = await askAttach(tab.console, all);
+    if (!picked) {
+      return;
+    }
+    await changeSource(tab.id, picked);
+    const attached = useWorkspace.getState().tabs.find((t) => t.id === tab.id);
+    if (!isConsole(attached) || attached.sourceId !== picked) {
+      return;
+    }
+    return runFromEditor(mode);
   }
 
   const plan = planRun(

@@ -11,6 +11,20 @@ const relations = new Map<string, Promise<MetaNode[]>>();
 const columns = new Map<string, Promise<MetaNode[]>>();
 const functions = new Map<string, Promise<MetaNode[]>>();
 const links = new Map<string, Promise<ForeignKeyDetail[]>>();
+const objects = new Map<string, Promise<MetaNode[]>>();
+
+/** Every relation, sequence and user routine of a data source, for the search palette. */
+export function catalogObjects(sourceId: string): Promise<MetaNode[]> {
+  let p = objects.get(sourceId);
+  if (!p) {
+    p = backend.metadataChildren(sourceId, { level: 'catalog' }).catch(() => {
+      objects.delete(sourceId);
+      return [];
+    });
+    objects.set(sourceId, p);
+  }
+  return p;
+}
 
 export function catalogRelations(sourceId: string): Promise<MetaNode[]> {
   let p = relations.get(sourceId);
@@ -76,7 +90,7 @@ export function catalogLinks(
 }
 
 export function resetCatalog(sourceId?: string) {
-  for (const map of [relations, columns, functions, links] as Map<string, unknown>[]) {
+  for (const map of [relations, columns, functions, links, objects] as Map<string, unknown>[]) {
     for (const k of [...map.keys()])
       if (!sourceId || k === sourceId || k.startsWith(`${sourceId}\u001f`)) map.delete(k);
   }

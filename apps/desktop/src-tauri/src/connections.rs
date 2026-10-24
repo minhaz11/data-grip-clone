@@ -386,6 +386,24 @@ pub async fn metadata_children(
     sessions.metadata(&id, &request).await
 }
 
+/// Cancels a slow explorer load by cancelling what the data source's shared session runs. Refused
+/// (`false`) while a statement runs there, so a user's query is never cancelled by accident; the
+/// UI then just stops waiting.
+#[tauri::command]
+pub async fn metadata_cancel(
+    sessions: Live<'_>,
+    jobs: State<'_, Arc<crate::exec::Jobs>>,
+    id: String,
+) -> Result<bool, AppError> {
+    let key = crate::sessions::SessionKey::shared(&id);
+    if jobs.running_in(&key).await {
+        return Ok(false);
+    }
+    sessions.get(&key).await?.cancel().await?;
+    tracing::info!(source = %id, "metadata load cancelled");
+    Ok(true)
+}
+
 /// Everything the table viewer shows for one object; `None` if it no longer exists.
 #[tauri::command]
 pub async fn object_details(
