@@ -3,11 +3,19 @@ import EditorWorker from 'monaco-esm/editor/editor.worker.js?worker';
 import * as monaco from './monaco/entry';
 import { completionContextAt, tablesInStatement } from '../../lib/sql/completionContext';
 import { formatSql } from '../../lib/sql/format';
-import { useWorkspace } from '../../app/workspaceStore';
+import { isConsole, useWorkspace } from '../../app/workspaceStore';
 import { useSessions } from '../connections/sessionsStore';
-import { catalogColumns, catalogRelations } from './catalog';
+import {
+  catalogColumns,
+  catalogFunctions,
+  catalogLinks,
+  catalogRelations,
+  searchPathOf,
+} from './catalog';
 import { setActiveEditor, type SqlEditorProps } from './editorHandle';
 import { buildSuggestions, type SuggestionKind } from './suggestions';
+import { activeSnippets } from '../snippets/snippetsStore';
+import { snippetText } from '../snippets/text';
 
 // Workers are bundled locally (no CDN; the app CSP only allows 'self').
 self.MonacoEnvironment = { getWorker: () => new EditorWorker() };
@@ -15,17 +23,25 @@ self.MonacoEnvironment = { getWorker: () => new EditorWorker() };
 const css = (name: string) =>
   getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 function defineThemes() {
-  // Match the app's surface colors; token colors come from Monaco's built-in themes.
+  // Match the app's surface colors; token colors come from Monaco's built-in themes, except the
+  // ones that fall below 4.5:1 contrast (WCAG AA) on our backgrounds, current line included.
   monaco.editor.defineTheme('quarry-light', {
     base: 'vs',
     inherit: true,
-    rules: [],
+    rules: [
+      { token: 'string.sql', foreground: 'b31d1d' }, // was FF0000 (4.0:1)
+      { token: 'operator.sql', foreground: '56626e' }, // was 778899 (3.6:1)
+    ],
     colors: { 'editor.background': '#ffffff' },
   });
   monaco.editor.defineTheme('quarry-dark', {
     base: 'vs-dark',
     inherit: true,
-    rules: [],
+    rules: [
+      { token: 'string.sql', foreground: 'ff8080' }, // was FF0000 (4.1:1)
+      { token: 'comment', foreground: '7fb069' }, // was 608B4E (4.2:1)
+      { token: 'variable.predefined', foreground: '8aa8e8' }, // was 4864AA (2.9:1)
+    ],
     colors: { 'editor.background': '#1e1f22' },
   });
 }
@@ -44,6 +60,10 @@ function modelFor(tabId: string, name: string, value: string) {
       'pgsql',
       monaco.Uri.parse(`inmemory://console/${tabId}/${encodeURIComponent(name)}.sql`),
     );
+    // New text uses LF; a file that already uses CRLF keeps it.
+    if (!value.includes('\r\n')) {
+      model.setEOL(monaco.editor.EndOfLineSequence.LF);
+    }
     models.set(tabId, model);
     tabOfModel.set(model, tabId);
   }
@@ -69,6 +89,8 @@ const KIND: Record<SuggestionKind, monaco.languages.CompletionItemKind> = {
   table: monaco.languages.CompletionItemKind.Struct,
   view: monaco.languages.CompletionItemKind.Interface,
   column: monaco.languages.CompletionItemKind.Field,
+  function: monaco.languages.CompletionItemKind.Function,
+  join: monaco.languages.CompletionItemKind.Reference,
 };
 
 monaco.languages.registerCompletionItemProvider('pgsql', {
@@ -80,11 +102,18 @@ monaco.languages.registerCompletionItemProvider('pgsql', {
     const sourceId = tab?.sourceId ?? null;
     // Completion never connects on its own; without a live session it offers keywords only.
     const live = sourceId !== null && useSessions.getState().byId[sourceId]?.state === 'connected';
-    const relations = live ? await catalogRelations(sourceId) : [];
+    const [relations, functions] = live
+      ? await Promise.all([catalogRelations(sourceId), catalogFunctions(sourceId)])
+      : [[], []];
     const items = await buildSuggestions(context, tablesInStatement(statement), {
       relations,
+      functions,
       columnsOf: (r) =>
         live && r.detail ? catalogColumns(sourceId, r.detail, r.name) : Promise.resolve([]),
+      linksOf: (r) =>
+        live && r.detail ? catalogLinks(sourceId, r.detail, r.name) : Promise.resolve([]),
+      // Unqualified names resolve through the console's schema first (REQ-EDIT-11).
+      searchPath: searchPathOf(isConsole(tab) ? tab.schema : null),
     });
     const word = model.getWordUntilPosition(position);
     const range = new monaco.Range(
@@ -93,15 +122,43 @@ monaco.languages.registerCompletionItemProvider('pgsql', {
       position.lineNumber,
       word.endColumn,
     );
+    // Snippets whose abbreviation starts with the typed word, where a statement or clause can
+    // start (fuzzy matches on short abbreviations are mostly noise).
+    const typed = word.word.toLowerCase();
+    const snippets =
+      context.kind === 'general' && typed
+        ? activeSnippets().filter((s) => s.abbreviation.toLowerCase().startsWith(typed))
+        : [];
+    const snippetItems = snippets.map((s, i) => ({
+      label: { label: s.abbreviation, description: s.description },
+      kind: monaco.languages.CompletionItemKind.Snippet,
+      insertText: s.body,
+      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      detail: `Snippet: ${s.description}`,
+      documentation: { value: ['```sql', snippetText(s.body).text, '```'].join('\n') },
+      sortText: `!${String(i).padStart(5, '0')}`,
+      filterText: word.word,
+      range,
+    }));
+    // The list is already filtered and ranked (fuzzy, REQ-EDIT-07): Monaco keeps that order,
+    // matches everything against the typed word, and asks again as typing continues.
     return {
-      suggestions: items.map((s) => ({
-        label: s.label,
-        kind: KIND[s.kind],
-        insertText: s.insertText,
-        detail: s.detail,
-        sortText: `${s.rank}${s.label.toLowerCase()}`,
-        range,
-      })),
+      incomplete: true,
+      suggestions: [
+        ...snippetItems,
+        ...items.map((s, i) => ({
+          label: s.label,
+          kind: KIND[s.kind],
+          insertText: s.insertText,
+          insertTextRules: s.snippet
+            ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
+            : undefined,
+          detail: s.detail,
+          sortText: String(i).padStart(6, '0'),
+          filterText: word.word || s.label,
+          range,
+        })),
+      ],
     };
   },
 });
@@ -115,13 +172,14 @@ export default function MonacoSqlEditor({
   onChange,
   onCaret,
   onFormatError,
+  readOnly = false,
 }: SqlEditorProps) {
   const host = useRef<HTMLDivElement>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
-  const callbacks = useRef({ onChange, onCaret, onFormatError });
+  const callbacks = useRef({ onChange, onCaret, onFormatError, readOnly });
   // Keep the latest callbacks without recreating the editor (refs must not be written during render).
   useLayoutEffect(() => {
-    callbacks.current = { onChange, onCaret, onFormatError };
+    callbacks.current = { onChange, onCaret, onFormatError, readOnly };
   });
 
   // Create the editor once.
@@ -135,6 +193,9 @@ export default function MonacoSqlEditor({
       tabSize: 2,
       wordBasedSuggestions: 'off',
       quickSuggestions: { other: true, comments: false, strings: false },
+      // While a snippet is being filled in, Tab moves between its stops instead of accepting a
+      // suggestion that typing opened.
+      suggest: { snippetsPreventQuickSuggestions: true },
       renderLineHighlight: 'line',
       fixedOverflowWidgets: true,
       ariaLabel: 'SQL editor',
@@ -148,6 +209,8 @@ export default function MonacoSqlEditor({
     ];
 
     const format = () => {
+      // executeEdits would still change a read-only model.
+      if (callbacks.current.readOnly) return;
       const model = editor.getModel();
       const selection = editor.getSelection();
       if (!model || !selection) return;
@@ -173,6 +236,57 @@ export default function MonacoSqlEditor({
         return { start: toOffset(s.getStartPosition()), end: toOffset(s.getEndPosition()) };
       },
       getCaret: () => toOffset(editor.getPosition() ?? { lineNumber: 1, column: 1 }),
+      insertText: (text) => {
+        const selection = editor.getSelection();
+        if (!selection) {
+          return;
+        }
+        editor.executeEdits('quarry-insert', [{ range: selection, text, forceMoveMarkers: true }]);
+        editor.pushUndoStop();
+        editor.focus();
+      },
+      replaceRange: (start, end, text) => {
+        const m = model();
+        if (!m || callbacks.current.readOnly) {
+          return;
+        }
+        const range = monaco.Range.fromPositions(m.getPositionAt(start), m.getPositionAt(end));
+        editor.pushUndoStop();
+        editor.executeEdits('quarry-replace', [{ range, text, forceMoveMarkers: true }]);
+        editor.pushUndoStop();
+        editor.setPosition(m.getPositionAt(start + text.length));
+        editor.focus();
+      },
+      expandSnippet: (lookup) => {
+        const m = model();
+        const position = editor.getPosition();
+        const selection = editor.getSelection();
+        if (!m || !position || !selection?.isEmpty() || callbacks.current.readOnly) {
+          return false;
+        }
+        const word = m.getWordUntilPosition(position);
+        const body = word.word ? lookup(word.word) : undefined;
+        if (body === undefined || word.endColumn !== position.column) {
+          return false;
+        }
+        editor.setSelection(
+          new monaco.Selection(
+            position.lineNumber,
+            word.startColumn,
+            position.lineNumber,
+            word.endColumn,
+          ),
+        );
+        // The snippet controller links the tab stops: Tab moves through them, Escape leaves.
+        const controller = editor.getContribution('snippetController2') as {
+          insert(template: string): void;
+        } | null;
+        if (!controller) {
+          return false;
+        }
+        controller.insert(body);
+        return true;
+      },
       revealOffset: (offset) => {
         const m = model();
         if (!m) return;
@@ -200,6 +314,20 @@ export default function MonacoSqlEditor({
       clearMarkers: () => {
         const m = model();
         if (m) monaco.editor.setModelMarkers(m, 'quarry-exec', []);
+      },
+      errors: () => {
+        const m = model();
+        if (!m) {
+          return [];
+        }
+        return monaco.editor
+          .getModelMarkers({ owner: 'quarry-exec', resource: m.uri })
+          .map((k) => ({
+            start: m.getOffsetAt({ lineNumber: k.startLineNumber, column: k.startColumn }),
+            end: m.getOffsetAt({ lineNumber: k.endLineNumber, column: k.endColumn }),
+            message: k.message,
+          }))
+          .sort((a, b) => a.start - b.start);
       },
     });
 
@@ -235,6 +363,10 @@ export default function MonacoSqlEditor({
   }, [tabId, value]);
 
   useEffect(() => editorRef.current?.updateOptions({ fontSize }), [fontSize]);
+  useEffect(
+    () => editorRef.current?.updateOptions({ readOnly, domReadOnly: readOnly }),
+    [readOnly],
+  );
   useEffect(
     () => monaco.editor.setTheme(theme === 'dark' ? 'quarry-dark' : 'quarry-light'),
     [theme],

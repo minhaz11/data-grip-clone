@@ -1,7 +1,9 @@
-import { useWorkspace } from './workspaceStore';
+import { isConsole, useWorkspace } from './workspaceStore';
 import { useConnections } from '../features/connections/connectionsStore';
 import { effectiveColor } from '../features/connections/model';
 import { useSessions, type SessionState } from '../features/connections/sessionsStore';
+import { keyOf, sessionOf, useTx } from '../features/exec/txStore';
+import { NotificationButton } from '../features/notifications/notifications';
 
 function sessionText(s: SessionState | undefined): string {
   switch (s?.state) {
@@ -24,6 +26,9 @@ export function StatusBar({ theme }: { theme: 'light' | 'dark' }) {
   const selected = useConnections((s) => s.items.find((c) => c.id === s.selectedId));
   const session = useSessions((s) => (selected ? s.byId[selected.id] : undefined));
   const color = selected ? effectiveColor(selected) : null;
+  const activeTab = useWorkspace((s) => s.tabs.find((t) => t.id === s.activeTabId));
+  const txSession = isConsole(activeTab) ? sessionOf(activeTab) : null;
+  const tx = useTx((s) => (txSession ? s.states[keyOf(txSession)] : undefined));
 
   return (
     <footer
@@ -46,13 +51,34 @@ export function StatusBar({ theme }: { theme: 'light' | 'dark' }) {
       ) : (
         <span>No data source selected</span>
       )}
+      {tx?.open && (
+        <span aria-label="Transaction state">
+          {tx.status === 'active'
+            ? 'Transaction open'
+            : tx.status === 'failed'
+              ? 'Transaction failed'
+              : tx.settings.mode === 'manual'
+                ? 'Manual commit'
+                : 'Auto-commit'}
+          {isConsole(activeTab) && activeTab.ownSession ? ' · own session' : ''}
+        </span>
+      )}
+      {isConsole(activeTab) && activeTab.sourceId && (
+        <span aria-label="Current schema">Schema: {activeTab.schema ?? 'server default'}</span>
+      )}
       <div className="flex-1" />
+      {isConsole(activeTab) && (
+        <span aria-label="Encoding" title="Consoles are saved as UTF-8">
+          UTF-8
+        </span>
+      )}
       {hasActiveTab && caret && (
         <span aria-label="Cursor position">
           Ln {caret.line}, Col {caret.column}
         </span>
       )}
       <span>{theme === 'dark' ? 'Dark' : 'Light'}</span>
+      <NotificationButton />
     </footer>
   );
 }

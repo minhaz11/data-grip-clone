@@ -8,6 +8,7 @@ const profile = (id: string, name: string): ConnectionProfile => ({
   id,
   name,
   passwordSaved: false,
+  sortOrder: 0,
   createdAt: '',
   updatedAt: '',
 });
@@ -51,7 +52,13 @@ describe('flattenTree', () => {
       rows.map((r) => [
         r.type,
         r.level,
-        r.type === 'status' ? r.status : r.type === 'node' ? r.node.name : r.profile.name,
+        r.type === 'status'
+          ? r.status
+          : r.type === 'node'
+            ? r.node.name
+            : r.type === 'source'
+              ? r.profile.name
+              : r.folder.name,
       ]),
     ).toEqual([
       ['source', 1, 'Alpha'],
@@ -75,7 +82,13 @@ describe('flattenTree', () => {
     const rows = flattenTree([a, b], children, {}, 'EMAIL');
     expect(
       rows.map((r) =>
-        r.type === 'node' ? r.node.name : r.type === 'source' ? r.profile.name : r.status,
+        r.type === 'node'
+          ? r.node.name
+          : r.type === 'source'
+            ? r.profile.name
+            : r.type === 'folder'
+              ? r.folder.name
+              : r.status,
       ),
     ).toEqual(['Alpha', 'shop', 'customer_email']);
     expect(rows[1]).toMatchObject({ expanded: true, posinset: 1, setsize: 1 });

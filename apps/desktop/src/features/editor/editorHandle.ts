@@ -6,11 +6,23 @@ export interface EditorHandle {
   /** Selection as `[start, end)` offsets into the text; empty when start === end. */
   getSelection(): { start: number; end: number };
   getCaret(): number;
+  /** Replaces the selection (or inserts at the caret) with `text`, undoably, and focuses the editor. */
+  insertText(text: string): void;
+  /** Replaces `[start, end)` with `text`, undoably, puts the caret after it and focuses. */
+  replaceRange(start: number, end: number, text: string): void;
   /** Moves the caret to `offset`, scrolls it into view and focuses the editor. */
   revealOffset(offset: number): void;
   /** Underlines `[start, end)` as an error with `message`; replaces any previous marker. */
   markError(start: number, end: number, message: string): void;
   clearMarkers(): void;
+  /** Error markers in the text, in order. */
+  errors(): { start: number; end: number; message: string }[];
+  /**
+   * Replaces the word before the caret with the snippet body `lookup` returns for it and moves
+   * to its first tab stop. False (nothing changed) when there is a selection, no word, or no
+   * snippet for it.
+   */
+  expandSnippet(lookup: (word: string) => string | undefined): boolean;
 }
 
 let active: EditorHandle | null = null;
@@ -34,4 +46,28 @@ export interface SqlEditorProps {
   onCaret(caret: { line: number; column: number } | null): void;
   /** Formatting failed (e.g. text the formatter cannot parse). */
   onFormatError(message: string): void;
+  /** Shows text that cannot be edited (generated DDL); Format does nothing. */
+  readOnly?: boolean;
+}
+
+/**
+ * Moves the caret to the next (or previous) error marker after (or before) it, wrapping around
+ * (REQ-ERR-02). Returns the marker's message, or `null` when there are no errors.
+ */
+export function goToError(direction: 1 | -1): string | null {
+  const editor = active;
+  const errors = editor?.errors() ?? [];
+  if (!editor || errors.length === 0) {
+    return null;
+  }
+  const caret = editor.getCaret();
+  const target =
+    direction === 1
+      ? (errors.find((e) => e.start > caret) ?? errors[0])
+      : ([...errors].reverse().find((e) => e.start < caret) ?? errors[errors.length - 1]);
+  if (!target) {
+    return null;
+  }
+  editor.revealOffset(target.start);
+  return target.message;
 }

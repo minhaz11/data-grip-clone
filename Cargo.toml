@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/store", "crates/secrets", "crates/connections", "crates/db-core", "crates/db-postgres", "crates/workspace", "crates/io", "apps/desktop/src-tauri"]
+members = ["crates/store", "crates/secrets", "crates/connections", "crates/db-core", "crates/db-postgres", "crates/workspace", "crates/io", "crates/logging", "crates/ssh", "crates/ai-core", "crates/ai-anthropic", "apps/desktop/src-tauri"]
 
 [workspace.package]
 edition = "2024"
@@ -15,11 +15,17 @@ quarry-db-core = { path = "crates/db-core" }
 quarry-db-postgres = { path = "crates/db-postgres" }
 quarry-workspace = { path = "crates/workspace" }
 quarry-io = { path = "crates/io" }
+quarry-logging = { path = "crates/logging" }
+quarry-ssh = { path = "crates/ssh" }
+quarry-ai-core = { path = "crates/ai-core" }
+quarry-ai-anthropic = { path = "crates/ai-anthropic" }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 thiserror = "2.0.21"
 tempfile = "3.27.0"
+ts-rs = "12.0.1"
+tracing = "0.1.44"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

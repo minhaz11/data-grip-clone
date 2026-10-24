@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ddl-save"
+description = "Enables the ddl_save command without any pre-configured scope."
+commands.allow = ["ddl_save"]
+
+[[permission]]
+identifier = "deny-ddl-save"
+description = "Denies the ddl_save command without any pre-configured scope."
+commands.deny = ["ddl_save"]

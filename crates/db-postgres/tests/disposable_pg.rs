@@ -42,6 +42,7 @@ fn params() -> ConnectParams {
         connect_timeout: Duration::from_secs(5),
         read_only: false,
         application_name: "quarry-it".into(),
+        options: Default::default(),
     }
 }
 
@@ -205,6 +206,7 @@ async fn session_reports_deliberate_and_unexpected_close() {
     let app = "quarry-it-lifecycle";
     let p = ConnectParams {
         application_name: app.into(),
+        options: Default::default(),
         ..params()
     };
     let session = PostgresAdapter

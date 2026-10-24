@@ -87,3 +87,8 @@ export function statementAt(text: string, offset: number): Span | null {
   }
   return best ?? spans[0] ?? null;
 }
+
+/** The statement containing the caret (up to just after its `;`), or `null` when it is outside all. */
+export function statementContaining(text: string, offset: number): Span | null {
+  return splitStatements(text).find((s) => offset >= s.start && offset <= s.end + 1) ?? null;
+}

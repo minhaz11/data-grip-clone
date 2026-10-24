@@ -62,7 +62,7 @@ describe('completion context', () => {
   it('detects relations, members and general positions', () => {
     expect(at('select * from |')).toEqual({ kind: 'relations', word: '' });
     expect(at('select * from ord|')).toEqual({ kind: 'relations', word: 'ord' });
-    expect(at('select * from a join |')).toEqual({ kind: 'relations', word: '' });
+    expect(at('select * from a join |')).toEqual({ kind: 'relations', word: '', join: true });
     expect(at('select o.| from orders o')).toEqual({ kind: 'members', qualifier: 'o', word: '' });
     expect(at('select * from shop.cu|')).toEqual({
       kind: 'members',

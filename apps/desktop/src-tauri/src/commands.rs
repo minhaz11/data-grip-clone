@@ -6,7 +6,7 @@ use tauri::State;
 use crate::error::AppError;
 
 /// Runs a store call on the blocking pool so SQLite I/O never stalls the main (UI event) thread.
-async fn with_store<T, F>(store: &Arc<Store>, f: F) -> Result<T, AppError>
+pub(crate) async fn with_store<T, F>(store: &Arc<Store>, f: F) -> Result<T, AppError>
 where
     T: Send + 'static,
     F: FnOnce(&Store) -> Result<T, StoreError> + Send + 'static,
@@ -28,7 +28,13 @@ pub async fn settings_set(
     store: State<'_, Arc<Store>>,
     settings: Settings,
 ) -> Result<Settings, AppError> {
-    with_store(&store, move |s| s.set_settings(&settings)).await
+    with_store(&store, move |s| {
+        let saved = s.set_settings(&settings)?;
+        // A smaller history limit applies at once, not only after the next run.
+        s.prune_history(saved.history_retention(), crate::exec::unix_millis())?;
+        Ok(saved)
+    })
+    .await
 }
 
 #[tauri::command]

@@ -1,5 +1,6 @@
 use std::sync::Mutex;
 
+use quarry_db_core::{Isolation, TxMode};
 use quarry_store::{Engine, Environment, SslMode};
 
 use super::*;
@@ -53,6 +54,10 @@ fn draft(name: &str, mode: SaveMode) -> ConnectionDraft {
         environment: Environment::Development,
         color: None,
         save_mode: mode,
+        tx_mode: TxMode::Auto,
+        isolation: Isolation::ReadCommitted,
+        history_enabled: true,
+        ..Default::default()
     }
 }
 
@@ -310,4 +315,129 @@ fn connect_params_map_profile_fields() {
     let mut bad = draft("A", SaveMode::Never);
     bad.port = 0;
     assert!(connect_params(bad, None).is_err());
+}
+
+fn ssh_draft(auth: SshAuthMethod, mode: SaveMode) -> SshProfileDraft {
+    SshProfileDraft {
+        name: "Bastion".into(),
+        host: "bastion.example.test".into(),
+        port: 22,
+        username: "deploy".into(),
+        auth,
+        key_file: Some("/home/me/.ssh/id_ed25519".into()),
+        save_mode: mode,
+    }
+}
+
+#[test]
+fn ssh_secrets_live_in_the_keyring_under_their_own_accounts() {
+    let (m, keyring, _) = setup();
+    let p = m
+        .create_ssh_profile(
+            ssh_draft(SshAuthMethod::Password, SaveMode::Forever),
+            Some(SecretString::new("ssh-pw".into())),
+        )
+        .expect("create");
+    assert!(p.secret_saved);
+    let account = format!("ssh:{}:password", p.id);
+    assert_eq!(
+        keyring
+            .get(&account)
+            .expect("get")
+            .map(|s| s.expose().to_owned()),
+        Some("ssh-pw".into())
+    );
+    assert_eq!(
+        m.ssh_secret(&p, None)
+            .expect("secret")
+            .map(|s| s.expose().to_owned()),
+        Some("ssh-pw".into())
+    );
+
+    // Switching to key auth drops the password; the passphrase gets its own account.
+    let key = m
+        .update_ssh_profile(
+            &p.id,
+            ssh_draft(SshAuthMethod::Key, SaveMode::Forever),
+            PasswordChange::Keep,
+        )
+        .expect("to key");
+    assert!(!key.secret_saved);
+    assert_eq!(keyring.get(&account).expect("get"), None);
+    let key = m
+        .update_ssh_profile(
+            &p.id,
+            ssh_draft(SshAuthMethod::Key, SaveMode::Forever),
+            PasswordChange::Set(SecretString::new("phrase".into())),
+        )
+        .expect("passphrase");
+    assert!(key.secret_saved);
+    assert!(
+        keyring
+            .get(&format!("ssh:{}:passphrase", p.id))
+            .expect("get")
+            .is_some()
+    );
+
+    // Until restart: memory only, never the keyring.
+    let session = m
+        .update_ssh_profile(
+            &p.id,
+            ssh_draft(SshAuthMethod::Key, SaveMode::UntilRestart),
+            PasswordChange::Keep,
+        )
+        .expect("session");
+    assert!(session.secret_saved);
+    assert_eq!(
+        keyring
+            .get(&format!("ssh:{}:passphrase", p.id))
+            .expect("get"),
+        None
+    );
+
+    m.delete_ssh_profile(&p.id).expect("delete");
+    assert!(m.ssh_profiles().expect("list").is_empty());
+}
+
+#[test]
+fn ssh_profiles_in_use_are_kept() {
+    let (m, _, _) = setup();
+    let p = m
+        .create_ssh_profile(ssh_draft(SshAuthMethod::Agent, SaveMode::Never), None)
+        .expect("create");
+    let conn = m
+        .create(
+            ConnectionDraft {
+                ssh_profile_id: Some(p.id.clone()),
+                ..draft("Prod", SaveMode::Never)
+            },
+            None,
+        )
+        .expect("conn");
+    let err = m.delete_ssh_profile(&p.id).expect_err("in use");
+    assert!(err.to_string().contains("Prod"), "{err}");
+    m.delete(&conn.id).expect("delete conn");
+    m.delete_ssh_profile(&p.id).expect("delete");
+}
+
+#[test]
+fn connect_params_carry_the_options() {
+    let d = ConnectionDraft {
+        tls_ca_file: Some("/etc/ca.pem".into()),
+        keepalive_secs: 30,
+        startup_sql: "SET search_path = app".into(),
+        schema_names: vec!["shop".into()],
+        schema_pattern: "app_*, t?".into(),
+        ..draft("A", SaveMode::Never)
+    };
+    let p = connect_params(d, None).expect("params");
+    assert_eq!(
+        p.options.tls_files.ca.as_deref(),
+        Some(std::path::Path::new("/etc/ca.pem"))
+    );
+    assert_eq!(p.options.keepalive, Some(Duration::from_secs(30)));
+    assert_eq!(p.options.startup_sql, "SET search_path = app");
+    assert_eq!(p.options.schema_scope.names, ["shop"]);
+    assert_eq!(p.options.schema_scope.patterns, ["app_*", "t?"]);
+    assert!(p.options.dial.is_none() && p.options.guard.is_none());
 }

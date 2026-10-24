@@ -7,10 +7,16 @@ publish.workspace = true
 description = "Local application storage (settings, workspace state) backed by SQLite."
 
 [dependencies]
+quarry-db-core.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+ts-rs = { workspace = true, optional = true }
+
+[features]
+# TypeScript binding derives, used by the desktop crate's bindings test.
+ts = ["dep:ts-rs", "quarry-db-core/ts"]
 
 [dev-dependencies]
 tempfile.workspace = true

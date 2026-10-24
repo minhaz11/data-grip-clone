@@ -21,11 +21,13 @@ impl Default for ExecOptions {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ColumnInfo {
     pub name: String,
     /// Engine type name ("int4", "text", ...) when the statement could be described.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub type_name: Option<String>,
 }
 
@@ -34,6 +36,7 @@ pub struct ColumnInfo {
 pub type Cell = Option<String>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(
     rename_all = "camelCase",
     rename_all_fields = "camelCase",
@@ -51,9 +54,11 @@ pub enum StatementOutcome {
         /// that cannot be kept in a cursor (e.g. `INSERT … RETURNING`, `SHOW`); those return at
         /// most `max_rows` rows.
         #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
         cursor: Option<String>,
         /// Whether rows can be edited (only computed for cursor-backed query results).
         #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(feature = "ts", ts(optional))]
         edit: Option<Editability>,
     },
     /// No result set: DML/DDL/utility. `rows_affected` is 0 for statements without a count.
@@ -103,6 +108,7 @@ mod tests {
 /// Server-side sort and filter applied to a query result by re-running it (module D). Columns are
 /// referenced by position in the original result, never by name or SQL text.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Refinement {
     /// Applied in order (first key sorts first).
@@ -114,6 +120,7 @@ pub struct Refinement {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct SortKey {
     pub column: usize,
@@ -121,6 +128,7 @@ pub struct SortKey {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Filter {
     pub column: usize,
@@ -130,6 +138,7 @@ pub struct Filter {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum FilterOp {
     Eq,
@@ -155,6 +164,7 @@ impl FilterOp {
 /// Whether a result's rows can be edited, decided from the columns' source tables (as reported by
 /// the server), never from SQL text.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(
     rename_all = "camelCase",
     rename_all_fields = "camelCase",
@@ -167,6 +177,7 @@ pub enum Editability {
 
 /// The single base table a result's rows come from.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct EditTarget {
     pub schema: String,
@@ -179,6 +190,7 @@ pub struct EditTarget {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct EditColumn {
     pub name: String,
@@ -186,6 +198,7 @@ pub struct EditColumn {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ColumnValue {
     /// Result-column position.
@@ -195,6 +208,7 @@ pub struct ColumnValue {
 
 /// One pending row change. Rows are identified by their primary-key values as last read.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(
     rename_all = "camelCase",
     rename_all_fields = "camelCase",
@@ -207,6 +221,9 @@ pub enum RowChange {
         key: Vec<Cell>,
         set: Vec<ColumnValue>,
         original: Vec<ColumnValue>,
+        /// Result-column positions set to the column default (`SET col = DEFAULT`).
+        #[serde(default)]
+        defaults: Vec<usize>,
     },
     Delete {
         key: Vec<Cell>,
@@ -218,8 +235,26 @@ pub enum RowChange {
 
 /// A generated statement exactly as it will run: SQL with placeholders plus bound values.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct EditStatement {
     pub sql: String,
     pub params: Vec<Cell>,
 }
+
+/// A server message that is not an error (`RAISE NOTICE`, warnings), reported while a statement
+/// runs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct Notice {
+    /// `NOTICE`, `WARNING`, `INFO`, `LOG` or `DEBUG`.
+    pub severity: String,
+    pub message: String,
+    pub detail: Option<String>,
+    pub hint: Option<String>,
+    pub sqlstate: String,
+}
+
+/// Where a session delivers notices; set by whoever runs statements on it.
+pub type NoticeSink = std::sync::Arc<dyn Fn(Notice) + Send + Sync>;

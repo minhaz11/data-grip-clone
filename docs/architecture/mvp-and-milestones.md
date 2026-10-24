@@ -63,7 +63,8 @@ listed tests run green in CI.
     deliberate vs server-side session close. `server_unavailable` is covered by a SQLSTATE unit
     test only (hard to provoke reliably). Session registry emits `connection-status` events;
     the UI shows status dots, Connect/Disconnect, a password prompt, and copyable error details.
-  - Not yet: custom CA / client certificates (REQ-CONN-08), SSH tunnels (REQ-CONN-07).
+  - Not yet: custom CA / client certificates (REQ-CONN-08) and SSH tunnels (REQ-CONN-07) came
+    in M4.9.
 - **M2.3 Metadata tree** ✅: lazy schema → kind → object → children; refresh; filter.
   - **AC**: 1,000-table schema expands in < 1 s after the first load; refresh picks up a new table.
   - Done: engine-neutral `MetadataRequest`/`MetaNode` (each node carries the request for its
@@ -74,7 +75,7 @@ listed tests run green in CI.
     (Ctrl+F5) keeps expansion and reloads visible levels; filter searches loaded nodes and reveals
     their ancestors; a lost or closed session clears that source's tree. Keyboard: ↑/↓/Home/End,
     → expand/enter, ← collapse/parent, Enter, Shift+F10.
-  - Not yet: keys/foreign keys, routines, sequences, DDL view (Phase 4), tree virtualization (not
+  - Not yet: DDL view (Phase 4; keys, foreign keys, routines and sequences came in M4.3), tree virtualization (not
     needed at 1,000 rows; revisit with the WebKitGTK budget test in Phase 3).
 
 ### Phase 3 — SQL execution
@@ -120,8 +121,8 @@ listed tests run green in CI.
       confirmation, with Cancel focused. The same path will serve AI-generated SQL.
     - Integration tests (disposable server): typed exact values, cap and count, affected rows,
       error positions, cancel < 1 s with the session reusable, read-only rejection.
-  - Not yet: NOTICE messages, per-console sessions, transaction mode controls (REQ-TX-01),
-    query history (Phase 5), statement timeouts as a setting.
+  - Later: per-console sessions and transaction mode controls came in M4.6; NOTICE messages
+    and the statement timeout setting in M4.7; query history in M5.1.
 - **M3.3 Grid + export** ✅: virtualized paged grid; multiple result tabs; CSV/JSON export streamed from
   the backend.
   - **AC**: a 1M-row result never sends more than 2 pages over IPC at once; it scrolls smoothly in
@@ -150,7 +151,8 @@ listed tests run green in CI.
     tags. `StatementOutcome`/`ExecEvent` fields went out snake_case, breaking M3.2's Output
     summaries and timings (the Result tab hid it). Fixed with `rename_all_fields`, plus
     Rust-side JSON contract tests.
-  - Not yet: sorting/filtering (Phase 4), export cancel, configurable CSV dialects (REQ in 07).
+  - Later: sorting/filtering came in M4.1; export cancel, TSV/SQL INSERT/Markdown, NULL text
+    and quoting options in M4.8.
 
 ### Phase 4 — Data and schema management
 
@@ -195,6 +197,234 @@ listed tests run green in CI.
   - Tests: builder unit tests (no values in SQL, unsafe types, key checks) and integration tests
     (editability reasons, apply/conflict/rollback, per-change errors, isolation from an open
     console transaction, read-only rejection).
+- **M4.3 Table viewer and richer metadata** ✅ (plan: `docs/plans/04-table-viewer-metadata.md`)
+  - **Tree**: under a table, Columns plus Keys, Foreign keys, Checks, Indexes and Triggers; under
+    a schema, Routines (user functions and procedures, overloads apart by their identity
+    arguments; extension members left out) and Sequences (type, increment, owning column).
+    Empty groups are hidden, except Columns. Details come from the server's own definitions
+    (`pg_get_constraintdef`, `pg_get_triggerdef`, `pg_get_function_identity_arguments`).
+  - **Table viewer**: Enter or double-click on a table, view or materialized view opens a
+    read-only tab (editor tabs are now consoles or objects, both restored on restart) with
+    columns (type, nullability, default, identity or generation, comment, primary key),
+    indexes, constraints, foreign keys in both directions, triggers, row estimate and size, and
+    Refresh. Offline it offers Connect; a dropped object says so.
+  - **Quick info** (Ctrl+Q or the context menu) for tables, views and columns.
+  - One `object_details` command reads the whole object by OID with parameterized catalog
+    queries; checked field by field against `psql \d+` on the seeded `shop.orders`.
+  - Tests: integration (every new kind, overloads, owned sequences, both FK directions, identity
+    and generated columns, comments, estimates, a missing object); UI (viewer sections, Connect,
+    quick info, tab de-duplication and restore); E2E axe scan of the viewer.
+  - Not yet: Open data (M4.8), partitions as children of their parent.
+- **M4.4 DDL generation** ✅ (plan: `docs/plans/05-ddl-generation.md`)
+  - **Show DDL / Copy DDL** on tables, views, materialized views, routines, sequences, indexes,
+    triggers and whole schemas. The DDL tab is read-only (Monaco), with Qualified names / Owner /
+    Grants options, Copy, Open in console and Save (native dialog from Rust, written atomically).
+  - **Generated in Rust from the catalog** on a short-lived side connection with its own
+    `search_path`, so a console's open transaction is never touched and the server qualifies and
+    quotes every name the same way (`regclass`, `pg_get_*def`, `quote_ident`, `quote_literal`).
+  - **Order that applies cleanly**: schemas, sequences, routines (row-type routines after
+    tables), tables without foreign keys (partitions after parents), views in dependency order,
+    sequence ownership, indexes, foreign keys (so circular pairs work), triggers. Serial
+    sequences come with their table.
+  - **Round-trip tests**: the seeded `shop` schema and a rich fixture (identity and generated
+    columns, collations, partial and expression indexes, circular FKs, partitions, chained views,
+    materialized views, functions, a procedure, enabled and disabled triggers, odd identifiers,
+    comments) are generated, applied to an empty database and generated again: the text and a
+    catalog fingerprint of the two databases must match. The fingerprint caught a partitioned
+    index written as `ON ONLY`, which would have left partitions unindexed.
+  - Also fixed: SQL syntax colors below 4.5:1 contrast in the editor (strings and operators in
+    light, comments, strings and predefined variables in dark), now scanned in both themes.
+  - Not yet: aggregates (emitted as a comment), table inheritance (`INHERITS`), arbitrary
+    multi-select in the explorer (schema-level generation covers multiple objects).
+- **M4.5 Schema change tools** ✅ (plan: `docs/plans/06-schema-change-tools.md`)
+  - **New table / Modify table** from the explorer: columns (type with suggestions, not null,
+    default, identity, comment), primary key, uniques, checks, foreign keys and indexes. Modify
+    starts from a `TableModel` read from the catalog and diffs it against the edit; column
+    renames carry through keys, and an unchanged model produces no statements.
+  - **Drop** (IF EXISTS, CASCADE), **Truncate** (RESTART IDENTITY, CASCADE) and **Rename**
+    (table, column, schema) for every object kind the explorer shows.
+  - **Exact statements first**: every dialog shows a live preview built in Rust; Edit SQL
+    switches to hand-edited text (Reset to generated returns), which runs through the console's
+    destructive-statement check.
+  - **All or nothing**: apply runs in one transaction on a short-lived side connection; a failure
+    reports "Statement N of M failed" with the statement and changes nothing.
+  - **Guards**: read-only sources offer no schema tools and the server rejects the transaction;
+    production sources confirm with the statements; CASCADE or several objects require typing
+    the name. After apply the explorer refreshes; DDL run in a console marks the source out of
+    date with a Refresh button.
+  - Tests: Rust unit (builders, quoting, type grammar, diff order); integration (create with every
+    constraint kind compared with the catalog, alter kinds, no-op model, rollback on failure,
+    read-only rejection, drop/truncate/rename); UI (create, typed CASCADE confirmation, a
+    production confirmation for each tool, hand edits, modify from the model, read-only, stale
+    banner); E2E (table dialog).
+  - Not yet: `USING` for type changes (via Edit SQL), view/routine source editing, rename
+    refactoring, safe-delete analysis.
+- **M4.6 Transactions and sessions** ✅ (plan: `docs/plans/03-transactions-sessions.md`)
+  - **Transaction state comes from the server.** `tokio-postgres` drops the ReadyForQuery
+    status, so after any statement that can change it (BEGIN/COMMIT/…, CALL, DO, or an error
+    inside a block) the session probes with a savepoint: 25P01 means no block, 25P02 an aborted
+    one, success an open one. The probe takes no snapshot, so `BEGIN; SET TRANSACTION …` still
+    works.
+  - **Manual mode** opens `BEGIN ISOLATION LEVEL …` before the first statement that needs one
+    (not before VACUUM, CREATE DATABASE, `… CONCURRENTLY` and other statements that refuse a
+    block). Commit and Rollback are commands, shown in Manual mode or whenever a block is open.
+    Defaults per data source (store migration 3); the console can switch mode and isolation.
+  - **Sessions** are keyed by data source plus optional console: a console can have its own
+    session (forked with the same credentials) and its own transaction; jobs run one per
+    session, so two own-session consoles run at once. Results and cursors carry the session.
+  - **Schema per console**: each run puts the console's schema first in the search path
+    (server-side `quote_ident`, followed by the server's default path); the registry re-applies
+    it only when it differs from what it last set, so a user's own `SET search_path` stays.
+  - **Nothing open is lost silently**: closing a console with its own open transaction,
+    switching its session or data source, disconnecting, deleting a data source, and quitting
+    (the window close is held by Rust) all ask Commit / Roll back / Cancel, with Cancel focused.
+    A failed commit keeps the dialog open with the error.
+  - **Cancel stage 2**: three seconds after Stop, "Drop connection" aborts the connection task,
+    so a stuck statement ends at once (the server may still finish it).
+  - **Read-only gap closed** (ADR-0006): statements that switch to read-write are blocked in the
+    UI, and the server side restores the read-only default before every statement outside a
+    block and rolls back any block made read-write (also after `set_config()` in a SELECT).
+  - Tests: integration (manual commit visibility, rollback, failed blocks, explicit blocks,
+    isolation, no-block statements, paging inside/after a transaction and after rollback,
+    concurrent forks, schema selection and quoting, read-only switches, abort); store migration
+    from version 2; classifier; UI (session/schema sent, guards for close/disconnect/quit,
+    failed commit, mode switch); E2E (Manual mode to Commit).
+  - Not yet: savepoint UI; refresh of results after Commit/Rollback.
+- **M4.7 Editor** ✅ (plan: `docs/plans/08-editor.md`)
+  - **Parameters**: `:name`, `${name}` and `$1` are found by the same scanner as statements, so
+    strings, comments, quoted names, dollar-quoted bodies, `::` casts, `:=` and array slices
+    are skipped, and `PREPARE` keeps its own `$n`. One prompt per name per run (with NULL), the
+    values remembered per console. They are bound as text-format parameters (the server parses
+    each for the type it infers), through the cursor path too (`DECLARE … CURSOR` with binds);
+    placeholders keep the original length so error positions still match the console.
+  - **What Run runs**: settings for a caret between statements (the nearest one, or ask) and a
+    selection of several statements (all, or ask), with a chooser.
+  - **Notices**: the connection task is driven by messages, so `RAISE NOTICE` and warnings reach
+    the running job in order and appear under their statement in that console's Output.
+  - **Output log** keeps earlier runs per console (time, data source, transaction mode, status,
+    parameter values, notices), with search and Clear.
+  - **Long queries**: a marker past the threshold (default 20 s) and a notification when they
+    end; a notification center in the status bar.
+  - **Statement timeout** setting (0 = no limit). Enforced by the session with the
+    out-of-band cancel: PostgreSQL switches `statement_timeout` off before the commit that
+    materializes a `WITH HOLD` cursor, so the server setting never applied to queries.
+  - **Errors**: F8 / Shift+F8 go to the next and previous error marker; markers show their
+    message on hover.
+  - **Completion**: functions (user schemas, and built-ins without type I/O, operator, cast or
+    internal ones) with signatures and overload counts; `JOIN … ON` suggestions from foreign
+    keys in both directions with generated aliases; fuzzy matching (prefix, initials, word
+    starts, letters in order); names resolve through the console's schema, then `public`.
+  - Tests: integration (bound types, an injection attempt stays a value, notices in order,
+    timeouts with and without a cursor, the function catalog); unit (parameter scanning and
+    binding, run policy, fuzzy ranking, joins, search path); UI (prompt and memory, chooser,
+    notices per console, output search and clear, long-query notification, F8); E2E (prompt
+    scan, bound values, notice in Output).
+  - Not yet: configurable parameter patterns (the three forms are built in), rows returned by
+    bound statements outside a cursor (`INSERT … RETURNING` shows its row count).
+- **M4.8 Result grid and table browsing** ✅ (plan: `docs/plans/07-result-grid.md`)
+  - **Range selection**: mouse drag, Shift+click, row numbers, Shift+arrows, Ctrl+A. A status
+    line sums the selection: count, and for numeric columns sum, average, min and max, exact for
+    integers and numerics (BigInt decimals), marked "loaded rows only" when rows are not loaded.
+  - **Copy** in TSV, CSV, JSON, SQL INSERT or Markdown with NULL text, header and quoting
+    options, for the selection, the page or the entire result. Ctrl+C copies one cell as is and a
+    range as TSV for spreadsheets. Selections gather unloaded pages two at a time (tested); the
+    entire result is formatted and put on the clipboard by Rust (`result_copy`, 64 MB cap,
+    confirmed above 10,000 rows). One writer per format in `quarry-io` serves copy and export.
+  - **Export dialog**: the same formats and options, to a file or the clipboard, with Cancel. A
+    cancelled export stops between pages and removes its `.partial` file (integration-tested).
+  - **Columns**: hide, show all, reorder by drag or Move left/right, reset. Layouts are stored in
+    the tab by column signature, so they survive re-runs and restarts.
+  - **Edit bar**: Clone (primary key left to its default), Set DEFAULT (`SET col = DEFAULT`,
+    still with the optimistic check), Revert selected; Delete marks every selected row.
+  - **Result tabs**: Pin keeps a result (and its cursor) through later runs; a setting keeps
+    every run's results as tabs instead (5 unpinned at most).
+  - **Open data** on tables, views and materialized views: a data tab with free-form WHERE and
+    ORDER BY text (with history for the session), run through the console path in the shared
+    session, editable under the M4.2 rules. The text cannot end the statement or add one
+    (checked), and read-only sources reject writes in it on the server (`nextval()`: 25006).
+  - Round trips: CSV and TSV copies parse back with the `csv` crate, JSON with serde, and SQL
+    INSERT copies run against the server and reproduce the rows exactly (awkward values:
+    quotes, tabs, newlines, backslashes, Unicode, NaN, infinity, bytea, arrays, jsonb).
+  - Also fixed: the run summary sat inside the result tab list (axe), and a late export progress
+    message could overwrite the finished summary.
+  - Not yet: value editor panel, transpose, FK navigation (Later backlog); persistent filter
+    history (comes with query history, step 09).
+- **M4.9 Connection gaps** ✅ (plan: `docs/plans/11-connections.md`)
+  - **SSH tunnels** in pure Rust (`quarry-ssh`, russh 0.64 on ring): password, key file (with
+    passphrase) and SSH agent logins; reusable SSH profiles with their own save mode. The tunnel
+    is a local port forward handed to the connection as a guard, so it lives exactly as long as
+    the sessions that use it (forks and side connections too) and cancel goes through it as
+    well. The forward is proved at open time, so an unreachable database behind the bastion is
+    reported as such. Keep-alives notice a dead SSH server within about a minute; the database
+    connection then ends and the session is marked lost.
+  - **Host keys**: the first connect shows the SHA-256 fingerprint and asks (Cancel focused);
+    trusted keys live in `app.db`, never `~/.ssh/known_hosts`. A changed key is refused with
+    both fingerprints and a warning. "Trust" only confirms the key the server just presented.
+  - **TLS files**: CA file, client certificate and key (PEM), picked with the native dialog from
+    Rust and read at connect time. As in libpq, a CA file makes Require verify the chain.
+    Unreadable or wrong files name the file and point at the TLS tab.
+  - **URL**: a `postgresql://` URL field synced with the form (IPv6, %-escapes, libpq
+    parameters); a password in a URL moves to the Password field and is stripped, so URLs never
+    keep one. "URL only" shows just the URL.
+  - **Options**: TCP keep-alive, auto-disconnect after idle minutes (never while a statement,
+    export or transaction is open), startup SQL after every connect.
+  - **Explorer**: one level of folders (color inherited by data sources without their own),
+    drag to reorder or into a folder, Move up/down and Move to folder for the keyboard, inline
+    rename (Shift+F6 or F2) for data sources and folders.
+  - **Schema scope**: checked schemas plus wildcard patterns; the schema list, completion
+    relations and user functions are filtered in SQL. An edit applies to the live session at
+    once. Connected sources with a scope show "N of M schemas".
+  - **Failure view**: the error with a checklist (SSH tunnel, reachable, TLS, credentials) that
+    marks the failing step, plus Test Connection, Edit and Connect. One connect flow asks for the
+    database password, the SSH password or passphrase (again after a wrong one) and host key
+    trust.
+  - Tests: integration against the disposable server and SSH container (queries, cancel, export
+    and forks over a tunnel; password, passphrase and agent logins; unknown and changed host
+    keys; unreachable forward; killed SSH session marks the session lost; verify-full with the
+    test CA, client certificate login, wrong CA also with Require, unreadable files; schema
+    scope in schemas, relations and functions); canary (SSH secrets in every save mode never in
+    the log, `app.db` or IPC responses); unit (URL round trips, store migration, folders and
+    order, SSH secret accounts, trust only of presented keys, idle decision); UI (tabs, URL,
+    SSH test before save, schema selection, prompts, checklist, folders, drag, rename, scope
+    label and reload); E2E (axe on every dialog tab and the folder tree, drag into a folder).
+  - Not yet: Windows agent (OpenSSH pipe, then Pageant) is built but untested; jump hosts;
+    encrypted client keys for TLS; nested folders.
+- **M4.10 Layout, navigation and explorer** ✅ (plan: `docs/plans/12-layout-navigation.md`)
+  - **Search everywhere** (Ctrl+Shift+A; Go to object Ctrl+N, Cmd+O on macOS): tables, views,
+    routines and sequences of every connected data source, console files and actions, ranked
+    exact, prefix, word start, substring, then fuzzy; `schema.name` matches both parts;
+    `/tables`, `/views`, `/routines`, `/sequences`, `/objects`, `/consoles`, `/actions` narrow
+    (Tab completes). Enter opens (table viewer, or DDL for routines and sequences),
+    Ctrl+Enter opens data, Shift+Enter shows DDL, Alt+Enter reveals in the explorer.
+  - **Go to DDL** (Ctrl+B) from the editor resolves the name at the caret through the
+    statement's aliases and table names, then the catalog (console schema, `public`, unique
+    match); a bare column goes to the statement's table that has it. Ctrl+B in the explorer shows
+    DDL of the selection. Alt+F1 reveals the object at the caret in the explorer, connecting and
+    expanding the way.
+  - **Tabs**: context menu (Close, Close others, Close to the right, Close all, Pin, Reopen
+    closed, Rename, Duplicate, Copy path, Delete for consoles, Reveal for viewers), pinned tabs
+    first and kept, an All tabs list, path tooltips, arrow keys between tabs. Reopen closed
+    (Ctrl+Shift+T) keeps 20 tabs and reads console text from the file again.
+  - **Consoles**: rename (never replaces another console; same tab, editor and undo history),
+    duplicate, delete (asks first; only regular files inside the consoles directory, links
+    refused). A console without a data source asks which one to attach when run.
+  - **Navigation**: Back/Forward across tabs with caret positions (Ctrl+Alt+Left/Right, Cmd+[
+    and Cmd+]), Recent tabs (Ctrl+E) with recently closed consoles; Escape in the explorer or
+    results panel returns to the editor; Hide all panels (Ctrl+Shift+F12) toggles both.
+  - **Status bar**: current schema and encoding (UTF-8) of the active console.
+  - **Explorer**: Shift/Ctrl+click and Shift+arrows mark several objects for Show DDL, Copy
+    DDL or Copy names; object type filter; Collapse all, Expand loaded levels; Force refresh
+    with the last refresh time in the tooltip; Cancel on loading rows (server cancel only when
+    no statement runs on the shared session); Enter/F3 and Shift+Enter/Shift+F3 in the filter
+    jump between matches.
+  - Also: app shortcuts are suspended while a modal dialog has focus.
+  - Tests: unit (ranking, prefixes, 1,000 tables in well under 100 ms; console rename, duplicate
+    and delete incl. a symlink); integration (`catalog` level); UI (reopen closed restores text,
+    rename keeps editor and binding, delete asks, pinned tabs, tab keys and list, back/forward
+    and recent, attach, Escape and hide panels, status bar, palette open/data/DDL/consoles/
+    actions/reveal, Go to DDL through aliases, explorer filter, collapse/expand, multi-select,
+    match navigation, cancel, force refresh); E2E (palette with axe in both browsers).
+  - Not yet: undocking panels, editor split, bookmarks (Later backlog).
 - Table viewer (columns/indexes/constraints/FKs), DDL generation, create/alter forms with DDL preview,
   destructive-operation confirmation.
 
@@ -203,11 +433,173 @@ listed tests run green in CI.
 - Query history with FTS search; saved consoles/files; snippets; configurable keymap; workspace
   restore; CSV/JSON import with preview, mapping, type validation, null/encoding handling, and
   streaming.
+- **M5.3 Keymap and action registry** ✅ (plan: `docs/plans/10-keymap-actions.md`)
+  - **Registry**: every action is registered once with a title, a context (everywhere, SQL
+    editor, result grid, Database Explorer) and default bindings per platform; the 13 earlier
+    command ids are unchanged. The grid's and explorer's command keys (select all, copy, edit,
+    delete, add row, column menu, quick info, refresh, duplicate, context menu) moved into it.
+  - **Resolution**: the focused panel's actions win over global ones; one capture-phase listener
+    runs global and editor actions before Monaco sees the key.
+  - **Settings > Keymap**: search by action or shortcut, add a shortcut by pressing it, remove,
+    reset one or all; conflicts show inline before saving and same-context clashes block Save;
+    reserved system chords and plain typing keys are refused. Overrides live in settings.
+  - **macOS**: Cmd is the primary modifier and Control is separate; ⌘⌥⇧⌃ labels; defaults
+    avoid system chords (⌘Q, ⌘Tab, Option-arrows).
+  - Docs: `docs/keymap.md`, generated from the registry and checked by a test.
+  - Tests: unit (chords per platform, focused context over global, overrides, conflicts,
+    reserved chords, defaults conflict-free on both platforms); UI (rebind works at once and
+    after a restart, the old chord stops working, conflicts and blocked Save, refusals, reset,
+    search, editor actions only with editor focus); E2E (rebind and use in both browsers, axe).
+  - Not yet: importing keymaps from other IDEs (out of scope); the search palette (step 12).
+- **M5.4 CSV/JSON import** ✅ (plan: `docs/plans/13-import.md`)
+  - **Wizard** from a schema (new table) or table (append) in the explorer, or by dropping a file
+    on one: File (format, encoding, delimiter, quote, escape, header, trim, NULL text, empty as
+    NULL, presets, live preview with inferred types and the row estimate), Target, Columns
+    (include, target column, type with suggestions, order), Review (CREATE TABLE built by the
+    schema tools, editable; error policy), Import (progress, rows/s, Cancel, summary with
+    rejected rows by line, Save Error Log).
+  - **Reading** in `quarry-io`: own streaming delimited parser (quoted `""` vs empty NULL,
+    doubled or escaped quotes, newlines in quotes, CR/LF, line numbers), BOM and encoding
+    detection with streaming transcoding, JSON arrays element by element and JSON lines.
+  - **Types**: inference over 1,000 sample rows (boolean, integer, bigint, numeric, date,
+    timestamp, timestamptz, uuid, jsonb, text); per-row checks against the target column type
+    (ranges, numeric precision, lengths, calendar dates, JSON) so Skip and NULL work and Abort
+    names the line.
+  - **Loading**: one COPY in one transaction on a side connection after the setup statements;
+    any failure or Cancel rolls back the table and the rows. Read-only sources refuse;
+    production sources confirm with the target and row estimate.
+  - **File access**: only paths picked in the native dialog or dropped on the window (received
+    by Rust); the WebView gets an id and a 200-row preview at most.
+  - Tests: unit (parser: quoting, NULL token vs empty, BOM, Latin-1, UTF-16, buffer boundaries,
+    unclosed quotes; JSON; inference; conversions; COPY encoding; mapping); integration (abort
+    leaves nothing, skip lists lines, NULL policy, new table plus load atomic, JSON by key,
+    read-only refused, 1M rows with about 1 MB peak memory growth, cancel leaves none); UI
+    (whole flow, presets, production confirmation, cancel, read-only refusal, drop target); E2E
+    (wizard with axe at every step).
+  - Not yet: Excel, Parquet, pg_dump, disabling triggers during load (REQ-IMPEX-09 to 11).
+- **M5.2 Local file history** ✅ (plan: `docs/plans/14-file-history.md`)
+  - **Revisions** of console files in `app.db` (migration 6), taken sparingly: while editing at
+    most once per interval, always before a save that deletes most of the text, when the file
+    was changed outside Quarry, and before a run, a format, a restore or a delete. Repeats and
+    blank text are skipped; renames carry the history along.
+  - **Local history** (Alt+Shift+H, or the tab menu): versions with time, reason and first line,
+    a line diff against the current text, and Restore, which first keeps the replaced text.
+  - **Retention** in Settings: versions per console, maximum age, interval.
+  - Tests: unit (autosave bursts make one revision, deletion and outside changes always kept,
+    pruning by count and age, rename, upgrade from version 5, line diff); desktop (the save
+    path keeps deleted text and outside edits); UI (diff and restore, before-run and
+    before-format checkpoints, settings); E2E (axe on the dialog).
+- **M5.5 Snippets** ✅ (plan: `docs/plans/15-snippets.md`)
+  - **Expansion**: type an abbreviation and press Tab, or pick it in completion; Monaco's
+    snippet controller links the tab stops (Tab and Shift+Tab move, Escape leaves). Tab is the
+    registry action `editor.expandSnippet`, which declines for anything that is not an
+    abbreviation.
+  - **Built-ins**: sel, selc, ins, upd, del, ct, cte, exp, idx, fn, do, tx. Bodies use Monaco
+    syntax; `\$` writes a literal `$`, so dollar quotes and `$1` parameters survive.
+  - **User snippets** in `app.db` (migration 7): abbreviation, description, template, scope
+    (PostgreSQL or every data source); Settings > Snippets edits them with a live preview, and
+    "Customize" copies a built-in so it can be replaced. Import and export as JSON through the
+    native dialogs (an import replaces snippets with the same abbreviation).
+  - Tests: unit (template parsing: stops, nesting, variables, `\$`, escaping; store CRUD,
+    validation, export then import on a fresh profile); UI (built-in expands on Tab with its
+    first stop selected, other words are left alone, a snippet saved in Settings expands at once
+    and replaces a built-in); E2E (real Monaco: Tab through the stops, dollar quotes; axe on
+    Settings > Snippets).
+- **M5.1 Query history** ✅ (plan: `docs/plans/09-query-history.md`)
+  - **Recording**: the query job in Rust records every statement that reached the server
+    (succeeded, failed or cancelled) with data source, console session, start time, duration,
+    rows, error summary and transaction mode, in one batch per run after it finishes, so a
+    closed window loses nothing. A statement skipped after a cancel is not recorded.
+  - **Storage**: `query_history` in `app.db` (migration 4) with an FTS5 index kept in sync by
+    triggers; entries go with their data source when it is deleted. Search turns each word into
+    a quoted prefix phrase, so input is never parsed as FTS syntax; 10,000 entries search in
+    well under 100 ms (tested).
+  - **Retention**: 10,000 entries per data source by default, plus an optional age limit, both
+    in Settings; pruning runs after each recorded batch and when the settings change.
+  - **Per data source**: "Record query history" in the connection dialog (on by default), with
+    help text saying statements are kept as typed, values included.
+  - **Popup** (Ctrl+Alt+E or the toolbar): search, data source filter, status icons, duration
+    and time, paging; Insert at the caret or Open in new console; Delete and Clear data source
+    history, both confirmed; CSV or JSON export through the native save dialog.
+  - Tests: store (migration from version 3, FTS5 present, retention by count and age, search by
+    table name and keyword, index in sync after delete and clear, disabled data sources write
+    nothing, 10,000-entry timing); integration (success, error and cancel recorded with their
+    status, nothing for a disabled data source); UI (search, insert, open, confirmations,
+    export, settings); E2E (run, find, reopen, axe).
+  - Not yet: redacting literals and the internal execution log (Later, ADR-0004).
 
 ### Phase 6 — AI assistant
 
 - Provider abstraction plus Anthropic; per-connection context levels; "what will be sent" preview;
   generate/explain/fix/optimise; output only to preview/insert.
+- **M6.1 AI provider and settings** ✅ (plan: `docs/plans/16-ai-provider.md`)
+  - **Provider**: `quarry-ai-core` defines `AiProvider` (streamed completion events, models,
+    capabilities); `quarry-ai-anthropic` calls the Messages API from Rust over HTTPS (rustls on
+    ring, system roots) with server-sent events, maps errors (auth, permission, rate limit with
+    retry-after, overload, timeout, network, protocol) and enforces connect and idle timeouts.
+    The WebView never calls the network. Models that support it retry policy declines on the
+    server's recommended fallback model; a refusal is reported as such.
+  - **Key**: OS keyring entry `ai:anthropic:api-key`, written by a write-only command; Settings
+    shows only whether one is stored, with Change and Remove.
+  - **Kill switch**: AI is off until enabled, and can be turned off per workspace. While off, Rust
+    refuses every AI call before reading the key, running requests are aborted, and the model
+    list is the built-in one, so nothing leaves the machine.
+  - **Settings > AI**: "Where your data goes", enable and per-workspace switches, key, model
+    selector (live list or built-in), a streamed Test with Cancel, and the ignore list of tables
+    and columns (globs, matched case-insensitively; applied by M6.2).
+  - Tests: unit (SSE parsing with every split point, CRLF and split UTF-8; event decoding,
+    error events, stop reasons; status and error-type mapping; kill switch before the provider;
+    ignore-list matching and validation); integration against a local stand-in API (incremental
+    streaming, cancel closes the connection, HTTP errors, cut-off and silent streams, model
+    paging, no connection while AI is off); canaries (the key never reaches the log file at
+    trace level, `app.db`, or IPC responses); UI (write-only key, streamed test and cancel,
+    workspace switch, ignore list); E2E (axe on Settings > AI); optional live call gated by
+    `QUARRY_ANTHROPIC_TEST_KEY`.
+- **M6.2 AI consent and context** ✅ (plan: `docs/plans/17-ai-consent-context.md`)
+  - **Consent per data source**: SQL text only, SQL and schema, or SQL, schema and sample rows;
+    remembered in `app.db` (migration 8) or kept until restart; undecided means SQL text only,
+    and production sources preselect it. Sample rows are confirmed per request (tables, columns
+    and row cap shown) unless always allowed. Revoke in Settings > AI.
+  - **Context builder** in Rust: the editor text, the referenced tables and views (resolved in
+    the catalog by the editor), then their foreign-key neighbours, as CREATE TABLE text with
+    the ignore list applied (ignored tables dropped; ignored columns and every key, index,
+    check, default or foreign key naming them removed), capped at 60,000 characters with the
+    omissions listed; up to 5 sample rows from up to 3 tables, ignored columns never read.
+  - **What will be sent**: every request is previewed with its exact text, size and token
+    estimate; Send takes only the preview's id, once, and fails if the consent changed since.
+    The provider sends exactly the previewed bytes.
+  - **Request log** (`app.db`): time, data source, action, model, level, whether rows were sent,
+    the request text byte for byte, and the answer (or error, or "stopped"); viewable and
+    clearable in Settings > AI; the newest 500 are kept.
+  - **Entry point**: the AI panel (M6.3).
+  - Tests: unit (filtering of tables, columns, keys, indexes, checks and foreign keys; level
+    none sends only text; rows only at the rows level; schema cap; consent defaults, remember,
+    once and revoke; a different or reused payload id is rejected; a lowered or revoked consent
+    invalidates previews; the log equals the sent bytes and never holds the key; cancel is
+    logged); integration against PostgreSQL (ignore list across schema, neighbours and rows;
+    rows only after consent); UI (consent first, exact text, log equality, production default,
+    row prompt, revoke and log in Settings, hidden while off); E2E (axe on consent, preview
+    and answer).
+- **M6.3 AI actions** ✅ (plan: `docs/plans/18-ai-actions.md`)
+  - **AI panel** (Ctrl+Alt+A, right side): the data source and its context level (Change), a
+    prompt with Generate SQL, Ask and Explain Query, the exact request before Send, the
+    streamed answer with Stop. Hidden while AI is off, off for the workspace, or without a key.
+  - **Explain Error** and **Fix with AI** on failed statements in Output, and as actions for the
+    last failed statement; explanations of a query or an error never offer Insert.
+  - **Proposed SQL** (generate, fix, ask) is extracted from the answer and shown as a line diff
+    against the selection or the failed statement; Insert replaces exactly that text (or, if it
+    changed meanwhile, inserts at the caret); Discard drops it. Nothing is ever run: inserted
+    SQL is editor text that runs only through Run with the read-only, destructive and production
+    guards.
+  - Prompt templates live in Rust (dialect and server version included), so the preview and the
+    request log show the wording sent.
+  - Tests: unit (templates per task; SQL extraction from fenced, tagged, untagged, cut-off and
+    bare answers, dollar quotes kept); UI (inserting never executes; inserted `DELETE FROM t`
+    still asks for confirmation on Run; inserted UPDATE on a read-only source is still blocked;
+    Fix from Output as a diff replacing only that statement; explanations without Insert;
+    consent, preview, rows prompt, log and revoke through the panel); E2E (axe on consent,
+    preview and proposal; Insert sends no query).
+- Phase 6 is done (M6.1 to M6.3).
 
 ### Phase 7 — Hardening and release
 

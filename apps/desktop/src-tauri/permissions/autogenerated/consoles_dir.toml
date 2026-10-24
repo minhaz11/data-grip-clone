@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-consoles-dir"
+description = "Enables the consoles_dir command without any pre-configured scope."
+commands.allow = ["consoles_dir"]
+
+[[permission]]
+identifier = "deny-consoles-dir"
+description = "Denies the consoles_dir command without any pre-configured scope."
+commands.deny = ["consoles_dir"]

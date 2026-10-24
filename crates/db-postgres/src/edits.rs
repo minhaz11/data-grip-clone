@@ -70,11 +70,21 @@ pub fn build(t: &EditTarget, changes: &[RowChange]) -> Result<Vec<EditStatement>
         .map(|change| {
             let mut b = Builder { params: Vec::new() };
             let sql = match change {
-                RowChange::Update { key, set, original } => {
-                    if set.is_empty() {
+                RowChange::Update {
+                    key,
+                    set,
+                    original,
+                    defaults,
+                } => {
+                    if set.is_empty() && defaults.is_empty() {
                         return Err("An update without changes.".into());
                     }
-                    distinct_columns(set)?;
+                    let mut all = set.clone();
+                    all.extend(defaults.iter().map(|&column| ColumnValue {
+                        column,
+                        value: None,
+                    }));
+                    distinct_columns(&all)?;
                     let mut assignments = Vec::new();
                     for v in set {
                         let (name, ty) = column(t, v.column)?;
@@ -83,6 +93,10 @@ pub fn build(t: &EditTarget, changes: &[RowChange]) -> Result<Vec<EditStatement>
                             quote_ident(name),
                             b.bind(v.value.clone(), ty)
                         ));
+                    }
+                    for &d in defaults {
+                        let (name, _) = column(t, d)?;
+                        assignments.push(format!("{} = DEFAULT", quote_ident(name)));
                     }
                     let mut condition = b.key_condition(t, key)?;
                     // Optimistic lock: only update if what was read is still there.
@@ -168,6 +182,7 @@ mod tests {
                 key: vec![s("7")],
                 set: vec![v(1, Some("new")), v(3, None)],
                 original: vec![v(1, Some("old")), v(3, Some("2"))],
+                defaults: vec![],
             }],
         )
         .expect("build");
@@ -178,6 +193,37 @@ mod tests {
              AND \"qty\" IS NOT DISTINCT FROM ($5::text)::int4"
         );
         assert_eq!(out[0].params, [s("new"), None, s("7"), s("old"), s("2")]);
+    }
+
+    #[test]
+    fn update_sets_columns_to_default() {
+        let out = build(
+            &target(),
+            &[RowChange::Update {
+                key: vec![s("7")],
+                set: vec![v(1, Some("new"))],
+                original: vec![v(1, Some("old")), v(3, Some("2"))],
+                defaults: vec![3],
+            }],
+        )
+        .expect("build");
+        assert_eq!(
+            out[0].sql,
+            "UPDATE \"shop\".\"Line \"\"Items\"\"\" SET \"note\" = ($1::text)::text, \"qty\" = DEFAULT \
+             WHERE \"id\" = ($2::text)::int4 AND \"note\" IS NOT DISTINCT FROM ($3::text)::text \
+             AND \"qty\" IS NOT DISTINCT FROM ($4::text)::int4"
+        );
+        let both = build(
+            &target(),
+            &[RowChange::Update {
+                key: vec![s("7")],
+                set: vec![v(3, Some("1"))],
+                original: vec![],
+                defaults: vec![3],
+            }],
+        )
+        .expect_err("set twice");
+        assert!(both.contains("set twice"), "{both}");
     }
 
     #[test]
@@ -216,6 +262,7 @@ mod tests {
                 key: vec![s("1")],
                 set: vec![v(1, Some(attack))],
                 original: vec![],
+                defaults: vec![],
             }],
         )
         .expect("build");
@@ -231,7 +278,8 @@ mod tests {
             err(RowChange::Update {
                 key: vec![s("1")],
                 set: vec![v(2, Some("x"))],
-                original: vec![]
+                original: vec![],
+                defaults: vec![],
             })
             .contains("cannot be edited")
         );
@@ -239,7 +287,8 @@ mod tests {
             err(RowChange::Update {
                 key: vec![],
                 set: vec![v(1, Some("x"))],
-                original: vec![]
+                original: vec![],
+                defaults: vec![],
             })
             .contains("incomplete")
         );
@@ -248,7 +297,8 @@ mod tests {
             err(RowChange::Update {
                 key: vec![s("1")],
                 set: vec![],
-                original: vec![]
+                original: vec![],
+                defaults: vec![],
             })
             .contains("without changes")
         );

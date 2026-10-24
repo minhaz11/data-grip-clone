@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-schema-preview"
+description = "Enables the schema_preview command without any pre-configured scope."
+commands.allow = ["schema_preview"]
+
+[[permission]]
+identifier = "deny-schema-preview"
+description = "Denies the schema_preview command without any pre-configured scope."
+commands.deny = ["schema_preview"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ai-consents-list"
+description = "Enables the ai_consents_list command without any pre-configured scope."
+commands.allow = ["ai_consents_list"]
+
+[[permission]]
+identifier = "deny-ai-consents-list"
+description = "Denies the ai_consents_list command without any pre-configured scope."
+commands.deny = ["ai_consents_list"]

@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 interface Props {
   title: string;
@@ -10,7 +11,11 @@ interface Props {
   initialFocus?: string;
 }
 
-/** Accessible modal: focuses itself on open, closes on Escape, restores focus on close, traps Tab. */
+/**
+ * Accessible modal: focuses itself on open, closes on Escape, restores focus on close, traps Tab.
+ * Rendered into `document.body`, so the panel it is opened from cannot clip it or take its
+ * pointer events (resize handles listen across their panel group).
+ */
 export function Modal({ title, onClose, children, footer, width = 440, initialFocus }: Props) {
   const titleId = useId();
   const ref = useRef<HTMLDivElement>(null);
@@ -47,7 +52,7 @@ export function Modal({ title, onClose, children, footer, width = 440, initialFo
     }
   }
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
       onMouseDown={onClose}
@@ -71,6 +76,7 @@ export function Modal({ title, onClose, children, footer, width = 440, initialFo
           <div className="flex justify-end gap-2 border-t border-border px-4 py-2.5">{footer}</div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

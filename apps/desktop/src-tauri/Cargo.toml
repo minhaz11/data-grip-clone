@@ -20,13 +20,31 @@ quarry-secrets.workspace = true
 quarry-connections.workspace = true
 quarry-db-core.workspace = true
 quarry-db-postgres.workspace = true
+quarry-ssh.workspace = true
+quarry-ai-core.workspace = true
+quarry-ai-anthropic.workspace = true
+futures-util = { version = "0.3.34", default-features = false, features = ["alloc"] }
 quarry-workspace.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tokio = { version = "1.53.3", features = ["sync"] }
+tokio = { version = "1.53.3", features = ["sync", "time"] }
 uuid = { version = "1.28.0", features = ["v4"] }
 tauri-plugin-dialog = "2.8.3"
+tauri-plugin-clipboard-manager = "2.5.0"
 quarry-io.workspace = true
+quarry-logging.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+# Enables the TypeScript derives for the bindings test (src/bindings.rs).
+ts-rs.workspace = true
+quarry-db-core = { workspace = true, features = ["ts"] }
+quarry-store = { workspace = true, features = ["ts"] }
+quarry-connections = { workspace = true, features = ["ts"] }
+quarry-io = { workspace = true, features = ["ts"] }
+quarry-ai-core = { workspace = true, features = ["ts"] }
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "time", "net", "io-util", "sync"] }
 
 [lints]
 workspace = true

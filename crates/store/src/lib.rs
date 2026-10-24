@@ -1,17 +1,34 @@
 //! Local application storage (ADR-0004). Only the Rust backend touches this database; the UI goes
 //! through typed commands. Secrets are never stored here (ADR-0003).
 
+pub mod ai;
+pub mod ai_requests;
 pub mod connections;
+pub mod history;
 mod migrations;
+pub mod revisions;
+pub mod snippets;
+pub mod ssh;
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
-pub use connections::{ConnectionDraft, ConnectionProfile, Engine, Environment, SaveMode, SslMode};
+pub use ai::{AiIgnoreKind, AiIgnoreRule, AiSettings, DEFAULT_AI_MODEL};
+pub use ai_requests::{
+    AiContextLevel, AiLogDraft, AiLogEntry, AiLogOutcome, AiLogStatus, StoredConsent,
+};
+pub use connections::{
+    ConnectionDraft, ConnectionProfile, Engine, Environment, Folder, SaveMode, SslMode,
+};
+pub use history::{HistoryEntry, HistoryQuery, HistoryRecord, HistoryStatus, Retention};
 pub use migrations::LATEST_VERSION;
+pub use revisions::{RevisionInfo, RevisionReason, RevisionRetention};
+pub use snippets::{Snippet, SnippetDialect, SnippetDraft, SnippetFile};
+pub use ssh::{SshAuthMethod, SshProfile, SshProfileDraft, TrustedHostKey};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -35,6 +52,7 @@ pub enum StoreError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum ThemePreference {
     #[default]
@@ -43,17 +61,84 @@ pub enum ThemePreference {
     Dark,
 }
 
+/// What a new run does with the previous run's result tabs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "lowercase")]
+pub enum ResultTabs {
+    /// Replace them (pinned results stay).
+    #[default]
+    Reuse,
+    /// Keep them as extra tabs, up to a limit.
+    New,
+}
+
+/// What Run does when the caret is outside every statement (blank lines, trailing comments).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "lowercase")]
+pub enum OutsideStatement {
+    /// Run the statement before the caret (or the first one).
+    #[default]
+    Nearest,
+    /// Ask which statement to run.
+    Ask,
+}
+
+/// What Run does with a selection that holds several statements.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "lowercase")]
+pub enum SelectionRun {
+    /// Run all of them, in order.
+    #[default]
+    All,
+    /// Ask: one of them, or all.
+    Ask,
+}
+
 /// Application preferences. Unknown or missing fields fall back to defaults so older/newer
 /// settings rows never block startup.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     pub theme: ThemePreference,
     pub editor_font_size: u8,
+    pub result_tabs: ResultTabs,
+    /// Statements running longer than this are cancelled; 0 = no limit.
+    pub statement_timeout_secs: u32,
+    /// Runs longer than this show a notice and notify when done; 0 = never.
+    pub long_query_secs: u32,
+    pub run_outside_statement: OutsideStatement,
+    pub run_selection: SelectionRun,
+    /// Query history entries kept per data source; the oldest go first.
+    pub history_limit: u32,
+    /// Query history older than this many days is removed; 0 = keep regardless of age.
+    pub history_max_age_days: u32,
+    /// Local history: revisions kept per console; the oldest go first.
+    pub revision_limit: u32,
+    /// Local history older than this many days is removed; 0 = keep regardless of age.
+    pub revision_max_age_days: u32,
+    /// Minutes between automatic revisions while a console is being edited.
+    pub revision_interval_mins: u32,
+    /// Shortcut overrides by action id; each replaces all of that action's default bindings
+    /// (an empty list unbinds it). Ids the UI no longer knows are ignored there.
+    pub keymap: BTreeMap<String, Vec<String>>,
 }
 
 impl Settings {
     pub const FONT_SIZE_RANGE: std::ops::RangeInclusive<u8> = 9..=32;
+    /// Upper bound for the timeout and long-query thresholds (one day).
+    pub const MAX_SECONDS: u32 = 86_400;
+    pub const HISTORY_LIMIT_RANGE: std::ops::RangeInclusive<u32> = 100..=1_000_000;
+    /// Ten years.
+    pub const MAX_HISTORY_DAYS: u32 = 3_650;
+    pub const REVISION_LIMIT_RANGE: std::ops::RangeInclusive<u32> = 1..=1_000;
+    pub const REVISION_INTERVAL_RANGE: std::ops::RangeInclusive<u32> = 1..=240;
+    pub const MAX_KEYMAP_ENTRIES: usize = 500;
+    pub const MAX_BINDINGS: usize = 4;
+    pub const MAX_CHORD_LEN: usize = 64;
 
     pub fn validate(&self) -> Result<(), StoreError> {
         if !Self::FONT_SIZE_RANGE.contains(&self.editor_font_size) {
@@ -63,7 +148,92 @@ impl Settings {
                 Self::FONT_SIZE_RANGE.end()
             )));
         }
+        if self.statement_timeout_secs > Self::MAX_SECONDS
+            || self.long_query_secs > Self::MAX_SECONDS
+        {
+            return Err(StoreError::Invalid(format!(
+                "time limits must be between 0 and {} seconds",
+                Self::MAX_SECONDS
+            )));
+        }
+        if !Self::HISTORY_LIMIT_RANGE.contains(&self.history_limit) {
+            return Err(StoreError::Invalid(format!(
+                "history size must be between {} and {} entries",
+                Self::HISTORY_LIMIT_RANGE.start(),
+                Self::HISTORY_LIMIT_RANGE.end()
+            )));
+        }
+        if !Self::REVISION_LIMIT_RANGE.contains(&self.revision_limit)
+            || self.revision_max_age_days > Self::MAX_HISTORY_DAYS
+            || !Self::REVISION_INTERVAL_RANGE.contains(&self.revision_interval_mins)
+        {
+            return Err(StoreError::Invalid(format!(
+                "local history keeps {} to {} revisions per console, at most {} days, \
+                 one every {} to {} minutes",
+                Self::REVISION_LIMIT_RANGE.start(),
+                Self::REVISION_LIMIT_RANGE.end(),
+                Self::MAX_HISTORY_DAYS,
+                Self::REVISION_INTERVAL_RANGE.start(),
+                Self::REVISION_INTERVAL_RANGE.end()
+            )));
+        }
+        if self.history_max_age_days > Self::MAX_HISTORY_DAYS {
+            return Err(StoreError::Invalid(format!(
+                "history age must be between 0 and {} days",
+                Self::MAX_HISTORY_DAYS
+            )));
+        }
+        self.validate_keymap()
+    }
+
+    fn validate_keymap(&self) -> Result<(), StoreError> {
+        let invalid = |msg: String| Err(StoreError::Invalid(msg));
+        if self.keymap.len() > Self::MAX_KEYMAP_ENTRIES {
+            return invalid(format!(
+                "at most {} shortcut overrides",
+                Self::MAX_KEYMAP_ENTRIES
+            ));
+        }
+        for (id, chords) in &self.keymap {
+            let id_ok = !id.is_empty()
+                && id.len() <= Self::MAX_CHORD_LEN
+                && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '.');
+            if !id_ok {
+                return invalid(format!("invalid action id '{id}'"));
+            }
+            if chords.len() > Self::MAX_BINDINGS {
+                return invalid(format!(
+                    "{id}: at most {} shortcuts per action",
+                    Self::MAX_BINDINGS
+                ));
+            }
+            for chord in chords {
+                if chord.is_empty()
+                    || chord.len() > Self::MAX_CHORD_LEN
+                    || chord.chars().any(char::is_control)
+                {
+                    return invalid(format!("{id}: invalid shortcut '{chord}'"));
+                }
+            }
+        }
         Ok(())
+    }
+
+    /// The local history retention these settings ask for.
+    pub fn revision_retention(&self) -> RevisionRetention {
+        RevisionRetention {
+            max_per_console: self.revision_limit,
+            max_age_days: self.revision_max_age_days,
+            interval_ms: i64::from(self.revision_interval_mins) * 60_000,
+        }
+    }
+
+    /// The history retention these settings ask for.
+    pub fn history_retention(&self) -> Retention {
+        Retention {
+            max_entries: self.history_limit,
+            max_age_days: self.history_max_age_days,
+        }
     }
 }
 
@@ -72,6 +242,17 @@ impl Default for Settings {
         Self {
             theme: ThemePreference::System,
             editor_font_size: 13,
+            result_tabs: ResultTabs::Reuse,
+            statement_timeout_secs: 0,
+            long_query_secs: 20,
+            run_outside_statement: OutsideStatement::Nearest,
+            run_selection: SelectionRun::All,
+            history_limit: 10_000,
+            history_max_age_days: 0,
+            revision_limit: 100,
+            revision_max_age_days: 30,
+            revision_interval_mins: 5,
+            keymap: BTreeMap::new(),
         }
     }
 }
@@ -199,6 +380,7 @@ mod tests {
                 .set_settings(&Settings {
                     theme: ThemePreference::Dark,
                     editor_font_size: 15,
+                    ..Settings::default()
                 })
                 .expect("save");
         }
@@ -228,6 +410,7 @@ mod tests {
         let next = Settings {
             theme: ThemePreference::Light,
             editor_font_size: 20,
+            ..Settings::default()
         };
         assert_eq!(store.set_settings(&next).expect("save"), next);
         assert_eq!(store.settings().expect("load"), next);
@@ -239,6 +422,7 @@ mod tests {
         let bad = Settings {
             theme: ThemePreference::Dark,
             editor_font_size: 99,
+            ..Settings::default()
         };
         assert!(matches!(
             store.set_settings(&bad),
@@ -267,9 +451,109 @@ mod tests {
     }
 
     #[test]
+    fn time_limits_are_validated() {
+        let store = Store::open_in_memory().expect("open");
+        let ok = Settings {
+            statement_timeout_secs: 30,
+            long_query_secs: 0,
+            ..Settings::default()
+        };
+        assert_eq!(store.set_settings(&ok).expect("save"), ok);
+        let bad = Settings {
+            statement_timeout_secs: Settings::MAX_SECONDS + 1,
+            ..Settings::default()
+        };
+        assert!(matches!(
+            store.set_settings(&bad),
+            Err(StoreError::Invalid(_))
+        ));
+        assert_eq!(store.settings().expect("load"), ok);
+    }
+
+    #[test]
+    fn keymap_overrides_round_trip_and_are_validated() {
+        let store = Store::open_in_memory().expect("open");
+        let ok = Settings {
+            keymap: BTreeMap::from([
+                ("query.run".to_owned(), vec!["Ctrl+R".to_owned()]),
+                ("tab.close".to_owned(), vec![]),
+            ]),
+            ..Settings::default()
+        };
+        assert_eq!(store.set_settings(&ok).expect("save"), ok);
+        assert_eq!(store.settings().expect("load"), ok);
+        let bad = [
+            BTreeMap::from([("bad id!".to_owned(), vec![])]),
+            BTreeMap::from([("query.run".to_owned(), vec![String::new()])]),
+            BTreeMap::from([("query.run".to_owned(), vec!["F1".to_owned(); 5])]),
+            BTreeMap::from([("query.run".to_owned(), vec!["Ctrl+\n".to_owned()])]),
+        ];
+        for keymap in bad {
+            assert!(matches!(
+                store.set_settings(&Settings {
+                    keymap,
+                    ..Settings::default()
+                }),
+                Err(StoreError::Invalid(_))
+            ));
+        }
+        assert_eq!(store.settings().expect("load"), ok);
+    }
+
+    #[test]
+    fn history_retention_is_validated() {
+        let store = Store::open_in_memory().expect("open");
+        for bad in [
+            Settings {
+                history_limit: 10,
+                ..Settings::default()
+            },
+            Settings {
+                history_max_age_days: Settings::MAX_HISTORY_DAYS + 1,
+                ..Settings::default()
+            },
+        ] {
+            assert!(matches!(
+                store.set_settings(&bad),
+                Err(StoreError::Invalid(_))
+            ));
+        }
+        let ok = Settings {
+            history_limit: 500,
+            history_max_age_days: 30,
+            ..Settings::default()
+        };
+        assert_eq!(store.set_settings(&ok).expect("save"), ok);
+        assert_eq!(
+            ok.history_retention(),
+            Retention {
+                max_entries: 500,
+                max_age_days: 30
+            }
+        );
+    }
+
+    #[test]
     fn settings_json_uses_frontend_field_names() {
         let json = serde_json::to_value(Settings::default()).expect("encode");
-        assert_eq!(json, json!({ "theme": "system", "editorFontSize": 13 }));
+        assert_eq!(
+            json,
+            json!({
+                "theme": "system",
+                "editorFontSize": 13,
+                "resultTabs": "reuse",
+                "statementTimeoutSecs": 0,
+                "longQuerySecs": 20,
+                "runOutsideStatement": "nearest",
+                "runSelection": "all",
+                "historyLimit": 10000,
+                "historyMaxAgeDays": 0,
+                "revisionLimit": 100,
+                "revisionMaxAgeDays": 30,
+                "revisionIntervalMins": 5,
+                "keymap": {}
+            })
+        );
     }
 
     #[test]

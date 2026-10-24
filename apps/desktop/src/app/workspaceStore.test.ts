@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { backend } from '../ipc/client';
 import {
   AUTOSAVE_MS,
+  isConsole,
   nextConsoleTitle,
   resetHydrationForTests,
   snapshot,
@@ -10,6 +11,7 @@ import {
 
 const initial = useWorkspace.getState();
 const ws = () => useWorkspace.getState();
+const consoles = () => ws().tabs.filter(isConsole);
 
 describe('workspace store', () => {
   beforeEach(() => {
@@ -47,23 +49,23 @@ describe('workspace store', () => {
     vi.useFakeTimers();
     const write = vi.spyOn(backend, 'consoleWrite');
     const id = await ws().newConsole();
-    const name = ws().tabs[0]?.console ?? '';
+    const name = consoles()[0]?.console ?? '';
 
     ws().updateText(id, 'select 1');
     ws().updateText(id, 'select 12');
-    expect(ws().tabs[0]?.save).toBe('pending');
+    expect(consoles()[0]?.save).toBe('pending');
     expect(write).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(AUTOSAVE_MS + 10);
     expect(write).toHaveBeenCalledTimes(1);
     expect(write).toHaveBeenCalledWith(name, 'select 12');
-    expect(ws().tabs[0]?.save).toBe('saved');
+    expect(consoles()[0]?.save).toBe('saved');
     expect(await backend.consoleRead(name)).toBe('select 12');
   });
 
   it('flushes unsaved text when a tab closes and reports write failures', async () => {
     const id = await ws().newConsole();
-    const name = ws().tabs[0]?.console ?? '';
+    const name = consoles()[0]?.console ?? '';
     ws().updateText(id, 'select 2');
     await ws().closeTab(id);
     expect(await backend.consoleRead(name)).toBe('select 2');
@@ -82,7 +84,7 @@ describe('workspace store', () => {
     const id = await ws().newConsole('src');
     ws().updateText(id, 'secret-ish query text');
     const snap = snapshot(ws());
-    expect(snap.tabs).toEqual([{ id, console: ws().tabs[0]?.console, sourceId: 'src' }]);
+    expect(snap.tabs).toEqual([{ id, console: consoles()[0]?.console, sourceId: 'src' }]);
     expect(JSON.stringify(snap)).not.toContain('secret-ish');
   });
 
@@ -116,8 +118,39 @@ describe('workspace store', () => {
       ],
       activeTabId: 't2',
     });
-    expect(ws().tabs.map((t) => [t.id, t.text])).toEqual([['t1', 'select 7']]);
+    expect(consoles().map((t) => [t.id, t.text])).toEqual([['t1', 'select 7']]);
     expect(ws().activeTabId).toBe('t1');
     expect(ws().notices[0]).toContain('deleted_elsewhere');
+  });
+
+  it('opens each object once and restores object tabs', async () => {
+    const orders = { schema: 'shop', name: 'orders', objectType: 'table' as const };
+    const first = ws().openObject('src', orders);
+    await ws().newConsole('src');
+    expect(ws().openObject('src', orders)).toBe(first);
+    expect(ws().activeTabId).toBe(first);
+    expect(ws().tabs).toHaveLength(2);
+    const other = ws().openObject('src', { ...orders, name: 'customers' });
+    expect(other).not.toBe(first);
+
+    const snap = snapshot(ws());
+    expect(snap.tabs[0]).toEqual({ id: first, kind: 'object', sourceId: 'src', object: orders });
+    useWorkspace.setState(initial, true);
+    resetHydrationForTests();
+    await ws().hydrate(snap);
+    expect(
+      ws()
+        .tabs.filter((t) => !isConsole(t))
+        .map((t) => t.id),
+    ).toEqual([first, other]);
+    // Text-only operations leave object tabs alone.
+    ws().updateText(first, 'select 1');
+    await ws().flushAll();
+    expect(ws().tabs.find((t) => t.id === first)).toEqual({
+      id: first,
+      kind: 'object',
+      sourceId: 'src',
+      object: orders,
+    });
   });
 });

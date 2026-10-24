@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-session-drop"
+description = "Enables the session_drop command without any pre-configured scope."
+commands.allow = ["session_drop"]
+
+[[permission]]
+identifier = "deny-session-drop"
+description = "Denies the session_drop command without any pre-configured scope."
+commands.deny = ["session_drop"]

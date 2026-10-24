@@ -3,20 +3,62 @@ import { StatusBar } from './StatusBar';
 import { Toolbar } from './Toolbar';
 import { Workbench } from './Workbench';
 import { useAppliedTheme, useKeybindings, useWorkspacePersistence } from './hooks';
-import { useWorkspace } from './workspaceStore';
+import { isConsole, useWorkspace } from './workspaceStore';
 import { SettingsDialog } from '../features/settings/SettingsDialog';
 import { useConnections } from '../features/connections/connectionsStore';
-import { activeEditor } from '../features/editor/editorHandle';
+import { activeEditor, goToError } from '../features/editor/editorHandle';
+import { snippetFor } from '../features/snippets/snippetsStore';
 import { useExec } from '../features/exec/execStore';
 import { runFromEditor } from '../features/exec/runQuery';
+import { closeConsole } from '../features/exec/txGuards';
 import { DialogHost } from './dialogs';
+import { Toasts } from '../features/notifications/notifications';
 import { ConnectionDialog } from '../features/connections/ConnectionDialog';
+import { HistoryDialog } from '../features/history/HistoryDialog';
+import { goToDdlAtCaret, revealAtCaret } from '../features/navigation/atCaret';
+import { formatWithHistory } from '../features/editor/localHistory';
+import { LocalHistoryDialog } from '../features/editor/LocalHistoryDialog';
+import { consoleContext, startForError, useAssistant } from '../features/ai/assistantStore';
+import { aiAvailable, useAi } from '../features/ai/aiStore';
+import { useNotifications } from '../features/notifications/notifications';
+import { Palette } from '../features/palette/Palette';
+import { RecentDialog } from '../features/palette/RecentDialog';
 import type { ConnectionProfile } from '../ipc/types';
+import type { ActionId } from '../lib/actions';
+import { goBack, goForward } from './navStore';
+
+/** True (after saying why) when AI is off, off for this workspace, or has no key. */
+function aiUnavailable(): boolean {
+  if (aiAvailable()) {
+    return false;
+  }
+  useNotifications.getState().notify('AI is off. Turn it on and add an API key in Settings > AI.');
+  return true;
+}
+
+/** Shows why a navigation action did nothing. */
+async function explain(result: Promise<string | null>) {
+  const problem = await result;
+  if (problem) {
+    useNotifications.getState().notify(problem);
+  }
+}
+
+// Panels as they were before Hide all panels, to restore them.
+let panelsBefore: { explorer: boolean; bottom: boolean } | null = null;
 
 export function App() {
   const { ready, error } = useWorkspacePersistence();
   const theme = useAppliedTheme();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  // The search palette's initial text (`null` = closed).
+  const [palette, setPalette] = useState<string | null>(null);
+  const [recentOpen, setRecentOpen] = useState(false);
+  // The console tab whose local history is open.
+  const [localHistory, setLocalHistory] = useState<string | null>(null);
+  // AI entry points are hidden while AI is off, for this workspace, or without a key.
+  const aiOn = useAi((s) => aiAvailable(s.status));
   const notices = useWorkspace((s) => s.notices);
   const dismissNotices = useWorkspace((s) => s.dismissNotices);
   // `null` = closed, `'new'` = create, profile = edit.
@@ -28,7 +70,7 @@ export function App() {
       'console.new': () => void ws().newConsole(useConnections.getState().selectedId),
       'tab.close': () => {
         const id = ws().activeTabId;
-        if (id) void ws().closeTab(id);
+        if (id) void closeConsole(id);
       },
       'tab.next': () => ws().cycleTab(1),
       'tab.previous': () => ws().cycleTab(-1),
@@ -36,14 +78,88 @@ export function App() {
       'view.toggleBottomPanel': () => ws().setBottomCollapsed(!ws().bottomCollapsed),
       'settings.open': () => setSettingsOpen(true),
       'datasource.new': () => setConnectionDialog('new'),
-      'editor.format': () => activeEditor()?.format(),
+      'editor.format': () => void formatWithHistory(),
+      // Declines (false) unless the word before the caret is an abbreviation: Tab then indents
+      // or accepts a suggestion, or moves to the next tab stop of an expanded snippet.
+      'editor.expandSnippet': () =>
+        activeEditor()?.expandSnippet((word) => snippetFor(word)?.body) ?? false,
+      'editor.nextError': () => goToError(1),
+      'editor.previousError': () => goToError(-1),
       'query.run': () => void runFromEditor('current'),
       'query.runScript': () => void runFromEditor('script'),
       'query.cancel': () => {
         const id = ws().activeTabId;
         if (id) void useExec.getState().cancel(id);
       },
-    };
+      'history.open': () => setHistoryOpen(true),
+      'search.everywhere': () => setPalette(''),
+      'search.objects': () => setPalette('/objects '),
+      'nav.recent': () => setRecentOpen(true),
+      'nav.back': () => void goBack(),
+      'nav.forward': () => void goForward(),
+      'tab.reopenClosed': () => void ws().reopenClosed(),
+      'view.hideAllPanels': () => {
+        const { explorerCollapsed, bottomCollapsed } = ws();
+        if (explorerCollapsed && bottomCollapsed && panelsBefore) {
+          ws().setExplorerCollapsed(panelsBefore.explorer);
+          ws().setBottomCollapsed(panelsBefore.bottom);
+          panelsBefore = null;
+        } else {
+          panelsBefore = { explorer: explorerCollapsed, bottom: bottomCollapsed };
+          ws().setExplorerCollapsed(true);
+          ws().setBottomCollapsed(true);
+        }
+      },
+      'ai.ask': () => {
+        if (aiUnavailable()) {
+          return;
+        }
+        useAssistant.getState().setOpen(true);
+        // The prompt mounts with the panel.
+        requestAnimationFrame(() =>
+          document.querySelector<HTMLElement>('[aria-label="AI assistant"] textarea')?.focus(),
+        );
+      },
+      'ai.explainQuery': () => {
+        if (aiUnavailable()) {
+          return;
+        }
+        const c = consoleContext();
+        if (typeof c === 'string' || !c.sql.trim()) {
+          useNotifications
+            .getState()
+            .notify(typeof c === 'string' ? c : 'Put the caret in a statement to explain it.');
+          return;
+        }
+        void useAssistant.getState().start({
+          sourceId: c.sourceId,
+          schema: c.schema,
+          task: { kind: 'explainQuery' },
+          sql: c.sql,
+          target: null,
+        });
+      },
+      'ai.explainError': () => {
+        const id = ws().activeTabId;
+        if (!aiUnavailable() && id) {
+          void explain(Promise.resolve(startForError('explainError', id)));
+        }
+      },
+      'ai.fix': () => {
+        const id = ws().activeTabId;
+        if (!aiUnavailable() && id) {
+          void explain(Promise.resolve(startForError('fix', id)));
+        }
+      },
+      'console.localHistory': () => {
+        const tab = ws().tabs.find((t) => t.id === ws().activeTabId);
+        if (isConsole(tab)) {
+          setLocalHistory(tab.id);
+        }
+      },
+      'editor.goToDdl': () => void explain(goToDdlAtCaret()),
+      'editor.revealInTree': () => void explain(revealAtCaret()),
+    } satisfies Partial<Record<ActionId, () => unknown>>;
   }, []);
   useKeybindings(handlers);
 
@@ -57,7 +173,10 @@ export function App() {
 
   return (
     <div className="flex h-full flex-col">
-      <Toolbar onOpenSettings={() => setSettingsOpen(true)} />
+      <Toolbar
+        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenHistory={() => setHistoryOpen(true)}
+      />
       {error && (
         <div role="alert" className="border-b border-border bg-panel-2 px-3 py-1 text-danger">
           {error}
@@ -81,7 +200,28 @@ export function App() {
       />
       <StatusBar theme={theme} />
       <DialogHost />
+      <Toasts />
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
+      {historyOpen && <HistoryDialog onClose={() => setHistoryOpen(false)} />}
+      {palette !== null && (
+        <Palette
+          initial={palette}
+          actions={
+            Object.keys(handlers).filter(
+              (id) =>
+                id !== 'search.everywhere' &&
+                id !== 'search.objects' &&
+                (aiOn || !id.startsWith('ai.')),
+            ) as ActionId[]
+          }
+          onRunAction={(id) => handlers[id as keyof typeof handlers]?.()}
+          onClose={() => setPalette(null)}
+        />
+      )}
+      {recentOpen && <RecentDialog onClose={() => setRecentOpen(false)} />}
+      {localHistory && (
+        <LocalHistoryDialog tabId={localHistory} onClose={() => setLocalHistory(null)} />
+      )}
       {connectionDialog && (
         <ConnectionDialog
           profile={connectionDialog === 'new' ? undefined : connectionDialog}

@@ -1,0 +1,57 @@
+# Keeps one open "release PR" up to date on the release/next branch. It bumps the app version from
+# the commit messages since the last release tag and adds a CHANGELOG.md section. Merging that PR
+# triggers release.yml, which builds the installers and publishes the GitHub release.
+name: Release PR
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump (auto reads commit messages since the last release)
+        type: choice
+        options: [auto, patch, minor, major]
+        default: auto
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-pr
+  cancel-in-progress: true
+
+jobs:
+  release-pr:
+    # The push that merges a release PR is handled by release.yml; opening another PR here would
+    # race with its tag.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (!startsWith(github.event.head_commit.message, 'chore: release v') &&
+      !contains(github.event.head_commit.message, '/release/next'))
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - id: version
+        run: node scripts/release/version.mjs prepare --bump "$BUMP"
+        env:
+          BUMP: ${{ inputs.bump || 'auto' }}
+      - if: steps.version.outputs.release == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          # PRs opened with GITHUB_TOKEN do not trigger CI. Add a RELEASE_TOKEN secret (fine-grained
+          # PAT or GitHub App token with contents and pull-requests write) to get CI on the PR.
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
+          branch: release/next
+          base: main
+          delete-branch: true
+          commit-message: 'chore: release v${{ steps.version.outputs.version }}'
+          title: 'chore: release v${{ steps.version.outputs.version }}'
+          body-path: ${{ steps.version.outputs.notes_file }}
+          labels: release

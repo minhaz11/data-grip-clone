@@ -30,3 +30,8 @@
 
 - The frontend gets typed commands (`history_search`, `settings_get/set`, …), not a database handle.
 - Backup = copy `app.db` plus the consoles directory. Neither contains secrets.
+- Implemented (step 11, migration 5): `folders` (one level, with an optional color the data
+  sources inherit), `connections.folder_id` and `sort_order`, `ssh_profiles` (no secret columns)
+  with `connections.ssh_profile_id` (a profile in use cannot be deleted, so a data source never
+  silently loses its tunnel), `ssh_known_hosts`, TLS file paths, keep-alive, auto-disconnect,
+  startup SQL, the schema scope (`schema_names` as JSON, `schema_pattern`) and `url_only`.

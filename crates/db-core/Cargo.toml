@@ -10,6 +10,11 @@ description = "Engine-neutral database adapter contract (ADR-0002)."
 async-trait = "0.1.92"
 quarry-secrets.workspace = true
 serde.workspace = true
+ts-rs = { workspace = true, optional = true }
+
+[features]
+# TypeScript binding derives, used by the desktop crate's bindings test.
+ts = ["dep:ts-rs"]
 
 [dev-dependencies]
 serde_json.workspace = true

@@ -25,7 +25,7 @@ deliberately unrelated to JetBrains branding.
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Repository layout (target)
+## Repository layout
 
 ```
 apps/desktop/                  Tauri app
@@ -33,13 +33,21 @@ apps/desktop/                  Tauri app
     app/                       shell, layout, routing of panels, theme
     features/<module>/         one folder per product module (below)
     components/ui/             reusable accessible primitives
-    ipc/                       generated bindings + thin typed client + mock for tests
-  src-tauri/                   Tauri entry crate: commands → domain crates
+    ipc/                       generated bindings (bindings.ts), typed client, in-memory backend
+    lib/sql/                   statement splitter, classifier, completion context (ADR-0006)
+  src-tauri/                   Tauri entry crate: commands, job registry, sessions, bindings test
 crates/
-  db-core  db-postgres  sql  store  secrets  exec  metadata  io  ai-core  ai-anthropic
-docs/  (reverse-engineering, architecture, decisions)
-tests/e2e/                     Playwright (mock IPC) + tauri-driver suites
+  db-core  db-postgres  connections  secrets  store  workspace  io      built
+  logging                                                               built (redacting log file)
+  ai-core  ai-anthropic                                                 built (provider, step 16)
+docs/  (reverse-engineering, architecture, decisions, plans)
+tests/e2e/                     Playwright + axe against the Vite build with a fake IPC layer
 ```
+
+The diagram above shows logical components. The `exec`, `metadata` and `sql` boxes did not become
+separate crates: the engine-neutral contract lives in `db-core`, the PostgreSQL implementations in
+`db-postgres` (`exec.rs`, `metadata.rs`, `refine.rs`, `edits.rs`), the job registry in
+`src-tauri/src/exec.rs`, and the splitter and classifier in TypeScript (ADR-0006).
 
 The Rust backend is a Cargo workspace. The frontend uses npm workspaces (single app for now). Each
 domain crate is unit-testable without Tauri.
@@ -67,12 +75,16 @@ Cross-cutting pieces:
 
 ## IPC contract principles
 
-1. Commands are **coarse-grained and typed**. Bindings are generated (`tauri-specta` or equivalent) so
-   TS and Rust cannot drift.
+1. Commands are **coarse-grained and typed**. Every type that crosses IPC is generated from Rust
+   with `ts-rs` into `apps/desktop/src/ipc/bindings.ts` (`npm run bindings`); `cargo test` fails
+   when the file is stale. A second test checks that the command names in `build.rs`,
+   `capabilities/default.json`, `generate_handler!` and `ipc/client.ts` agree. The `invoke`
+   wrappers in `client.ts` stay hand-written.
 2. Long work returns a `job_id` immediately. Progress, pages, and completion arrive as events. The UI
    never awaits a query on the invoke promise.
-3. Errors are a single serializable `AppError { kind, message, detail?, hint?, sqlstate?, position? }`
-   and contain no secrets.
+3. Errors are a single serializable `AppError { kind, message, hint?, sqlstate?, connectKind? }`
+   and contain no secrets. Statement failures inside a job arrive as `StatementError` events
+   (with `detail` and `position`), not as rejected calls.
 4. Large payloads are paged (`exec_fetch_page(job_id, offset, limit)`). Files stream in Rust; the UI
    gets progress only.
 5. The capability file allows only our commands plus a minimal set of core plugins
@@ -85,7 +97,9 @@ Cross-cutting pieces:
 
 1. Classify every statement.
 2. If the connection is **read-only** and any statement is a write or DDL, block it with an
-   explanation.
+   explanation. The session itself
+   also keeps it read-only: it restores the read-only default before each statement outside a
+   transaction and rolls back any transaction switched to read-write (M4.6).
 3. If a statement is **destructive** (DROP/TRUNCATE/ALTER … DROP, or DELETE/UPDATE without WHERE),
    show a confirmation dialog that lists the statements.
 4. If the connection environment is **production**, require an extra confirmation for any write,

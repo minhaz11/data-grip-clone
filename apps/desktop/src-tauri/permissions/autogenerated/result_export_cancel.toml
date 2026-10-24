@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-result-export-cancel"
+description = "Enables the result_export_cancel command without any pre-configured scope."
+commands.allow = ["result_export_cancel"]
+
+[[permission]]
+identifier = "deny-result-export-cancel"
+description = "Denies the result_export_cancel command without any pre-configured scope."
+commands.deny = ["result_export_cancel"]
