@@ -20,7 +20,8 @@ pub const MAX_ANSWER_TOKENS: u32 = 16_000;
 /// Longest editor text or question accepted.
 pub const MAX_INPUT_CHARS: usize = 100_000;
 
-/// What the user asks for. Step 18 adds explain, explain-error and fix.
+/// What the user asks for. Every prompt template lives here, in Rust, so the preview and the
+/// request log show the exact wording sent.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(
@@ -29,20 +30,68 @@ pub const MAX_INPUT_CHARS: usize = 100_000;
     rename_all_fields = "camelCase"
 )]
 pub enum AiTask {
-    /// A free-form question about the SQL in the editor (or a request to write some).
+    /// A free-form question about the SQL in the editor.
     Ask { question: String },
+    /// Write SQL for a request in plain language (the editor's SQL, if any, is context).
+    Generate { request: String },
+    /// Explain what the SQL does.
+    ExplainQuery,
+    /// Explain why the SQL failed with `error`.
+    ExplainError { error: String },
+    /// Propose corrected SQL for a statement that failed with `error`.
+    Fix { error: String },
 }
 
 impl AiTask {
     pub fn action(&self) -> &'static str {
         match self {
             Self::Ask { .. } => "ask",
+            Self::Generate { .. } => "generate",
+            Self::ExplainQuery => "explainQuery",
+            Self::ExplainError { .. } => "explainError",
+            Self::Fix { .. } => "fix",
         }
     }
 
+    /// The user-supplied text (question, request or error), for size checks.
     pub fn text(&self) -> &str {
         match self {
             Self::Ask { question } => question,
+            Self::Generate { request } => request,
+            Self::ExplainQuery => "",
+            Self::ExplainError { error } | Self::Fix { error } => error,
+        }
+    }
+
+    /// Whether the task needs SQL from the editor to make sense.
+    pub fn needs_sql(&self) -> bool {
+        !matches!(self, Self::Ask { .. } | Self::Generate { .. })
+    }
+
+    fn instruction(&self, dialect: &str) -> String {
+        match self {
+            Self::Ask { question } => format!("Request: {}", question.trim()),
+            Self::Generate { request } => format!(
+                "Write {dialect} SQL for this request. Reply with the SQL in one ```sql block, \
+                 then at most three sentences on what it does and any assumption you made.\n\n\
+                 Request: {}",
+                request.trim()
+            ),
+            Self::ExplainQuery => "Explain what the SQL in the editor does, step by step, in \
+                 plain language. Point out anything costly or risky (full scans, locks, writes \
+                 without a WHERE clause)."
+                .into(),
+            Self::ExplainError { error } => format!(
+                "The SQL in the editor failed with the error below. Explain what the error \
+                 means and why this SQL causes it, then how to fix it.\n\nError:\n{}",
+                error.trim()
+            ),
+            Self::Fix { error } => format!(
+                "The SQL in the editor failed with the error below. Reply with the corrected \
+                 SQL in one ```sql block (the whole statement, not a fragment), then one or two \
+                 sentences on what you changed.\n\nError:\n{}",
+                error.trim()
+            ),
         }
     }
 }
@@ -253,7 +302,7 @@ pub fn build_request(
             sql.trim_end()
         ));
     }
-    parts.push(format!("Request: {}", task.text().trim()));
+    parts.push(task.instruction(facts.dialect));
     CompletionRequest {
         model: model.to_owned(),
         system: Some(SYSTEM.into()),
@@ -450,6 +499,60 @@ mod tests {
         let text = &r.messages[0].content;
         assert!(text.contains("Sample rows from public.users (1 rows):\nnote\tgone\na b "));
         assert!(text.contains("…\tNULL"));
+    }
+
+    #[test]
+    fn each_task_has_its_template() {
+        let facts = SourceFacts {
+            dialect: "PostgreSQL",
+            server_version: None,
+        };
+        let build = |task: AiTask| {
+            build_request(
+                &facts,
+                &task,
+                "select nope",
+                AiContextLevel::None,
+                "",
+                &[],
+                "m",
+            )
+            .messages[0]
+                .content
+                .clone()
+        };
+        let generate = build(AiTask::Generate {
+            request: "orders per day".into(),
+        });
+        assert!(generate.contains("Write PostgreSQL SQL for this request"));
+        assert!(generate.contains("one ```sql block"));
+        assert!(generate.ends_with("Request: orders per day"));
+        assert!(build(AiTask::ExplainQuery).contains("Explain what the SQL in the editor does"));
+        let error = "ERROR 42703: column \"nope\" does not exist";
+        let explain = build(AiTask::ExplainError {
+            error: error.into(),
+        });
+        assert!(explain.contains("Explain what the error means"));
+        assert!(explain.ends_with(error));
+        let fix = build(AiTask::Fix {
+            error: error.into(),
+        });
+        assert!(fix.contains("Reply with the corrected SQL in one ```sql block"));
+        assert!(fix.contains("SQL in the editor:\n```sql\nselect nope\n```"));
+        assert_eq!(
+            AiTask::Fix {
+                error: String::new()
+            }
+            .action(),
+            "fix"
+        );
+        assert!(AiTask::ExplainQuery.needs_sql());
+        assert!(
+            !AiTask::Generate {
+                request: String::new()
+            }
+            .needs_sql()
+        );
     }
 
     #[test]

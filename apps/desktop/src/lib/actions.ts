@@ -122,9 +122,27 @@ export const ACTIONS = [
   },
   {
     id: 'ai.ask',
-    title: 'Ask AI about the SQL',
+    title: 'AI assistant',
     context: 'global',
     defaults: ['Ctrl+Alt+A'],
+  },
+  {
+    id: 'ai.explainQuery',
+    title: 'Explain the query with AI',
+    context: 'global',
+    defaults: [],
+  },
+  {
+    id: 'ai.explainError',
+    title: 'Explain the last error with AI',
+    context: 'global',
+    defaults: [],
+  },
+  {
+    id: 'ai.fix',
+    title: 'Fix the last error with AI',
+    context: 'global',
+    defaults: [],
   },
   {
     id: 'view.hideAllPanels',

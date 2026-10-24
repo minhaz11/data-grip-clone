@@ -9,6 +9,7 @@ import {
   type AiSettings,
   type AiStatus,
   type AiStreamEvent,
+  type AiTask,
   type ConnectionDraft,
   type ConnectionProfile,
   type Folder,
@@ -25,6 +26,22 @@ import {
  * names, password-saved flag) but never holds a password: the flag is all the UI can observe.
  */
 const AI_WORKSPACE_ID = 'main';
+
+/** The last part of a request, as the Rust templates word it (shortened). */
+function aiInstruction(task: AiTask): string {
+  switch (task.kind) {
+    case 'ask':
+      return `Request: ${task.question}`;
+    case 'generate':
+      return `Write PostgreSQL SQL for this request. Reply with the SQL in one \`\`\`sql block.\n\nRequest: ${task.request}`;
+    case 'explainQuery':
+      return 'Explain what the SQL in the editor does, step by step, in plain language.';
+    case 'explainError':
+      return `The SQL in the editor failed with the error below. Explain what the error means.\n\nError:\n${task.error}`;
+    case 'fix':
+      return `The SQL in the editor failed with the error below. Reply with the corrected SQL in one \`\`\`sql block.\n\nError:\n${task.error}`;
+  }
+}
 /** Delay between the fake AI test's events, so the UI shows them arriving one by one. */
 const AI_STEP_MS = 60;
 
@@ -52,7 +69,13 @@ export function createMemoryBackend(): Backend {
   >();
   const aiPrepared = new Map<
     string,
-    { connectionId: string; level: AiContextLevel; rowsSent: boolean; body: string }
+    {
+      action: string;
+      connectionId: string;
+      level: AiContextLevel;
+      rowsSent: boolean;
+      body: string;
+    }
   >();
   const aiLog: AiLogEntry[] = [];
   const dropPrepared = (connectionId: string) => {
@@ -281,7 +304,7 @@ export function createMemoryBackend(): Backend {
       if (request.sql.trim()) {
         parts.push(`SQL in the editor:\n${request.sql}`);
       }
-      parts.push(`Request: ${request.task.question}`);
+      parts.push(aiInstruction(request.task));
       const body = JSON.stringify(
         {
           model: aiSettings.model,
@@ -295,6 +318,7 @@ export function createMemoryBackend(): Backend {
       seq += 1;
       const payloadId = `payload-${seq}`;
       aiPrepared.set(payloadId, {
+        action: request.task.kind,
         connectionId: request.connectionId,
         level,
         rowsSent: withRows,
@@ -334,7 +358,7 @@ export function createMemoryBackend(): Backend {
         createdAt: Date.now(),
         connectionId: prepared.connectionId,
         connectionName: find(prepared.connectionId)?.name ?? '',
-        action: 'ask',
+        action: prepared.action,
         model: aiSettings.model,
         level: prepared.level,
         rowsSent: prepared.rowsSent,

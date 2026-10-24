@@ -245,6 +245,18 @@ export default function MonacoSqlEditor({
         editor.pushUndoStop();
         editor.focus();
       },
+      replaceRange: (start, end, text) => {
+        const m = model();
+        if (!m || callbacks.current.readOnly) {
+          return;
+        }
+        const range = monaco.Range.fromPositions(m.getPositionAt(start), m.getPositionAt(end));
+        editor.pushUndoStop();
+        editor.executeEdits('quarry-replace', [{ range, text, forceMoveMarkers: true }]);
+        editor.pushUndoStop();
+        editor.setPosition(m.getPositionAt(start + text.length));
+        editor.focus();
+      },
       expandSnippet: (lookup) => {
         const m = model();
         const position = editor.getPosition();

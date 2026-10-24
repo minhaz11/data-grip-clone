@@ -1,3 +1,5 @@
+import { aiAvailable, useAi } from '../ai/aiStore';
+import { startForError } from '../ai/assistantStore';
 import clsx from 'clsx';
 import { CircleCheck, CircleX, LoaderCircle, Ban, Circle, Pin } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -257,7 +259,7 @@ function OutputLog({ tabId, run }: { tabId: string; run: Run }) {
               )}
               <ol>
                 {lines.map((st) => (
-                  <OutputLine key={st.index} st={st} current={current} />
+                  <OutputLine key={st.index} st={st} current={current} tabId={tabId} />
                 ))}
               </ol>
             </li>
@@ -268,7 +270,9 @@ function OutputLog({ tabId, run }: { tabId: string; run: Run }) {
   );
 }
 
-function OutputLine({ st, current }: { st: StatementRun; current: boolean }) {
+function OutputLine({ st, current, tabId }: { st: StatementRun; current: boolean; tabId: string }) {
+  // AI help for errors of the current run, while AI is available (hidden otherwise).
+  const aiOn = useAi((s) => aiAvailable(s.status));
   const Icon = {
     pending: Circle,
     running: LoaderCircle,
@@ -343,6 +347,24 @@ function OutputLine({ st, current }: { st: StatementRun; current: boolean }) {
             </p>
             {e.detail && <p className="text-muted">{e.detail}</p>}
             {e.hint && <p className="text-muted">Hint: {e.hint}</p>}
+            {aiOn && current && !e.cancelled && (
+              <p className="mt-1 flex gap-2">
+                <button
+                  type="button"
+                  className="rounded border border-border px-2 py-0.5 hover:bg-hover"
+                  onClick={() => startForError('explainError', tabId)}
+                >
+                  Explain Error
+                </button>
+                <button
+                  type="button"
+                  className="rounded border border-border px-2 py-0.5 hover:bg-hover"
+                  onClick={() => startForError('fix', tabId)}
+                >
+                  Fix with AI
+                </button>
+              </p>
+            )}
           </div>
         )}
       </div>

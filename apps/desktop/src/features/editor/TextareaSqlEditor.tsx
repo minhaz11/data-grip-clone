@@ -45,6 +45,17 @@ export default function TextareaSqlEditor({
           area.focus();
         });
       },
+      replaceRange: (start, end, text) => {
+        const area = el();
+        if (!area || readOnly) {
+          return;
+        }
+        onChange(area.value.slice(0, start) + text + area.value.slice(end));
+        requestAnimationFrame(() => {
+          area.setSelectionRange(start + text.length, start + text.length);
+          area.focus();
+        });
+      },
       revealOffset: (offset) => {
         el()?.setSelectionRange(offset, offset);
         el()?.focus();

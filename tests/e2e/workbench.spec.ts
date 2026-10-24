@@ -455,7 +455,7 @@ test.describe('accessibility', () => {
     await expectNoA11yViolations(app, '[role="dialog"]');
   });
 
-  test('Ask AI asks for consent, previews the exact request, and has no WCAG A/AA violations', async ({
+  test('the AI panel asks for consent, previews, inserts without running, and has no WCAG A/AA violations', async ({
     app,
   }) => {
     await app.getByRole('button', { name: /^Settings/ }).click();
@@ -471,21 +471,27 @@ test.describe('accessibility', () => {
     await createDataSource(app, 'AI Dev');
     await consoleWith(app, 'AI Dev', 'select 1');
     await app.keyboard.press('ControlOrMeta+Alt+A');
-    const ask = app.getByRole('dialog', { name: 'Ask AI' });
-    await ask.getByLabel('Question or request').fill('What does this do?');
-    await ask.getByRole('button', { name: 'Preview Request' }).click();
+    const panel = app.getByRole('complementary', { name: 'AI assistant' });
+    await panel.getByLabel('Ask, or describe the SQL you need').fill('count the orders');
+    await panel.getByRole('button', { name: 'Generate SQL' }).click();
     const consent = app.getByRole('dialog', { name: 'AI context for AI Dev' });
     await expect(consent.getByRole('radio', { name: /^SQL and schema/ })).toBeChecked();
     await expectNoA11yViolations(app, '[role="dialog"]');
     await consent.getByRole('radio', { name: /^SQL text only/ }).check();
     await consent.getByRole('button', { name: 'Continue' }).click();
-    const preview = ask.getByRole('region', { name: 'What will be sent' });
+    const preview = panel.getByRole('region', { name: 'What will be sent' });
     await preview.getByText('What will be sent (exact text)').click();
-    await expect(preview.getByLabel('Request text')).toContainText('What does this do?');
-    await expectNoA11yViolations(app, '[role="dialog"]');
-    await ask.getByRole('button', { name: 'Send' }).click();
-    await expect(ask.getByRole('log', { name: 'Answer' })).toContainText('SELECT 1;');
-    await expectNoA11yViolations(app, '[role="dialog"]');
+    await expect(preview.getByLabel('Request text')).toContainText('count the orders');
+    await expectNoA11yViolations(app, '[aria-label="AI assistant"]');
+    await panel.getByRole('button', { name: 'Send' }).click();
+    const proposal = panel.getByRole('region', { name: 'Proposed SQL' });
+    await expect(proposal).toContainText('SELECT 1;');
+    await expectNoA11yViolations(app, '[aria-label="AI assistant"]');
+    const executed = (await ipcCalls(app, 'query_execute')).length;
+    await proposal.getByRole('button', { name: 'Insert' }).click();
+    await expect(app.locator('.monaco-editor').first()).toContainText('SELECT 1;');
+    // Inserting never runs anything.
+    expect(await ipcCalls(app, 'query_execute')).toHaveLength(executed);
   });
 
   test('settings dialog has no WCAG A/AA violations', async ({ app }) => {

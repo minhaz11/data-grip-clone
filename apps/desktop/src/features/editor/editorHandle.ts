@@ -8,6 +8,8 @@ export interface EditorHandle {
   getCaret(): number;
   /** Replaces the selection (or inserts at the caret) with `text`, undoably, and focuses the editor. */
   insertText(text: string): void;
+  /** Replaces `[start, end)` with `text`, undoably, puts the caret after it and focuses. */
+  replaceRange(start: number, end: number, text: string): void;
   /** Moves the caret to `offset`, scrolls it into view and focuses the editor. */
   revealOffset(offset: number): void;
   /** Underlines `[start, end)` as an error with `message`; replaces any previous marker. */

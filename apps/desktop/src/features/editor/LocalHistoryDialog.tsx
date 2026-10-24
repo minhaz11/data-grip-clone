@@ -5,6 +5,7 @@ import { Modal } from '../../components/ui/Modal';
 import { backend } from '../../ipc/client';
 import type { RevisionInfo, RevisionReason } from '../../ipc/types';
 import { diffLines } from '../../lib/diff';
+import { LineDiff } from '../../components/ui/LineDiff';
 import { toAppError } from '../../lib/errors';
 import { useNotifications } from '../notifications/notifications';
 import { formatBytes } from '../import/model';
@@ -172,36 +173,7 @@ export function LocalHistoryDialog({ tabId, onClose }: { tabId: string; onClose(
               (diff.every((l) => l.kind === 'same') ? (
                 <p className="p-2 font-sans text-muted">Same as the current text.</p>
               ) : (
-                <table className="w-full">
-                  <tbody>
-                    {diff.map((line, i) => (
-                      <tr
-                        key={i}
-                        className={clsx(
-                          line.kind === 'added' && 'bg-[#3f9d5a]/15',
-                          line.kind === 'removed' && 'bg-danger/15',
-                        )}
-                      >
-                        <td className="w-8 select-none pr-1 text-right text-muted">
-                          {line.oldLine ?? ''}
-                        </td>
-                        <td className="w-8 select-none pr-1 text-right text-muted">
-                          {line.newLine ?? ''}
-                        </td>
-                        <td className="w-4 select-none text-center">
-                          {line.kind === 'added' ? (
-                            <span aria-label="added">+</span>
-                          ) : line.kind === 'removed' ? (
-                            <span aria-label="removed">-</span>
-                          ) : (
-                            ''
-                          )}
-                        </td>
-                        <td className="whitespace-pre-wrap break-all pr-2">{line.text}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <LineDiff lines={diff} />
               ))}
           </div>
         </div>

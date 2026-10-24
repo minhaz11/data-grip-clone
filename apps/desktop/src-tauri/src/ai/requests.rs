@@ -271,6 +271,12 @@ impl Ai {
                 "The text is too long to send. Select a smaller part.",
             ));
         }
+        if input.task.needs_sql() && input.sql.trim().is_empty() {
+            return Err(AppError::new(
+                "invalid",
+                "Put the caret in a statement or select some SQL first.",
+            ));
+        }
         let this = Arc::clone(self);
         let id = input.connection_id.clone();
         let (consent, profile, settings) = tauri::async_runtime::spawn_blocking(move || {

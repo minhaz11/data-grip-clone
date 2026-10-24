@@ -18,15 +18,23 @@ import { HistoryDialog } from '../features/history/HistoryDialog';
 import { goToDdlAtCaret, revealAtCaret } from '../features/navigation/atCaret';
 import { formatWithHistory } from '../features/editor/localHistory';
 import { LocalHistoryDialog } from '../features/editor/LocalHistoryDialog';
-import { AskAiDialog } from '../features/ai/AskAiDialog';
+import { consoleContext, startForError, useAssistant } from '../features/ai/assistantStore';
 import { aiAvailable, useAi } from '../features/ai/aiStore';
-import { statementAt } from '../lib/sql/statements';
 import { useNotifications } from '../features/notifications/notifications';
 import { Palette } from '../features/palette/Palette';
 import { RecentDialog } from '../features/palette/RecentDialog';
 import type { ConnectionProfile } from '../ipc/types';
 import type { ActionId } from '../lib/actions';
 import { goBack, goForward } from './navStore';
+
+/** True (after saying why) when AI is off, off for this workspace, or has no key. */
+function aiUnavailable(): boolean {
+  if (aiAvailable()) {
+    return false;
+  }
+  useNotifications.getState().notify('AI is off. Turn it on and add an API key in Settings > AI.');
+  return true;
+}
 
 /** Shows why a navigation action did nothing. */
 async function explain(result: Promise<string | null>) {
@@ -49,11 +57,6 @@ export function App() {
   const [recentOpen, setRecentOpen] = useState(false);
   // The console tab whose local history is open.
   const [localHistory, setLocalHistory] = useState<string | null>(null);
-  const [askAi, setAskAi] = useState<{
-    sourceId: string;
-    sql: string;
-    schema: string | null;
-  } | null>(null);
   // AI entry points are hidden while AI is off, for this workspace, or without a key.
   const aiOn = useAi((s) => aiAvailable(s.status));
   const notices = useWorkspace((s) => s.notices);
@@ -108,32 +111,45 @@ export function App() {
         }
       },
       'ai.ask': () => {
-        if (!aiAvailable()) {
+        if (aiUnavailable()) {
+          return;
+        }
+        useAssistant.getState().setOpen(true);
+        // The prompt mounts with the panel.
+        requestAnimationFrame(() =>
+          document.querySelector<HTMLElement>('[aria-label="AI assistant"] textarea')?.focus(),
+        );
+      },
+      'ai.explainQuery': () => {
+        if (aiUnavailable()) {
+          return;
+        }
+        const c = consoleContext();
+        if (typeof c === 'string' || !c.sql.trim()) {
           useNotifications
             .getState()
-            .notify('AI is off. Turn it on and add an API key in Settings > AI.');
+            .notify(typeof c === 'string' ? c : 'Put the caret in a statement to explain it.');
           return;
         }
-        const tab = ws().tabs.find((t) => t.id === ws().activeTabId);
-        const editor = activeEditor();
-        if (!isConsole(tab) || !editor) {
-          useNotifications.getState().notify('Ask AI works in a console.');
-          return;
+        void useAssistant.getState().start({
+          sourceId: c.sourceId,
+          schema: c.schema,
+          task: { kind: 'explainQuery' },
+          sql: c.sql,
+          target: null,
+        });
+      },
+      'ai.explainError': () => {
+        const id = ws().activeTabId;
+        if (!aiUnavailable() && id) {
+          void explain(Promise.resolve(startForError('explainError', id)));
         }
-        if (!tab.sourceId) {
-          useNotifications.getState().notify('Choose a data source for this console first.');
-          return;
+      },
+      'ai.fix': () => {
+        const id = ws().activeTabId;
+        if (!aiUnavailable() && id) {
+          void explain(Promise.resolve(startForError('fix', id)));
         }
-        const text = editor.getText();
-        const selection = editor.getSelection();
-        const span = statementAt(text, editor.getCaret());
-        const sql =
-          selection.end > selection.start
-            ? text.slice(selection.start, selection.end)
-            : span
-              ? text.slice(span.start, span.end)
-              : '';
-        setAskAi({ sourceId: tab.sourceId, sql, schema: tab.schema ?? null });
       },
       'console.localHistory': () => {
         const tab = ws().tabs.find((t) => t.id === ws().activeTabId);
@@ -193,7 +209,9 @@ export function App() {
           actions={
             Object.keys(handlers).filter(
               (id) =>
-                id !== 'search.everywhere' && id !== 'search.objects' && (aiOn || id !== 'ai.ask'),
+                id !== 'search.everywhere' &&
+                id !== 'search.objects' &&
+                (aiOn || !id.startsWith('ai.')),
             ) as ActionId[]
           }
           onRunAction={(id) => handlers[id as keyof typeof handlers]?.()}
@@ -201,14 +219,6 @@ export function App() {
         />
       )}
       {recentOpen && <RecentDialog onClose={() => setRecentOpen(false)} />}
-      {askAi && (
-        <AskAiDialog
-          sourceId={askAi.sourceId}
-          sql={askAi.sql}
-          schema={askAi.schema}
-          onClose={() => setAskAi(null)}
-        />
-      )}
       {localHistory && (
         <LocalHistoryDialog tabId={localHistory} onClose={() => setLocalHistory(null)} />
       )}

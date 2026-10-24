@@ -110,7 +110,7 @@ remembered: boolean, rowsAlways: boolean,
  */
 suggested: AiContextLevel, };
 
-export type AiTask = { "kind": "ask", question: string, };
+export type AiTask = { "kind": "ask", question: string, } | { "kind": "generate", request: string, } | { "kind": "explainQuery" } | { "kind": "explainError", error: string, } | { "kind": "fix", error: string, };
 
 export type AiPreviewRequest = { connectionId: string, task: AiTask, 
 /**

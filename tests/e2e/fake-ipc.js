@@ -394,7 +394,7 @@
       const content = [
         'Database: PostgreSQL 16.4',
         ...(request.sql.trim() ? [`SQL in the editor:\n${request.sql}`] : []),
-        `Request: ${request.task.question}`,
+        `Request (${request.task.kind}): ${request.task.question ?? request.task.request ?? request.task.error ?? ''}`,
       ].join('\n\n');
       const body = JSON.stringify(
         {
@@ -408,7 +408,12 @@
       );
       state.seq += 1;
       const payloadId = `payload-${state.seq}`;
-      state.aiPrepared.set(payloadId, { connectionId: request.connectionId, level, body });
+      state.aiPrepared.set(payloadId, {
+        action: request.task.kind,
+        connectionId: request.connectionId,
+        level,
+        body,
+      });
       return {
         payloadId,
         connectionId: request.connectionId,
@@ -435,7 +440,7 @@
         createdAt: Date.now(),
         connectionId: prepared.connectionId,
         connectionName: state.connections.find((c) => c.id === prepared.connectionId)?.name ?? '',
-        action: 'ask',
+        action: prepared.action,
         model: state.ai.model,
         level: prepared.level,
         rowsSent: false,

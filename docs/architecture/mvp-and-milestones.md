@@ -571,8 +571,7 @@ listed tests run green in CI.
   - **Request log** (`app.db`): time, data source, action, model, level, whether rows were sent,
     the request text byte for byte, and the answer (or error, or "stopped"); viewable and
     clearable in Settings > AI; the newest 500 are kept.
-  - **Ask AI** (Ctrl+Alt+A): consent, preview, send and a streamed answer that is never run;
-    hidden from the palette while AI is unavailable.
+  - **Entry point**: the AI panel (M6.3).
   - Tests: unit (filtering of tables, columns, keys, indexes, checks and foreign keys; level
     none sends only text; rows only at the rows level; schema cap; consent defaults, remember,
     once and revoke; a different or reused payload id is rejected; a lowered or revoked consent
@@ -581,6 +580,26 @@ listed tests run green in CI.
     rows only after consent); UI (consent first, exact text, log equality, production default,
     row prompt, revoke and log in Settings, hidden while off); E2E (axe on consent, preview
     and answer).
+- **M6.3 AI actions** ✅ (plan: `docs/plans/18-ai-actions.md`)
+  - **AI panel** (Ctrl+Alt+A, right side): the data source and its context level (Change), a
+    prompt with Generate SQL, Ask and Explain Query, the exact request before Send, the
+    streamed answer with Stop. Hidden while AI is off, off for the workspace, or without a key.
+  - **Explain Error** and **Fix with AI** on failed statements in Output, and as actions for the
+    last failed statement; explanations of a query or an error never offer Insert.
+  - **Proposed SQL** (generate, fix, ask) is extracted from the answer and shown as a line diff
+    against the selection or the failed statement; Insert replaces exactly that text (or, if it
+    changed meanwhile, inserts at the caret); Discard drops it. Nothing is ever run: inserted
+    SQL is editor text that runs only through Run with the read-only, destructive and production
+    guards.
+  - Prompt templates live in Rust (dialect and server version included), so the preview and the
+    request log show the wording sent.
+  - Tests: unit (templates per task; SQL extraction from fenced, tagged, untagged, cut-off and
+    bare answers, dollar quotes kept); UI (inserting never executes; inserted `DELETE FROM t`
+    still asks for confirmation on Run; inserted UPDATE on a read-only source is still blocked;
+    Fix from Output as a diff replacing only that statement; explanations without Insert;
+    consent, preview, rows prompt, log and revoke through the panel); E2E (axe on consent,
+    preview and proposal; Insert sends no query).
+- Phase 6 is done (M6.1 to M6.3).
 
 ### Phase 7 — Hardening and release
 
