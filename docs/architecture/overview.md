@@ -39,7 +39,7 @@ apps/desktop/                  Tauri app
 crates/
   db-core  db-postgres  connections  secrets  store  workspace  io      built
   logging                                                               built (redacting log file)
-  ai-core  ai-anthropic                                                 planned (steps 16 to 18)
+  ai-core  ai-anthropic                                                 built (provider, step 16)
 docs/  (reverse-engineering, architecture, decisions, plans)
 tests/e2e/                     Playwright + axe against the Vite build with a fake IPC layer
 ```

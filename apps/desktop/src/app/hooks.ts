@@ -7,6 +7,7 @@ import { resolveTheme, useSettings } from './settingsStore';
 import { snapshot, useWorkspace } from './workspaceStore';
 import { useConnections } from '../features/connections/connectionsStore';
 import { useSnippets } from '../features/snippets/snippetsStore';
+import { useAi } from '../features/ai/aiStore';
 import { useSessions } from '../features/connections/sessionsStore';
 import { resetCatalog } from '../features/editor/catalog';
 import { askQuit } from '../features/exec/txGuards';
@@ -82,6 +83,7 @@ export function useWorkspacePersistence(): { ready: boolean; error: string | nul
         await useSettings.getState().load();
         await useConnections.getState().load();
         await useSnippets.getState().load();
+        await useAi.getState().load();
         unlistenStatus = await useSessions.getState().init();
         const unlistenTx = await useTx.getState().init();
         const unlistenQuit = await backend.onQuitRequested((open) => void askQuit(open));

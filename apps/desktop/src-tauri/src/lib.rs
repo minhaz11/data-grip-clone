@@ -1,3 +1,4 @@
+mod ai;
 mod bindings;
 mod commands;
 mod connections;
@@ -37,6 +38,14 @@ pub fn run() {
             let store = Arc::new(Store::open(&dir.join("app.db"))?);
             // Keyring entries are namespaced by the app identifier (ADR-0003).
             let keyring = Arc::new(KeyringStore::new(app.config().identifier.clone()));
+            app.manage(Arc::new(
+                ai::Ai::new(
+                    Arc::clone(&store),
+                    keyring.clone(),
+                    quarry_ai_anthropic::Options::default(),
+                )
+                .map_err(|e| e.message)?,
+            ));
             app.manage(Arc::new(ConnectionManager::new(
                 Arc::clone(&store),
                 keyring,
@@ -62,6 +71,13 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            ai::ai_settings_get,
+            ai::ai_settings_set,
+            ai::ai_key_set,
+            ai::ai_key_clear,
+            ai::ai_models,
+            ai::ai_test,
+            ai::ai_cancel,
             commands::settings_get,
             commands::settings_set,
             commands::workspace_get,

@@ -1,6 +1,7 @@
 //! Local application storage (ADR-0004). Only the Rust backend touches this database; the UI goes
 //! through typed commands. Secrets are never stored here (ADR-0003).
 
+pub mod ai;
 pub mod connections;
 pub mod history;
 mod migrations;
@@ -15,6 +16,7 @@ use std::sync::{Mutex, MutexGuard};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
+pub use ai::{AiIgnoreKind, AiIgnoreRule, AiSettings, DEFAULT_AI_MODEL};
 pub use connections::{
     ConnectionDraft, ConnectionProfile, Engine, Environment, Folder, SaveMode, SslMode,
 };

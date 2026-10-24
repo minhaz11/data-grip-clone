@@ -21,6 +21,9 @@ quarry-connections.workspace = true
 quarry-db-core.workspace = true
 quarry-db-postgres.workspace = true
 quarry-ssh.workspace = true
+quarry-ai-core.workspace = true
+quarry-ai-anthropic.workspace = true
+futures-util = { version = "0.3.34", default-features = false, features = ["alloc"] }
 quarry-workspace.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -40,7 +43,8 @@ quarry-db-core = { workspace = true, features = ["ts"] }
 quarry-store = { workspace = true, features = ["ts"] }
 quarry-connections = { workspace = true, features = ["ts"] }
 quarry-io = { workspace = true, features = ["ts"] }
-tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "time"] }
+quarry-ai-core = { workspace = true, features = ["ts"] }
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "time", "net", "io-util", "sync"] }
 
 [lints]
 workspace = true

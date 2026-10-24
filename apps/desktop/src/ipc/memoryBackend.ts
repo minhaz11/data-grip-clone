@@ -1,6 +1,10 @@
 import type { Backend } from './client';
 import {
+  AI_FALLBACK_MODELS,
+  DEFAULT_AI_SETTINGS,
   DEFAULT_SETTINGS,
+  type AiSettings,
+  type AiStatus,
   type ConnectionDraft,
   type ConnectionProfile,
   type Folder,
@@ -16,6 +20,10 @@ import {
  * Non-persistent backend for browser-only runs and tests. It mirrors the Rust contract (unique
  * names, password-saved flag) but never holds a password: the flag is all the UI can observe.
  */
+const AI_WORKSPACE_ID = 'main';
+/** Delay between the fake AI test's events, so the UI shows them arriving one by one. */
+const AI_STEP_MS = 60;
+
 export function createMemoryBackend(): Backend {
   let settings: Settings = { ...DEFAULT_SETTINGS };
   let workspace: WorkspaceState | null = null;
@@ -24,6 +32,16 @@ export function createMemoryBackend(): Backend {
   let sshProfiles: SshProfile[] = [];
   let snippets: Snippet[] = [];
   let seq = 0;
+  // AI: like passwords, the key itself is never kept here; only whether one was "stored".
+  let aiSettings: AiSettings = structuredClone(DEFAULT_AI_SETTINGS);
+  let aiKeyStored = false;
+  const aiTimers = new Map<string, ReturnType<typeof setTimeout>[]>();
+  const aiStatus = (): AiStatus => ({
+    settings: structuredClone(aiSettings),
+    keyStored: aiKeyStored,
+    workspaceId: AI_WORKSPACE_ID,
+    active: aiSettings.enabled && !aiSettings.disabledWorkspaces.includes(AI_WORKSPACE_ID),
+  });
   const consoles = new Map<string, string>();
   // Local history: what the Rust side keeps in app.db, minus the automatic policy.
   const revisions: { id: number; console: string; info: RevisionInfo; text: string }[] = [];
@@ -96,6 +114,78 @@ export function createMemoryBackend(): Backend {
     );
 
   return {
+    aiSettingsGet: async () => aiStatus(),
+    aiSettingsSet: async (next) => {
+      if (!/^[A-Za-z0-9._:@-]{1,100}$/.test(next.model)) {
+        return fail('invalid', `'${next.model}' is not a model id`);
+      }
+      const bad = next.ignore.find((r) => {
+        const parts = r.pattern.trim().split('.');
+        return parts.some((p) => !p) || parts.length > (r.kind === 'table' ? 2 : 3);
+      });
+      if (bad) {
+        return fail('invalid', `ignore pattern '${bad.pattern}' is not valid`);
+      }
+      aiSettings = {
+        ...structuredClone(next),
+        ignore: next.ignore.map((r) => ({ ...r, pattern: r.pattern.trim() })),
+      };
+      if (!aiStatus().active) {
+        aiTimers.forEach((timers) => timers.forEach(clearTimeout));
+        aiTimers.clear();
+      }
+      return aiStatus();
+    },
+    aiKeySet: async (key) => {
+      if (!key || /\s/.test(key)) {
+        return fail('invalid', 'Enter an API key without spaces.');
+      }
+      aiKeyStored = true;
+      return aiStatus();
+    },
+    aiKeyClear: async () => {
+      aiKeyStored = false;
+      return aiStatus();
+    },
+    aiModels: async () => ({ models: structuredClone(AI_FALLBACK_MODELS), live: false }),
+    aiTest: async (onEvent) => {
+      if (!aiStatus().active) {
+        return fail('ai_disabled', 'AI features are turned off');
+      }
+      if (!aiKeyStored) {
+        return fail('ai_no_key', 'no API key is stored; add one in Settings > AI');
+      }
+      seq += 1;
+      const id = `ai-${seq}`;
+      const steps: (() => void)[] = [
+        () => onEvent({ type: 'started', model: aiSettings.model }),
+        () => onEvent({ type: 'text', text: 'O' }),
+        () => onEvent({ type: 'text', text: 'K' }),
+        () => {
+          aiTimers.delete(id);
+          onEvent({
+            type: 'done',
+            stopReason: 'end_turn',
+            usage: {
+              inputTokens: 20,
+              outputTokens: 2,
+              cacheReadInputTokens: 0,
+              cacheCreationInputTokens: 0,
+            },
+          });
+        },
+      ];
+      aiTimers.set(
+        id,
+        steps.map((step, i) => setTimeout(step, (i + 1) * AI_STEP_MS)),
+      );
+      return id;
+    },
+    aiCancel: async (requestId) => {
+      aiTimers.get(requestId)?.forEach(clearTimeout);
+      aiTimers.delete(requestId);
+      return null;
+    },
     settingsGet: async () => settings,
     settingsSet: async (next) => (settings = { ...next }),
     workspaceGet: async () => workspace,

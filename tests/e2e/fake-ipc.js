@@ -35,7 +35,17 @@
     sessions: new Map(),
     // Query history, newest first, recorded by query_execute as the Rust job does.
     history: [],
+    // AI: like the Rust side, only whether a key is stored is known, never the key.
+    ai: { enabled: false, model: 'claude-sonnet-5-5', disabledWorkspaces: [], ignore: [] },
+    aiKeyStored: false,
   };
+
+  const aiStatus = () => ({
+    settings: structuredClone(state.ai),
+    keyStored: state.aiKeyStored,
+    workspaceId: 'main',
+    active: state.ai.enabled && !state.ai.disabledWorkspaces.includes('main'),
+  });
 
   const sessionKey = (session) => `${session.sourceId}|${session.console ?? ''}`;
   function sessionState(session) {
@@ -309,6 +319,48 @@
     consoles_dir: () => '/fake/consoles',
     console_checkpoint: () => null,
     snippets_list: () => [],
+    ai_settings_get: () => aiStatus(),
+    ai_settings_set: ({ settings }) => {
+      state.ai = structuredClone(settings);
+      return aiStatus();
+    },
+    ai_key_set: () => {
+      state.aiKeyStored = true;
+      return aiStatus();
+    },
+    ai_key_clear: () => {
+      state.aiKeyStored = false;
+      return aiStatus();
+    },
+    ai_models: () => ({
+      models: [
+        { id: 'claude-sonnet-5-5', displayName: 'Claude Sonnet 5.5' },
+        { id: 'claude-opus-5-5', displayName: 'Claude Opus 5.5' },
+      ],
+      live: false,
+    }),
+    ai_test: ({ onEvent }) => {
+      if (!aiStatus().active) {
+        return reject('ai_disabled', 'AI features are turned off');
+      }
+      sendOnChannel(onEvent, [
+        { type: 'started', model: state.ai.model },
+        { type: 'text', text: 'O' },
+        { type: 'text', text: 'K' },
+        {
+          type: 'done',
+          stopReason: 'end_turn',
+          usage: {
+            inputTokens: 20,
+            outputTokens: 2,
+            cacheReadInputTokens: 0,
+            cacheCreationInputTokens: 0,
+          },
+        },
+      ]);
+      return 'ai-1';
+    },
+    ai_cancel: () => null,
     revisions_list: () => [],
     import_pick: () => ({
       id: 'file-1',

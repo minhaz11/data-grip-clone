@@ -1,6 +1,10 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type {
+  AiModels,
+  AiSettings,
+  AiStatus,
+  AiStreamEvent,
   ConnectionDraft,
   ConnectionProfile,
   Cell,
@@ -62,6 +66,17 @@ export interface Backend {
   settingsSet(settings: Settings): Promise<Settings>;
   workspaceGet(): Promise<WorkspaceState | null>;
   workspaceSet(state: WorkspaceState): Promise<null>;
+  /** AI settings and whether a key is stored (never the key itself). */
+  aiSettingsGet(): Promise<AiStatus>;
+  aiSettingsSet(settings: AiSettings): Promise<AiStatus>;
+  /** Write-only: stores the API key in the OS keyring. */
+  aiKeySet(key: string): Promise<AiStatus>;
+  aiKeyClear(): Promise<AiStatus>;
+  /** Live from the provider while AI is on and a key is stored; otherwise the built-in list. */
+  aiModels(): Promise<AiModels>;
+  /** Streams a short test answer; resolves to the request id at once (for `aiCancel`). */
+  aiTest(onEvent: (e: AiStreamEvent) => void): Promise<string>;
+  aiCancel(requestId: string): Promise<null>;
   connectionsList(): Promise<ConnectionProfile[]>;
   connectionCreate(draft: ConnectionDraft, password: string | null): Promise<ConnectionProfile>;
   connectionUpdate(
@@ -269,6 +284,17 @@ const tauriBackend: Backend = {
   settingsSet: (settings) => invoke<Settings>('settings_set', { settings }),
   workspaceGet: () => invoke<WorkspaceState | null>('workspace_get'),
   workspaceSet: (state) => invoke<null>('workspace_set', { state }),
+  aiSettingsGet: () => invoke<AiStatus>('ai_settings_get'),
+  aiSettingsSet: (settings) => invoke<AiStatus>('ai_settings_set', { settings }),
+  aiKeySet: (key) => invoke<AiStatus>('ai_key_set', { key }),
+  aiKeyClear: () => invoke<AiStatus>('ai_key_clear'),
+  aiModels: () => invoke<AiModels>('ai_models'),
+  aiTest: (onEvent) => {
+    const channel = new Channel<AiStreamEvent>();
+    channel.onmessage = onEvent;
+    return invoke<string>('ai_test', { onEvent: channel });
+  },
+  aiCancel: (requestId) => invoke<null>('ai_cancel', { requestId }),
   connectionsList: () => invoke<ConnectionProfile[]>('connections_list'),
   connectionCreate: (draft, password) =>
     invoke<ConnectionProfile>('connection_create', { draft, password }),

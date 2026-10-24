@@ -433,6 +433,28 @@ test.describe('accessibility', () => {
     await expectNoA11yViolations(app, '[role="dialog"]');
   });
 
+  test('AI settings stream a test answer and have no WCAG A/AA violations', async ({ app }) => {
+    await app.getByRole('button', { name: /^Settings/ }).click();
+    const dialog = app.getByRole('dialog', { name: 'Settings' });
+    await dialog.getByRole('tab', { name: 'AI' }).click();
+    await expect(dialog.getByRole('heading', { name: 'Where your data goes' })).toBeVisible();
+    await expectNoA11yViolations(app, '[role="dialog"]');
+    await dialog.getByRole('checkbox', { name: 'Enable AI features' }).check();
+    await dialog.getByRole('button', { name: 'Add Key' }).click();
+    await dialog.getByLabel('Anthropic API key').fill('sk-ant-e2e-key');
+    await dialog.getByRole('button', { name: 'Save Key' }).click();
+    await expect(dialog.getByText('Stored in the system credential store.')).toBeVisible();
+    await dialog.getByLabel('Pattern').fill('billing.*');
+    await dialog.getByRole('button', { name: 'Add' }).click();
+    await expect(dialog.getByRole('list', { name: 'Ignore list' })).toContainText('billing.*');
+    await dialog.getByRole('button', { name: 'Test' }).click();
+    const result = dialog.getByRole('status', { name: 'Test result' });
+    await expect(result).toContainText('Connected.');
+    await expect(result).toContainText('OK');
+    await expect(dialog).not.toContainText('sk-ant-e2e-key');
+    await expectNoA11yViolations(app, '[role="dialog"]');
+  });
+
   test('settings dialog has no WCAG A/AA violations', async ({ app }) => {
     await app.getByRole('button', { name: /^Settings/ }).click();
     await expect(app.getByRole('dialog')).toBeVisible();

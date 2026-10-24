@@ -532,6 +532,29 @@ listed tests run green in CI.
 
 - Provider abstraction plus Anthropic; per-connection context levels; "what will be sent" preview;
   generate/explain/fix/optimise; output only to preview/insert.
+- **M6.1 AI provider and settings** ✅ (plan: `docs/plans/16-ai-provider.md`)
+  - **Provider**: `quarry-ai-core` defines `AiProvider` (streamed completion events, models,
+    capabilities); `quarry-ai-anthropic` calls the Messages API from Rust over HTTPS (rustls on
+    ring, system roots) with server-sent events, maps errors (auth, permission, rate limit with
+    retry-after, overload, timeout, network, protocol) and enforces connect and idle timeouts.
+    The WebView never calls the network. Models that support it retry policy declines on the
+    server's recommended fallback model; a refusal is reported as such.
+  - **Key**: OS keyring entry `ai:anthropic:api-key`, written by a write-only command; Settings
+    shows only whether one is stored, with Change and Remove.
+  - **Kill switch**: AI is off until enabled, and can be turned off per workspace. While off, Rust
+    refuses every AI call before reading the key, running requests are aborted, and the model
+    list is the built-in one, so nothing leaves the machine.
+  - **Settings > AI**: "Where your data goes", enable and per-workspace switches, key, model
+    selector (live list or built-in), a streamed Test with Cancel, and the ignore list of tables
+    and columns (globs, matched case-insensitively; applied by M6.2).
+  - Tests: unit (SSE parsing with every split point, CRLF and split UTF-8; event decoding,
+    error events, stop reasons; status and error-type mapping; kill switch before the provider;
+    ignore-list matching and validation); integration against a local stand-in API (incremental
+    streaming, cancel closes the connection, HTTP errors, cut-off and silent streams, model
+    paging, no connection while AI is off); canaries (the key never reaches the log file at
+    trace level, `app.db`, or IPC responses); UI (write-only key, streamed test and cancel,
+    workspace switch, ignore list); E2E (axe on Settings > AI); optional live call gated by
+    `QUARRY_ANTHROPIC_TEST_KEY`.
 
 ### Phase 7 — Hardening and release
 

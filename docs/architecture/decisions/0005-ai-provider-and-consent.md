@@ -36,6 +36,20 @@ cannot classify a statement.
 - Prompts include the dialect name and server version so that generated SQL targets the right engine.
 - All AI requests are logged locally (redacted, no row data). The user can view and clear this log.
 
+## As built (step 16, 2026-10-24)
+
+- Crates: `crates/ai-core` (`quarry-ai-core`: the `AiProvider` trait, request and event types,
+  `KillSwitch` and the `Switched` wrapper) and `crates/ai-anthropic` (`quarry-ai-anthropic`).
+- The provider calls the Messages API directly over HTTPS (reqwest with rustls on the ring
+  provider and the system's trusted roots), streams with server-sent events, and sends
+  `anthropic-version: 2026-10-21`. There is no official Rust SDK, so this is a raw HTTP client.
+- Default model: `claude-sonnet-5-5`. The selector lists the models endpoint's answer while AI is
+  on and a key is stored, and a built-in list otherwise.
+- Key: keyring account `ai:anthropic:api-key`, set by a write-only command; the UI only learns
+  whether a key is stored. The redacting logger masks `sk-ant-` keys.
+- Kill switch: off by default; checked in Rust before the key is read and before any request.
+  Per-workspace disable and the table/column ignore list live in `app.db` (`settings` row `ai`).
+
 ## Consequences
 
 - The AI module depends on `db-core` metadata types, never on a live session.

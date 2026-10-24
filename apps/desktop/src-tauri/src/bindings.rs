@@ -42,6 +42,16 @@ mod tests {
             decl::<quarry_store::OutsideStatement>(&cfg),
             decl::<quarry_store::SelectionRun>(&cfg),
             decl::<quarry_store::Settings>(&cfg),
+            // AI (quarry-store, quarry-ai-core)
+            decl::<quarry_store::AiIgnoreKind>(&cfg),
+            decl::<quarry_store::AiIgnoreRule>(&cfg),
+            decl::<quarry_store::AiSettings>(&cfg),
+            decl::<quarry_ai_core::ModelInfo>(&cfg),
+            decl::<quarry_ai_core::StopReason>(&cfg),
+            decl::<quarry_ai_core::Usage>(&cfg),
+            decl::<crate::ai::AiStatus>(&cfg),
+            decl::<crate::ai::AiModels>(&cfg),
+            decl::<crate::ai::AiStreamEvent>(&cfg),
             // Errors
             decl::<crate::error::AppError>(&cfg),
             decl::<crate::error::HostKeyPrompt>(&cfg),

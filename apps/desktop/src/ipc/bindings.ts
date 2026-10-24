@@ -44,6 +44,44 @@ revisionIntervalMins: number,
  */
 keymap: { [key in string]: Array<string> }, };
 
+export type AiIgnoreKind = "table" | "column";
+
+export type AiIgnoreRule = { kind: AiIgnoreKind, pattern: string, };
+
+export type AiSettings = { 
+/**
+ * The kill switch: while false, no AI request leaves the app.
+ */
+enabled: boolean, model: string, 
+/**
+ * Workspaces where AI stays off even when it is enabled.
+ */
+disabledWorkspaces: Array<string>, ignore: Array<AiIgnoreRule>, };
+
+export type ModelInfo = { id: string, displayName: string, };
+
+export type StopReason = "end_turn" | "max_tokens" | "stop_sequence" | "refusal" | "other";
+
+export type Usage = { inputTokens: number, outputTokens: number, cacheReadInputTokens: number, cacheCreationInputTokens: number, };
+
+export type AiStatus = { settings: AiSettings, keyStored: boolean, workspaceId: string, 
+/**
+ * AI is enabled and not turned off for this workspace: requests may be sent.
+ */
+active: boolean, };
+
+export type AiModels = { models: Array<ModelInfo>, 
+/**
+ * The list came from the provider (not the built-in fallback).
+ */
+live: boolean, 
+/**
+ * Why the live list could not be read, when that was tried.
+ */
+error?: string, };
+
+export type AiStreamEvent = { "type": "started", model: string, } | { "type": "text", text: string, } | { "type": "done", stopReason: StopReason | null, usage: Usage, } | { "type": "failed", error: AppError, };
+
 export type AppError = { kind: string, message: string, hint?: string, sqlstate?: string, 
 /**
  * Set when `kind == "connect"`: which connection failure it was.

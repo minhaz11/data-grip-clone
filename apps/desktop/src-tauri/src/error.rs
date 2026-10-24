@@ -1,3 +1,4 @@
+use quarry_ai_core::AiError;
 use quarry_connections::ConnectionError;
 use quarry_db_core::{ConnectError, ConnectErrorKind, DbError};
 use quarry_store::StoreError;
@@ -131,5 +132,11 @@ impl From<ConnectError> for AppError {
             host_key: None,
             tunnel: None,
         }
+    }
+}
+
+impl From<AiError> for AppError {
+    fn from(e: AiError) -> Self {
+        Self::new(e.kind(), e.to_string())
     }
 }

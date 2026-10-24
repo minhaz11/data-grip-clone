@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { AiPanel } from './AiPanel';
 import { hasBlockingConflicts, KeymapPanel } from './KeymapPanel';
 import { SnippetsPanel } from './SnippetsPanel';
 import { Modal } from '../../components/ui/Modal';
@@ -28,7 +29,7 @@ export function SettingsDialog({ onClose }: { onClose(): void }) {
   const update = useSettings((s) => s.update);
   const error = useSettings((s) => s.error);
   const [draft, setDraft] = useState<Settings>(current);
-  const [page, setPage] = useState<'general' | 'keymap' | 'snippets'>('general');
+  const [page, setPage] = useState<'general' | 'keymap' | 'snippets' | 'ai'>('general');
 
   const fontSizeValid =
     Number.isInteger(draft.editorFontSize) &&
@@ -80,6 +81,7 @@ export function SettingsDialog({ onClose }: { onClose(): void }) {
             ['general', 'General'],
             ['keymap', 'Keymap'],
             ['snippets', 'Snippets'],
+            ['ai', 'AI'],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -96,6 +98,11 @@ export function SettingsDialog({ onClose }: { onClose(): void }) {
           </button>
         ))}
       </div>
+      {page === 'ai' && (
+        <div role="tabpanel" id="settings-page-ai" aria-labelledby="settings-tab-ai">
+          <AiPanel />
+        </div>
+      )}
       {page === 'snippets' && (
         <div role="tabpanel" id="settings-page-snippets" aria-labelledby="settings-tab-snippets">
           <SnippetsPanel />

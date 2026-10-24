@@ -2,7 +2,14 @@
  * IPC types. Everything that crosses IPC is generated from the Rust types into `bindings.ts`
  * (regenerate with `npm run bindings`); this file re-exports it and adds the few types the UI owns.
  */
-import type { DdlObject, ImportFormat, ObjectRef, Settings } from './bindings';
+import type {
+  AiSettings,
+  DdlObject,
+  ImportFormat,
+  ModelInfo,
+  ObjectRef,
+  Settings,
+} from './bindings';
 
 export type * from './bindings';
 
@@ -21,6 +28,22 @@ export const DEFAULT_SETTINGS: Settings = {
   revisionIntervalMins: 5,
   keymap: {},
 };
+
+/** Matches `AiSettings::default()` in Rust: AI stays off until the user turns it on. */
+export const DEFAULT_AI_SETTINGS: AiSettings = {
+  enabled: false,
+  model: 'claude-sonnet-5-5',
+  disabledWorkspaces: [],
+  ignore: [],
+};
+
+/** Matches `FALLBACK_MODELS` in the Rust provider: offered when the live list is not available. */
+export const AI_FALLBACK_MODELS: ModelInfo[] = [
+  { id: 'claude-sonnet-5-5', displayName: 'Claude Sonnet 5.5' },
+  { id: 'claude-opus-5-5', displayName: 'Claude Opus 5.5' },
+  { id: 'claude-haiku-5-5', displayName: 'Claude Haiku 5.5' },
+  { id: 'claude-fable-5-1', displayName: 'Claude Fable 5.1' },
+];
 
 /** Text form of a value as the server renders it; `null` is SQL NULL (Rust `quarry_db_core::Cell`). */
 export type Cell = string | null;
