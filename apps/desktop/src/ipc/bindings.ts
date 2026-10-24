@@ -488,6 +488,28 @@ connectionId?: string, text: string, limit: number, offset: number, };
 
 export type HistoryExportFormat = "csv" | "json";
 
+export type SnippetDialect = "postgresql" | "any";
+
+export type SnippetDraft = { 
+/**
+ * What is typed before Tab: letters, digits and `_`.
+ */
+abbreviation: string, description: string, body: string, dialect: SnippetDialect, };
+
+export type Snippet = { id: string, createdAt: string, updatedAt: string, 
+/**
+ * What is typed before Tab: letters, digits and `_`.
+ */
+abbreviation: string, description: string, body: string, dialect: SnippetDialect, };
+
+export type SnippetFile = { 
+/**
+ * Always `quarry-snippets`.
+ */
+format: string, version: number, snippets: Array<SnippetDraft>, };
+
+export type SnippetImport = { added: number, replaced: number, };
+
 export type RevisionReason = "auto" | "beforeDeletion" | "external" | "beforeRun" | "beforeFormat" | "beforeRestore" | "beforeDelete";
 
 export type RevisionInfo = { id: number, 

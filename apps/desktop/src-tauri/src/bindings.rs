@@ -110,6 +110,12 @@ mod tests {
             decl::<quarry_store::HistoryEntry>(&cfg),
             decl::<quarry_store::HistoryQuery>(&cfg),
             decl::<crate::history::HistoryExportFormat>(&cfg),
+            // Snippets
+            decl::<quarry_store::SnippetDialect>(&cfg),
+            decl::<quarry_store::SnippetDraft>(&cfg),
+            decl::<quarry_store::Snippet>(&cfg),
+            decl::<quarry_store::SnippetFile>(&cfg),
+            decl::<crate::snippets::SnippetImport>(&cfg),
             // Local history of consoles
             decl::<quarry_store::RevisionReason>(&cfg),
             decl::<quarry_store::RevisionInfo>(&cfg),

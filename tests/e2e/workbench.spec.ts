@@ -30,6 +30,34 @@ test('creates a data source, connects, and walks the explorer tree', async ({ ap
   await expect(app.getByRole('treeitem', { name: 'orders, table' })).toBeVisible();
 });
 
+test('a snippet abbreviation expands on Tab and Tab moves through its stops', async ({ app }) => {
+  await app.getByRole('button', { name: 'New console', exact: true }).click();
+  const editor = app.locator('.monaco-editor').first();
+  await expect(editor).toBeVisible();
+  await editor.click();
+  await app.keyboard.type('sel');
+  await app.keyboard.press('Escape'); // close the completion list; Tab then expands
+  await app.keyboard.press('Tab');
+  await app.keyboard.type('id, email'); // replaces the first stop: *
+  await app.keyboard.press('Tab');
+  await app.keyboard.type('shop.customers'); // the second: table_name
+  await app.keyboard.press('Tab');
+  await app.keyboard.type('id > 1'); // the third: true
+  const saved = async () => {
+    const writes = await ipcCalls(app, 'console_write');
+    return (writes.at(-1)?.args.text as string | undefined) ?? '';
+  };
+  await expect.poll(saved).toBe('SELECT id, email\nFROM shop.customers\nWHERE id > 1;');
+
+  // Dollar quotes and $1 survive expansion (in a fresh console).
+  await app.getByRole('button', { name: 'New console', exact: true }).click();
+  await app.locator('.monaco-editor').first().click();
+  await app.keyboard.type('fn');
+  await app.keyboard.press('Escape');
+  await app.keyboard.press('Tab');
+  await expect.poll(saved).toContain('LANGUAGE plpgsql AS $$\nBEGIN\n    RETURN $1;');
+});
+
 test('runs a query, shows the result grid, and exports it', async ({ app }) => {
   await createDataSource(app, 'Dev');
   await app.getByRole('treeitem', { name: /^Dev/ }).click();
@@ -389,6 +417,19 @@ test.describe('accessibility', () => {
     await app.getByRole('menuitem', { name: 'Local history…' }).click();
     const dialog = app.getByRole('dialog', { name: 'Local History: console.sql' });
     await expect(dialog).toContainText('No earlier versions yet');
+    await expectNoA11yViolations(app, '[role="dialog"]');
+  });
+
+  test('snippets settings have no WCAG A/AA violations', async ({ app }) => {
+    await app.getByRole('button', { name: /^Settings/ }).click();
+    const dialog = app.getByRole('dialog');
+    await dialog.getByRole('tab', { name: 'Snippets' }).click();
+    await dialog.getByRole('button', { name: 'sel, built-in' }).click();
+    await expect(dialog.getByRole('button', { name: /Customize/ })).toBeVisible();
+    await expectNoA11yViolations(app, '[role="dialog"]');
+    await dialog.getByRole('button', { name: 'New' }).click();
+    await dialog.getByLabel('Template').fill('select \\$1 as ${1:x}');
+    await expect(dialog.getByLabel('Expanded text')).toHaveText('select $1 as x');
     await expectNoA11yViolations(app, '[role="dialog"]');
   });
 

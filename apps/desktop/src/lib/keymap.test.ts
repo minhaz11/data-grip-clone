@@ -96,9 +96,11 @@ describe('conflicts', () => {
       expect(conflicts(keymap).size, platform).toBe(0);
       for (const action of ACTIONS) {
         for (const chord of keymap[action.id]) {
-          expect(unbindableReason(chord, action.context, platform), `${platform} ${chord}`).toBe(
-            null,
-          );
+          const declinable = 'declinable' in action && action.declinable;
+          expect(
+            unbindableReason(chord, action.context, platform, declinable),
+            `${platform} ${chord}`,
+          ).toBe(null);
         }
       }
     }

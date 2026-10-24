@@ -6,7 +6,8 @@ import { useAppliedTheme, useKeybindings, useWorkspacePersistence } from './hook
 import { isConsole, useWorkspace } from './workspaceStore';
 import { SettingsDialog } from '../features/settings/SettingsDialog';
 import { useConnections } from '../features/connections/connectionsStore';
-import { goToError } from '../features/editor/editorHandle';
+import { activeEditor, goToError } from '../features/editor/editorHandle';
+import { snippetFor } from '../features/snippets/snippetsStore';
 import { useExec } from '../features/exec/execStore';
 import { runFromEditor } from '../features/exec/runQuery';
 import { closeConsole } from '../features/exec/txGuards';
@@ -65,6 +66,10 @@ export function App() {
       'settings.open': () => setSettingsOpen(true),
       'datasource.new': () => setConnectionDialog('new'),
       'editor.format': () => void formatWithHistory(),
+      // Declines (false) unless the word before the caret is an abbreviation: Tab then indents
+      // or accepts a suggestion, or moves to the next tab stop of an expanded snippet.
+      'editor.expandSnippet': () =>
+        activeEditor()?.expandSnippet((word) => snippetFor(word)?.body) ?? false,
       'editor.nextError': () => goToError(1),
       'editor.previousError': () => goToError(-1),
       'query.run': () => void runFromEditor('current'),
@@ -100,7 +105,7 @@ export function App() {
       },
       'editor.goToDdl': () => void explain(goToDdlAtCaret()),
       'editor.revealInTree': () => void explain(revealAtCaret()),
-    } satisfies Partial<Record<ActionId, () => void>>;
+    } satisfies Partial<Record<ActionId, () => unknown>>;
   }, []);
   useKeybindings(handlers);
 

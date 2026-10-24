@@ -14,6 +14,8 @@ import {
 } from './catalog';
 import { setActiveEditor, type SqlEditorProps } from './editorHandle';
 import { buildSuggestions, type SuggestionKind } from './suggestions';
+import { activeSnippets } from '../snippets/snippetsStore';
+import { snippetText } from '../snippets/text';
 
 // Workers are bundled locally (no CDN; the app CSP only allows 'self').
 self.MonacoEnvironment = { getWorker: () => new EditorWorker() };
@@ -58,6 +60,10 @@ function modelFor(tabId: string, name: string, value: string) {
       'pgsql',
       monaco.Uri.parse(`inmemory://console/${tabId}/${encodeURIComponent(name)}.sql`),
     );
+    // New text uses LF; a file that already uses CRLF keeps it.
+    if (!value.includes('\r\n')) {
+      model.setEOL(monaco.editor.EndOfLineSequence.LF);
+    }
     models.set(tabId, model);
     tabOfModel.set(model, tabId);
   }
@@ -116,22 +122,43 @@ monaco.languages.registerCompletionItemProvider('pgsql', {
       position.lineNumber,
       word.endColumn,
     );
+    // Snippets whose abbreviation starts with the typed word, where a statement or clause can
+    // start (fuzzy matches on short abbreviations are mostly noise).
+    const typed = word.word.toLowerCase();
+    const snippets =
+      context.kind === 'general' && typed
+        ? activeSnippets().filter((s) => s.abbreviation.toLowerCase().startsWith(typed))
+        : [];
+    const snippetItems = snippets.map((s, i) => ({
+      label: { label: s.abbreviation, description: s.description },
+      kind: monaco.languages.CompletionItemKind.Snippet,
+      insertText: s.body,
+      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      detail: `Snippet: ${s.description}`,
+      documentation: { value: ['```sql', snippetText(s.body).text, '```'].join('\n') },
+      sortText: `!${String(i).padStart(5, '0')}`,
+      filterText: word.word,
+      range,
+    }));
     // The list is already filtered and ranked (fuzzy, REQ-EDIT-07): Monaco keeps that order,
     // matches everything against the typed word, and asks again as typing continues.
     return {
       incomplete: true,
-      suggestions: items.map((s, i) => ({
-        label: s.label,
-        kind: KIND[s.kind],
-        insertText: s.insertText,
-        insertTextRules: s.snippet
-          ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
-          : undefined,
-        detail: s.detail,
-        sortText: String(i).padStart(6, '0'),
-        filterText: word.word || s.label,
-        range,
-      })),
+      suggestions: [
+        ...snippetItems,
+        ...items.map((s, i) => ({
+          label: s.label,
+          kind: KIND[s.kind],
+          insertText: s.insertText,
+          insertTextRules: s.snippet
+            ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
+            : undefined,
+          detail: s.detail,
+          sortText: String(i).padStart(6, '0'),
+          filterText: word.word || s.label,
+          range,
+        })),
+      ],
     };
   },
 });
@@ -166,6 +193,9 @@ export default function MonacoSqlEditor({
       tabSize: 2,
       wordBasedSuggestions: 'off',
       quickSuggestions: { other: true, comments: false, strings: false },
+      // While a snippet is being filled in, Tab moves between its stops instead of accepting a
+      // suggestion that typing opened.
+      suggest: { snippetsPreventQuickSuggestions: true },
       renderLineHighlight: 'line',
       fixedOverflowWidgets: true,
       ariaLabel: 'SQL editor',
@@ -214,6 +244,36 @@ export default function MonacoSqlEditor({
         editor.executeEdits('quarry-insert', [{ range: selection, text, forceMoveMarkers: true }]);
         editor.pushUndoStop();
         editor.focus();
+      },
+      expandSnippet: (lookup) => {
+        const m = model();
+        const position = editor.getPosition();
+        const selection = editor.getSelection();
+        if (!m || !position || !selection?.isEmpty() || callbacks.current.readOnly) {
+          return false;
+        }
+        const word = m.getWordUntilPosition(position);
+        const body = word.word ? lookup(word.word) : undefined;
+        if (body === undefined || word.endColumn !== position.column) {
+          return false;
+        }
+        editor.setSelection(
+          new monaco.Selection(
+            position.lineNumber,
+            word.startColumn,
+            position.lineNumber,
+            word.endColumn,
+          ),
+        );
+        // The snippet controller links the tab stops: Tab moves through them, Escape leaves.
+        const controller = editor.getContribution('snippetController2') as {
+          insert(template: string): void;
+        } | null;
+        if (!controller) {
+          return false;
+        }
+        controller.insert(body);
+        return true;
       },
       revealOffset: (offset) => {
         const m = model();

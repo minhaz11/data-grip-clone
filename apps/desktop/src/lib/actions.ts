@@ -19,6 +19,11 @@ export interface ActionDef {
   defaults: string[];
   /** macOS defaults where the system owns the usual chord (Cmd+Q, Cmd+Tab, Option+arrows). */
   mac?: string[];
+  /**
+   * The handler declines keys it has nothing to do for, which then reach the focused control,
+   * so a plain key (Tab) can be bound without stopping typing.
+   */
+  declinable?: boolean;
 }
 
 export const ACTIONS = [
@@ -129,6 +134,13 @@ export const ACTIONS = [
     title: 'Previous error',
     context: 'editor',
     defaults: ['Shift+F8'],
+  },
+  {
+    id: 'editor.expandSnippet',
+    title: 'Expand the snippet abbreviation before the caret',
+    context: 'editor',
+    defaults: ['Tab'],
+    declinable: true,
   },
   {
     id: 'editor.goToDdl',

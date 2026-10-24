@@ -489,6 +489,22 @@ listed tests run green in CI.
     pruning by count and age, rename, upgrade from version 5, line diff); desktop (the save
     path keeps deleted text and outside edits); UI (diff and restore, before-run and
     before-format checkpoints, settings); E2E (axe on the dialog).
+- **M5.5 Snippets** ✅ (plan: `docs/plans/15-snippets.md`)
+  - **Expansion**: type an abbreviation and press Tab, or pick it in completion; Monaco's
+    snippet controller links the tab stops (Tab and Shift+Tab move, Escape leaves). Tab is the
+    registry action `editor.expandSnippet`, which declines for anything that is not an
+    abbreviation.
+  - **Built-ins**: sel, selc, ins, upd, del, ct, cte, exp, idx, fn, do, tx. Bodies use Monaco
+    syntax; `\$` writes a literal `$`, so dollar quotes and `$1` parameters survive.
+  - **User snippets** in `app.db` (migration 7): abbreviation, description, template, scope
+    (PostgreSQL or every data source); Settings > Snippets edits them with a live preview, and
+    "Customize" copies a built-in so it can be replaced. Import and export as JSON through the
+    native dialogs (an import replaces snippets with the same abbreviation).
+  - Tests: unit (template parsing: stops, nesting, variables, `\$`, escaping; store CRUD,
+    validation, export then import on a fresh profile); UI (built-in expands on Tab with its
+    first stop selected, other words are left alone, a snippet saved in Settings expands at once
+    and replaces a built-in); E2E (real Monaco: Tab through the stops, dollar quotes; axe on
+    Settings > Snippets).
 - **M5.1 Query history** ✅ (plan: `docs/plans/09-query-history.md`)
   - **Recording**: the query job in Rust records every statement that reached the server
     (succeeded, failed or cancelled) with data source, console session, start time, duration,

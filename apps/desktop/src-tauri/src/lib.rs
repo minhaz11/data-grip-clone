@@ -10,6 +10,7 @@ mod import;
 mod results;
 mod schema;
 mod sessions;
+mod snippets;
 mod transactions;
 mod tunnels;
 
@@ -127,6 +128,11 @@ pub fn run() {
             results::result_copy,
             results::result_export_cancel,
             results::result_format,
+            snippets::snippets_list,
+            snippets::snippet_save,
+            snippets::snippet_delete,
+            snippets::snippets_export,
+            snippets::snippets_import,
             transactions::session_state,
             transactions::session_set_tx,
             transactions::tx_commit,

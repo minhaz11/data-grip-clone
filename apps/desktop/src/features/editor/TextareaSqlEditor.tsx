@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { formatSql } from '../../lib/sql/format';
+import { snippetText } from '../snippets/text';
 import { setActiveEditor, type SqlEditorProps } from './editorHandle';
 
 /** 1-based line/column of a caret offset. */
@@ -70,6 +71,28 @@ export default function TextareaSqlEditor({
               },
             ]
           : [];
+      },
+      // Plain text has no linked tab stops: the first one is selected after expanding.
+      expandSnippet: (lookup) => {
+        const area = el();
+        if (!area || readOnly || area.selectionStart !== area.selectionEnd) {
+          return false;
+        }
+        const { selectionStart: at, value } = area;
+        const word = /[A-Za-z_][\w]*$/.exec(value.slice(0, at))?.[0];
+        const body = word ? lookup(word) : undefined;
+        if (!word || body === undefined) {
+          return false;
+        }
+        const { text, stops } = snippetText(body);
+        const start = at - word.length;
+        onChange(value.slice(0, start) + text + value.slice(at));
+        const first = stops[0] ?? { start: text.length, end: text.length };
+        requestAnimationFrame(() => {
+          area.setSelectionRange(start + first.start, start + first.end);
+          area.focus();
+        });
+        return true;
       },
       format: () => {
         if (readOnly) {

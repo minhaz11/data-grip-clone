@@ -6,6 +6,7 @@ import { currentKeymap, isCapturingShortcut } from './keymapStore';
 import { resolveTheme, useSettings } from './settingsStore';
 import { snapshot, useWorkspace } from './workspaceStore';
 import { useConnections } from '../features/connections/connectionsStore';
+import { useSnippets } from '../features/snippets/snippetsStore';
 import { useSessions } from '../features/connections/sessionsStore';
 import { resetCatalog } from '../features/editor/catalog';
 import { askQuit } from '../features/exec/txGuards';
@@ -16,7 +17,10 @@ import { useTx } from '../features/exec/txStore';
  * panel's context decides: its own actions win, and grid and explorer actions are left to those
  * panels' handlers. Runs in the capture phase, so Monaco never sees a chord bound to an action.
  */
-export function useKeybindings(handlers: Partial<Record<ActionId, () => void>>) {
+/** An action handler; returning `false` declines the key, which then goes to the focused control. */
+export type ActionHandler = () => unknown;
+
+export function useKeybindings(handlers: Partial<Record<ActionId, ActionHandler>>) {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (isModifierOnly(e) || isCapturingShortcut(e.target)) {
@@ -28,10 +32,9 @@ export function useKeybindings(handlers: Partial<Record<ActionId, () => void>>) 
       }
       const id = resolveAction(chordOf(e), contextOf(e.target), currentKeymap());
       const handler = id ? handlers[id] : undefined;
-      if (handler) {
+      if (handler && handler() !== false) {
         e.preventDefault();
         e.stopPropagation();
-        handler();
       }
     }
     window.addEventListener('keydown', onKeyDown, { capture: true });
@@ -78,6 +81,7 @@ export function useWorkspacePersistence(): { ready: boolean; error: string | nul
       try {
         await useSettings.getState().load();
         await useConnections.getState().load();
+        await useSnippets.getState().load();
         unlistenStatus = await useSessions.getState().init();
         const unlistenTx = await useTx.getState().init();
         const unlistenQuit = await backend.onQuitRequested((open) => void askQuit(open));

@@ -48,7 +48,7 @@ is the human summary; refresh its Progress column from the script output when yo
 | 12  | [Layout, navigation and explorer](12-layout-navigation.md)        | M4.10            | 05, 10     | Done        | 100%     |
 | 13  | [CSV/JSON import](13-import.md)                                   | M5.4             | 06         | Done        | 100%     |
 | 14  | [Local file history](14-file-history.md)                          | M5.2             | -          | Done        | 100%     |
-| 15  | [Snippets](15-snippets.md)                                        | M5.5             | 10         | Not started | 0%       |
+| 15  | [Snippets](15-snippets.md)                                        | M5.5             | 10         | Done        | 100%     |
 | 16  | [AI provider and settings](16-ai-provider.md)                     | M6.1             | 02         | Not started | 0%       |
 | 17  | [AI consent and context](17-ai-consent-context.md)                | M6.2             | 05, 16     | Not started | 0%       |
 | 18  | [AI actions](18-ai-actions.md)                                    | M6.3             | 17         | Not started | 0%       |

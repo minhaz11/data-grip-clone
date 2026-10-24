@@ -15,6 +15,12 @@ export interface EditorHandle {
   clearMarkers(): void;
   /** Error markers in the text, in order. */
   errors(): { start: number; end: number; message: string }[];
+  /**
+   * Replaces the word before the caret with the snippet body `lookup` returns for it and moves
+   * to its first tab stop. False (nothing changed) when there is a selection, no word, or no
+   * snippet for it.
+   */
+  expandSnippet(lookup: (word: string) => string | undefined): boolean;
 }
 
 let active: EditorHandle | null = null;

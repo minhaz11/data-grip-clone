@@ -3,11 +3,11 @@
 | Field        | Value       |
 | ------------ | ----------- |
 | Milestone    | M5.5        |
-| Status       | Not started |
+| Status       | Done        |
 | Depends on   | 10          |
 | Requirements | REQ-SNIP-01 |
-| Started      | -           |
-| Finished     | -           |
+| Started      | 2026-10-24  |
+| Finished     | 2026-10-24  |
 
 ## Goal
 
@@ -38,27 +38,27 @@ their own snippets.
 
 ### Backend
 
-- [ ] Store migration for `snippets`; CRUD commands; import/export with the Rust-side dialog.
+- [x] Store migration for `snippets`; CRUD commands; import/export with the Rust-side dialog.
 
 ### Frontend
 
-- [ ] Built-in snippet set (select, insert, update with where, create table, CTE, explain).
-- [ ] Completion provider for snippets, scoped by dialect.
-- [ ] Settings > Snippets: list, edit, add, delete, import, export.
+- [x] Built-in snippet set (select, insert, update with where, create table, CTE, explain).
+- [x] Completion provider for snippets, scoped by dialect.
+- [x] Settings > Snippets: list, edit, add, delete, import, export.
 
 ### Tests
 
-- [ ] Unit: dollar quotes and `$1` in bodies survive expansion.
-- [ ] UI: abbreviation + Tab expands and moves through tab stops.
+- [x] Unit: dollar quotes and `$1` in bodies survive expansion.
+- [x] UI: abbreviation + Tab expands and moves through tab stops.
 
 ### Docs
 
-- [ ] Mark M5.5 done in `mvp-and-milestones.md`.
+- [x] Mark M5.5 done in `mvp-and-milestones.md`.
 
 ## Acceptance criteria
 
-- [ ] A user snippet created in Settings expands in a console without restart.
-- [ ] Export then import on a fresh profile restores the same snippets.
+- [x] A user snippet created in Settings expands in a console without restart.
+- [x] Export then import on a fresh profile restores the same snippets.
 
 ## Risks and open questions
 
@@ -66,5 +66,8 @@ their own snippets.
 
 ## Progress log
 
-| Date | Note |
-| ---- | ---- |
+| Date       | Note                                                                                                                                                                                                                                        |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-10-24 | Tab conflict resolved in the registry: `editor.expandSnippet` (Tab) declines unless the word before the caret is an abbreviation, so Tab still indents, accepts a suggestion or moves to the next tab stop. Handlers can now decline a key. |
+| 2026-10-24 | Quick suggestions are off while a snippet is filled in (`snippetsPreventQuickSuggestions`), otherwise Tab accepted a suggestion instead of moving on (seen in Chromium). Snippet completions match the abbreviation's start only.           |
+| 2026-10-24 | Built-ins ship in the UI; a user snippet with the same abbreviation replaces one ("Customize"). New Monaco models default to LF line endings (Chromium chose CRLF); files that use CRLF keep it.                                            |

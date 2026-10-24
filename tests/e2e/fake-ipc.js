@@ -308,6 +308,7 @@
     },
     consoles_dir: () => '/fake/consoles',
     console_checkpoint: () => null,
+    snippets_list: () => [],
     revisions_list: () => [],
     import_pick: () => ({
       id: 'file-1',

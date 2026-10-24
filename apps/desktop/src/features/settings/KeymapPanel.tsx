@@ -91,7 +91,12 @@ export function KeymapPanel({
       setCaptureError(null);
       return;
     }
-    const reason = unbindableReason(chord, action.context);
+    const reason = unbindableReason(
+      chord,
+      action.context,
+      undefined,
+      'declinable' in action && action.declinable,
+    );
     if (reason) {
       setCaptureError(reason);
       return;

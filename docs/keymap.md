@@ -42,6 +42,7 @@ typed (everywhere and in the SQL editor), a shortcut without Ctrl or Alt must be
 | Format SQL | SQL editor | `Ctrl+Alt+L` | `⌥⌘L` |
 | Next error | SQL editor | `F8` | `F8` |
 | Previous error | SQL editor | `Shift+F8` | `⇧F8` |
+| Expand the snippet abbreviation before the caret | SQL editor | `Tab` | `Tab` |
 | Go to DDL of the object at the caret | SQL editor | `Ctrl+B` | `⌘B` |
 | Reveal the object at the caret in the Database Explorer | SQL editor | `Alt+F1` | `⌥F1` |
 | Select all cells | Result grid | `Ctrl+A` | `⌘A` |

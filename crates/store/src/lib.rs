@@ -5,6 +5,7 @@ pub mod connections;
 pub mod history;
 mod migrations;
 pub mod revisions;
+pub mod snippets;
 pub mod ssh;
 
 use std::collections::BTreeMap;
@@ -20,6 +21,7 @@ pub use connections::{
 pub use history::{HistoryEntry, HistoryQuery, HistoryRecord, HistoryStatus, Retention};
 pub use migrations::LATEST_VERSION;
 pub use revisions::{RevisionInfo, RevisionReason, RevisionRetention};
+pub use snippets::{Snippet, SnippetDialect, SnippetDraft, SnippetFile};
 pub use ssh::{SshAuthMethod, SshProfile, SshProfileDraft, TrustedHostKey};
 
 #[derive(Debug, thiserror::Error)]

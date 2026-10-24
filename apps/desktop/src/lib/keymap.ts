@@ -230,11 +230,15 @@ const RESERVED: Record<Platform, Record<string, string>> = {
   },
 };
 
-/** Why `chord` cannot be bound in `context`, or `null` if it can. */
+/**
+ * Why `chord` cannot be bound in `context`, or `null` if it can. A `declinable` action passes
+ * keys it does not use on, so plain keys are allowed for it.
+ */
 export function unbindableReason(
   chord: string,
   context: ActionContext,
   platform: Platform = PLATFORM,
+  declinable = false,
 ): string | null {
   const reserved = RESERVED[platform][chord];
   if (reserved) {
@@ -246,7 +250,7 @@ export function unbindableReason(
   // Without Ctrl or Alt only function keys are safe where text is typed: anything else (letters,
   // Enter, Tab, Delete, arrows) would stop editing. Grid and explorer keys are not typed text.
   const typed = context === 'global' || context === 'editor';
-  if (typed && !modified && !/^F\d{1,2}$/.test(key)) {
+  if (typed && !declinable && !modified && !/^F\d{1,2}$/.test(key)) {
     return context === 'global'
       ? 'Add Ctrl or Alt: a plain key would stop typing everywhere.'
       : 'Add Ctrl or Alt: a plain key would stop typing in the editor.';

@@ -121,6 +121,18 @@ const MIGRATIONS: &[&str] = &[
      ) STRICT;
      CREATE INDEX console_revisions_by_console ON console_revisions (console, id);
      CREATE INDEX console_revisions_by_time ON console_revisions (created_at);",
+    // 7: user snippets (M5.5, ADR-0004). Built-in snippets ship with the UI.
+    "CREATE TABLE snippets (
+         id           TEXT PRIMARY KEY NOT NULL,
+         abbreviation TEXT NOT NULL,
+         description  TEXT NOT NULL,
+         body         TEXT NOT NULL,
+         dialect      TEXT NOT NULL,
+         created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+         updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+     ) STRICT;
+     CREATE UNIQUE INDEX snippets_abbreviation_unique
+         ON snippets (abbreviation COLLATE NOCASE, dialect);",
 ];
 
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;

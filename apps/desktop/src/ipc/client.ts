@@ -41,6 +41,9 @@ import type {
   RevisionReason,
   ServerInfo,
   SessionKey,
+  Snippet,
+  SnippetDraft,
+  SnippetImport,
   SessionState,
   SessionStatus,
   Settings,
@@ -148,6 +151,14 @@ export interface Backend {
   consolesDir(): Promise<string>;
   /** Keeps a console's current file text in its local history (before a run or a format). */
   consoleCheckpoint(name: string, reason: RevisionReason): Promise<null>;
+  snippetsList(): Promise<Snippet[]>;
+  /** Creates a snippet, or updates `snippetId`. */
+  snippetSave(snippetId: string | null, draft: SnippetDraft): Promise<Snippet>;
+  snippetDelete(snippetId: string): Promise<null>;
+  /** Saves every user snippet as JSON via the native dialog; the path, or `null`. */
+  snippetsExport(): Promise<string | null>;
+  /** Reads snippets from a JSON file picked in the native dialog; `null` if cancelled. */
+  snippetsImport(): Promise<SnippetImport | null>;
   /** A console's local history, newest first. */
   revisionsList(name: string): Promise<RevisionInfo[]>;
   revisionRead(id: number): Promise<string>;
@@ -307,6 +318,11 @@ const tauriBackend: Backend = {
   consolesDir: () => invoke<string>('consoles_dir'),
   consoleCheckpoint: (name, reason) => invoke<null>('console_checkpoint', { name, reason }),
   revisionsList: (name) => invoke<RevisionInfo[]>('revisions_list', { name }),
+  snippetsList: () => invoke<Snippet[]>('snippets_list'),
+  snippetSave: (snippetId, draft) => invoke<Snippet>('snippet_save', { snippetId, draft }),
+  snippetDelete: (snippetId) => invoke<null>('snippet_delete', { snippetId }),
+  snippetsExport: () => invoke<string | null>('snippets_export'),
+  snippetsImport: () => invoke<SnippetImport | null>('snippets_import'),
   revisionRead: (id) => invoke<string>('revision_read', { id }),
   revisionRestore: (id) => invoke<string>('revision_restore', { id }),
   metadataCancel: (id) => invoke<boolean>('metadata_cancel', { id }),

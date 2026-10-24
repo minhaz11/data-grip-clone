@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { hasBlockingConflicts, KeymapPanel } from './KeymapPanel';
+import { SnippetsPanel } from './SnippetsPanel';
 import { Modal } from '../../components/ui/Modal';
 import { useSettings } from '../../app/settingsStore';
 import type {
@@ -27,7 +28,7 @@ export function SettingsDialog({ onClose }: { onClose(): void }) {
   const update = useSettings((s) => s.update);
   const error = useSettings((s) => s.error);
   const [draft, setDraft] = useState<Settings>(current);
-  const [page, setPage] = useState<'general' | 'keymap'>('general');
+  const [page, setPage] = useState<'general' | 'keymap' | 'snippets'>('general');
 
   const fontSizeValid =
     Number.isInteger(draft.editorFontSize) &&
@@ -52,7 +53,7 @@ export function SettingsDialog({ onClose }: { onClose(): void }) {
     <Modal
       title="Settings"
       onClose={onClose}
-      width={page === 'keymap' ? 760 : 560}
+      width={page === 'general' ? 560 : 760}
       footer={
         <>
           <button
@@ -78,6 +79,7 @@ export function SettingsDialog({ onClose }: { onClose(): void }) {
           [
             ['general', 'General'],
             ['keymap', 'Keymap'],
+            ['snippets', 'Snippets'],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -94,6 +96,11 @@ export function SettingsDialog({ onClose }: { onClose(): void }) {
           </button>
         ))}
       </div>
+      {page === 'snippets' && (
+        <div role="tabpanel" id="settings-page-snippets" aria-labelledby="settings-tab-snippets">
+          <SnippetsPanel />
+        </div>
+      )}
       {page === 'keymap' && (
         <div role="tabpanel" id="settings-page-keymap" aria-labelledby="settings-tab-keymap">
           <KeymapPanel

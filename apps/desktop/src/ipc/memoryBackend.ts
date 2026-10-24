@@ -7,6 +7,7 @@ import {
   type RevisionInfo,
   type RevisionReason,
   type Settings,
+  type Snippet,
   type SshProfile,
   type WorkspaceState,
 } from './types';
@@ -21,6 +22,7 @@ export function createMemoryBackend(): Backend {
   let connections: ConnectionProfile[] = [];
   let folders: Folder[] = [];
   let sshProfiles: SshProfile[] = [];
+  let snippets: Snippet[] = [];
   let seq = 0;
   const consoles = new Map<string, string>();
   // Local history: what the Rust side keeps in app.db, minus the automatic policy.
@@ -386,6 +388,41 @@ export function createMemoryBackend(): Backend {
       return null;
     },
     consolesDir: async () => '(browser memory)',
+    snippetsList: async () =>
+      [...snippets].sort((a, b) => a.abbreviation.localeCompare(b.abbreviation)),
+    snippetSave: async (snippetId, draft) => {
+      const abbreviation = draft.abbreviation.trim();
+      if (!/^[A-Za-z_][A-Za-z0-9_]{0,39}$/.test(abbreviation)) {
+        return fail('invalid', 'The abbreviation is 1 to 40 letters, digits or _.');
+      }
+      const taken = snippets.some(
+        (s) =>
+          s.id !== snippetId &&
+          s.dialect === draft.dialect &&
+          s.abbreviation.toLowerCase() === abbreviation.toLowerCase(),
+      );
+      if (taken) {
+        return fail('invalid', `A snippet "${abbreviation}" already exists.`);
+      }
+      seq += 1;
+      const saved: Snippet = {
+        ...draft,
+        abbreviation,
+        id: snippetId ?? `snippet-${seq}`,
+        createdAt: now(),
+        updatedAt: now(),
+      };
+      snippets = [...snippets.filter((s) => s.id !== saved.id), saved];
+      return saved;
+    },
+    snippetDelete: async (snippetId) => {
+      snippets = snippets.filter((s) => s.id !== snippetId);
+      return null;
+    },
+    snippetsExport: () =>
+      fail('unsupported', 'Exporting snippets requires the Quarry desktop app.'),
+    snippetsImport: () =>
+      fail('unsupported', 'Importing snippets requires the Quarry desktop app.'),
     consoleCheckpoint: async (name, reason) => {
       addRevision(name, reason, consoles.get(name) ?? '');
       return null;
