@@ -26,6 +26,11 @@
     - [0005 AI provider & consent](architecture/decisions/0005-ai-provider-and-consent.md)
     - [0006 SQL splitter and classifier in TypeScript](architecture/decisions/0006-sql-splitter-and-classifier-in-typescript.md)
 - **Reference**
+  - [User guide](user-guide.md): install, supported databases, limitations
   - [Keyboard shortcuts](keymap.md) (generated from the action registry)
+  - [Release procedure](release-procedure.md), with the release checklist and soak baseline
+- **Security**
+  - [Audit 2026-10](security/audit-2026-10.md): commands, secrets, execution safety, faults
+  - [Dependency advisories](security/dependency-advisories.md)
 - **Plans**
   - [Feature roadmap: what is still missing](plans/feature-roadmap.md)

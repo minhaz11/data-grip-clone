@@ -3,10 +3,10 @@
 | Field        | Value                            |
 | ------------ | -------------------------------- |
 | Milestone    | Phase 7                          |
-| Status       | Not started                      |
+| Status       | In progress                      |
 | Depends on   | all                              |
 | Requirements | Phase 7 in mvp-and-milestones.md |
-| Started      | -                                |
+| Started      | 2026-10-24                       |
 | Finished     | -                                |
 
 ## Goal
@@ -26,6 +26,9 @@ as signed installers for Linux, Windows and macOS with user-facing docs.
 ## Out of scope
 
 - Auto-update (decide separately; it adds a signing and hosting dependency).
+- A `tauri-driver` desktop smoke test: tauri-driver has no macOS support, and the Playwright
+  suite (real UI, fake IPC) plus the Rust integration and fault suites cover the same ground;
+  the release checklist covers the real app on each OS.
 
 ## Design notes
 
@@ -46,37 +49,36 @@ as signed installers for Linux, Windows and macOS with user-facing docs.
 
 ### Tests
 
-- [ ] Fault-injection proxy in the test harness.
-- [ ] Each fault scenario has an integration test with the expected UI state (lost, retry, error).
-- [ ] Soak test script and a recorded baseline (memory, time per page).
-- [ ] `tauri-driver` desktop smoke test on Linux (optional, if still valuable after step 02's E2E).
+- [x] Fault-injection proxy in the test harness.
+- [x] Each fault scenario has an integration test with the expected UI state (lost, retry, error).
+- [x] Soak test script and a recorded baseline (memory, time per page).
 
 ### Audit
 
-- [ ] Capability and command review.
-- [ ] Secret handling review (DB, SSH, AI key; keyring save modes; canary tests up to date).
-- [ ] Execution safety review (classifier coverage, every confirmation path tested).
-- [ ] `cargo audit` and `npm audit` clean or assessed in `docs/security/dependency-advisories.md`.
-- [ ] Revisit the `freezePrototype` trade-off with the current Monaco version.
+- [x] Capability and command review.
+- [x] Secret handling review (DB, SSH, AI key; keyring save modes; canary tests up to date).
+- [x] Execution safety review (classifier coverage, every confirmation path tested).
+- [x] `cargo audit` and `npm audit` clean or assessed in `docs/security/dependency-advisories.md`.
+- [x] Revisit the `freezePrototype` trade-off with the current Monaco version.
 
 ### Release
 
 - [ ] Choose and apply the final product name and app identifier.
 - [ ] Obtain a macOS Developer ID certificate and add the `APPLE_*` secrets used by step 20.
 - [ ] Obtain a Windows code-signing certificate and wire it into step 20's Windows build.
-- [ ] A release checklist (what to verify on each OS before announcing a release).
+- [x] A release checklist (what to verify on each OS before announcing a release).
 
 ### Docs
 
-- [ ] User docs: install per OS, supported databases and versions, limitations.
-- [ ] Release procedure in `docs/`.
+- [x] User docs: install per OS, supported databases and versions, limitations.
+- [x] Release procedure in `docs/`.
 - [ ] Mark Phase 7 done in `mvp-and-milestones.md`.
 
 ## Acceptance criteria
 
-- [ ] Every fault scenario ends in a clear, recoverable UI state with no hang and no data loss.
+- [x] Every fault scenario ends in a clear, recoverable UI state with no hang and no data loss.
 - [ ] Soak run shows no unbounded memory growth.
-- [ ] Audit findings are fixed or recorded with a decision.
+- [x] Audit findings are fixed or recorded with a decision.
 - [ ] Signed installers install and launch on a clean machine for each OS.
 
 ## Risks and open questions
@@ -86,5 +88,9 @@ as signed installers for Linux, Windows and macOS with user-facing docs.
 
 ## Progress log
 
-| Date | Note |
-| ---- | ---- |
+| Date       | Note                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-10-24 | Fault injection: `crates/db-postgres/tests/fault_pg.rs` with a TCP proxy (`tests/support/fault_proxy.rs`) that drops, stalls, refuses and resumes. Six scenarios pass (drop mid-query, between pages, during export; server restart; silent network; permission denied mid-script); the SSH tunnel drop was already covered in `ssh_pg.rs`.                                                                                                          |
+| 2026-10-24 | Soak: `scripts/soak.sh` runs `soak_pg.rs` (page, sort, filter, export a large result in rounds, sampling resident memory). Baseline in `docs/release-procedure.md`: 3 minutes, 1M rows, 30 rounds, memory flat at 8 to 12 MB. This measures the backend process; the WebView process during a long scroll is still to be measured by hand on the real app, so the soak criterion stays open.                                                         |
+| 2026-10-24 | Audit recorded in `docs/security/audit-2026-10.md`; no blocking findings (file paths in data source drafts and UI-side confirmations accepted with reasons; read-only is enforced by the server). `cargo audit`: `rustls-webpki` updated to 0.103.16 for RUSTSEC-2026-0382; the rest assessed. `npm audit`: five DOMPurify advisories in Monaco's vendored copy, none reachable. `freezePrototype` stays off (Monaco 0.57 still assigns `toString`). |
+| 2026-10-24 | Waiting on decisions and accounts outside the code: the final product name and app identifier, an Apple Developer ID (and notarization secrets), a Windows code-signing certificate, and installs on clean machines per OS.                                                                                                                                                                                                                          |

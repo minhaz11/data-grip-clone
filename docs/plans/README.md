@@ -52,7 +52,7 @@ is the human summary; refresh its Progress column from the script output when yo
 | 16  | [AI provider and settings](16-ai-provider.md)                     | M6.1             | 02         | Done        | 100%     |
 | 17  | [AI consent and context](17-ai-consent-context.md)                | M6.2             | 05, 16     | Done        | 100%     |
 | 18  | [AI actions](18-ai-actions.md)                                    | M6.3             | 17         | Done        | 100%     |
-| 19  | [Hardening and release](19-hardening-release.md)                  | Phase 7          | all        | Not started | 0%       |
+| 19  | [Hardening and release](19-hardening-release.md)                  | Phase 7          | all        | In progress | 68%      |
 | 20  | [Release automation](20-release-automation.md)                    | Release pipeline | -          | In progress | 57%      |
 
 Steps 01 and 02 are foundations: they are not user features, but later steps rely on them
