@@ -97,6 +97,8 @@ interface WorkspaceStore {
   activate(id: string): void;
   cycleTab(delta: 1 | -1): void;
   updateText(id: string, text: string): void;
+  /** Shows text the console file already holds (a restore), without saving it again. */
+  replaceText(id: string, text: string): void;
   setSource(id: string, sourceId: string | null): void;
   setOwnSession(id: string, own: boolean): void;
   setSchema(id: string, schema: string | null): void;
@@ -453,6 +455,12 @@ export const useWorkspace = create<WorkspaceStore>((set, get) => {
         id,
         setTimeout(() => void saveNow(id), AUTOSAVE_MS),
       );
+    },
+
+    replaceText(id, text) {
+      clearTimeout(timers.get(id));
+      timers.delete(id);
+      patchTab(id, { text, save: 'saved', saveError: undefined });
     },
 
     // A different data source has different schemas.

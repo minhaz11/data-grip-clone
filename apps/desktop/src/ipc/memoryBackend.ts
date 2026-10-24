@@ -4,6 +4,8 @@ import {
   type ConnectionDraft,
   type ConnectionProfile,
   type Folder,
+  type RevisionInfo,
+  type RevisionReason,
   type Settings,
   type SshProfile,
   type WorkspaceState,
@@ -21,6 +23,31 @@ export function createMemoryBackend(): Backend {
   let sshProfiles: SshProfile[] = [];
   let seq = 0;
   const consoles = new Map<string, string>();
+  // Local history: what the Rust side keeps in app.db, minus the automatic policy.
+  const revisions: { id: number; console: string; info: RevisionInfo; text: string }[] = [];
+  const addRevision = (console: string, reason: RevisionReason, text: string) => {
+    const latest = revisions.filter((r) => r.console === console).at(-1);
+    if (!text.trim() || latest?.text === text) {
+      return;
+    }
+    seq += 1;
+    revisions.push({
+      id: seq,
+      console,
+      text,
+      info: {
+        id: seq,
+        createdAt: Date.now(),
+        reason,
+        size: text.length,
+        firstLine:
+          text
+            .split('\n')
+            .find((l) => l.trim())
+            ?.trim() ?? '',
+      },
+    });
+  };
 
   const fail = (kind: string, message: string) => Promise.reject({ kind, message });
   const nameTaken = (name: string, exceptId?: string) =>
@@ -359,6 +386,27 @@ export function createMemoryBackend(): Backend {
       return null;
     },
     consolesDir: async () => '(browser memory)',
+    consoleCheckpoint: async (name, reason) => {
+      addRevision(name, reason, consoles.get(name) ?? '');
+      return null;
+    },
+    revisionsList: async (name) =>
+      revisions
+        .filter((r) => r.console === name)
+        .map((r) => r.info)
+        .reverse(),
+    revisionRead: async (id) =>
+      revisions.find((r) => r.id === id)?.text ??
+      fail('not_found', 'That revision is no longer kept.'),
+    revisionRestore: async (id) => {
+      const r = revisions.find((x) => x.id === id);
+      if (!r) {
+        return fail('not_found', 'That revision is no longer kept.');
+      }
+      addRevision(r.console, 'beforeRestore', consoles.get(r.console) ?? '');
+      consoles.set(r.console, r.text);
+      return r.text;
+    },
     metadataCancel: async () => false,
     consoleWrite: async (name, text) => {
       if (!consoles.has(name)) {

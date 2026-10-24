@@ -3,10 +3,10 @@ import { StatusBar } from './StatusBar';
 import { Toolbar } from './Toolbar';
 import { Workbench } from './Workbench';
 import { useAppliedTheme, useKeybindings, useWorkspacePersistence } from './hooks';
-import { useWorkspace } from './workspaceStore';
+import { isConsole, useWorkspace } from './workspaceStore';
 import { SettingsDialog } from '../features/settings/SettingsDialog';
 import { useConnections } from '../features/connections/connectionsStore';
-import { activeEditor, goToError } from '../features/editor/editorHandle';
+import { goToError } from '../features/editor/editorHandle';
 import { useExec } from '../features/exec/execStore';
 import { runFromEditor } from '../features/exec/runQuery';
 import { closeConsole } from '../features/exec/txGuards';
@@ -15,6 +15,8 @@ import { Toasts } from '../features/notifications/notifications';
 import { ConnectionDialog } from '../features/connections/ConnectionDialog';
 import { HistoryDialog } from '../features/history/HistoryDialog';
 import { goToDdlAtCaret, revealAtCaret } from '../features/navigation/atCaret';
+import { formatWithHistory } from '../features/editor/localHistory';
+import { LocalHistoryDialog } from '../features/editor/LocalHistoryDialog';
 import { useNotifications } from '../features/notifications/notifications';
 import { Palette } from '../features/palette/Palette';
 import { RecentDialog } from '../features/palette/RecentDialog';
@@ -41,6 +43,8 @@ export function App() {
   // The search palette's initial text (`null` = closed).
   const [palette, setPalette] = useState<string | null>(null);
   const [recentOpen, setRecentOpen] = useState(false);
+  // The console tab whose local history is open.
+  const [localHistory, setLocalHistory] = useState<string | null>(null);
   const notices = useWorkspace((s) => s.notices);
   const dismissNotices = useWorkspace((s) => s.dismissNotices);
   // `null` = closed, `'new'` = create, profile = edit.
@@ -60,7 +64,7 @@ export function App() {
       'view.toggleBottomPanel': () => ws().setBottomCollapsed(!ws().bottomCollapsed),
       'settings.open': () => setSettingsOpen(true),
       'datasource.new': () => setConnectionDialog('new'),
-      'editor.format': () => activeEditor()?.format(),
+      'editor.format': () => void formatWithHistory(),
       'editor.nextError': () => goToError(1),
       'editor.previousError': () => goToError(-1),
       'query.run': () => void runFromEditor('current'),
@@ -86,6 +90,12 @@ export function App() {
           panelsBefore = { explorer: explorerCollapsed, bottom: bottomCollapsed };
           ws().setExplorerCollapsed(true);
           ws().setBottomCollapsed(true);
+        }
+      },
+      'console.localHistory': () => {
+        const tab = ws().tabs.find((t) => t.id === ws().activeTabId);
+        if (isConsole(tab)) {
+          setLocalHistory(tab.id);
         }
       },
       'editor.goToDdl': () => void explain(goToDdlAtCaret()),
@@ -147,6 +157,9 @@ export function App() {
         />
       )}
       {recentOpen && <RecentDialog onClose={() => setRecentOpen(false)} />}
+      {localHistory && (
+        <LocalHistoryDialog tabId={localHistory} onClose={() => setLocalHistory(null)} />
+      )}
       {connectionDialog && (
         <ConnectionDialog
           profile={connectionDialog === 'new' ? undefined : connectionDialog}

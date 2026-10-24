@@ -477,6 +477,18 @@ listed tests run green in CI.
     (whole flow, presets, production confirmation, cancel, read-only refusal, drop target); E2E
     (wizard with axe at every step).
   - Not yet: Excel, Parquet, pg_dump, disabling triggers during load (REQ-IMPEX-09 to 11).
+- **M5.2 Local file history** ✅ (plan: `docs/plans/14-file-history.md`)
+  - **Revisions** of console files in `app.db` (migration 6), taken sparingly: while editing at
+    most once per interval, always before a save that deletes most of the text, when the file
+    was changed outside Quarry, and before a run, a format, a restore or a delete. Repeats and
+    blank text are skipped; renames carry the history along.
+  - **Local history** (Alt+Shift+H, or the tab menu): versions with time, reason and first line,
+    a line diff against the current text, and Restore, which first keeps the replaced text.
+  - **Retention** in Settings: versions per console, maximum age, interval.
+  - Tests: unit (autosave bursts make one revision, deletion and outside changes always kept,
+    pruning by count and age, rename, upgrade from version 5, line diff); desktop (the save
+    path keeps deleted text and outside edits); UI (diff and restore, before-run and
+    before-format checkpoints, settings); E2E (axe on the dialog).
 - **M5.1 Query history** ✅ (plan: `docs/plans/09-query-history.md`)
   - **Recording**: the query job in Rust records every statement that reached the server
     (succeeded, failed or cancelled) with data source, console session, start time, duration,

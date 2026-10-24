@@ -2,6 +2,7 @@ import { isConsole, useWorkspace } from '../../app/workspaceStore';
 import { askConfirm, askCustom } from '../../app/dialogs';
 import { connectSource } from '../connections/connectFlow';
 import { askAttach } from '../editor/ConsoleDialogs';
+import { checkpoint } from '../editor/localHistory';
 import { changeSource } from './txGuards';
 import { useSettings } from '../../app/settingsStore';
 import type { Cell, Settings, StatementRequest } from '../../ipc/types';
@@ -238,6 +239,8 @@ export async function runFromEditor(mode: RunMode): Promise<void> {
   editor.clearMarkers();
   ws.setBottomCollapsed(false);
   const options = { schema: tab.schema ?? null, txMode };
+  // The text as it was when it ran stays in the console's local history.
+  await checkpoint('beforeRun');
   await exec.start(tab.id, session, source.name, toRun, options, (failed) => {
     const e = failed.error;
     if (!e) return;

@@ -110,6 +110,9 @@ mod tests {
             decl::<quarry_store::HistoryEntry>(&cfg),
             decl::<quarry_store::HistoryQuery>(&cfg),
             decl::<crate::history::HistoryExportFormat>(&cfg),
+            // Local history of consoles
+            decl::<quarry_store::RevisionReason>(&cfg),
+            decl::<quarry_store::RevisionInfo>(&cfg),
             // Results: sort/filter, editing, export
             decl::<quarry_db_core::SortKey>(&cfg),
             decl::<quarry_db_core::Filter>(&cfg),

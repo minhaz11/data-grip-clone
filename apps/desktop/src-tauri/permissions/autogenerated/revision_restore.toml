@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-revision-restore"
+description = "Enables the revision_restore command without any pre-configured scope."
+commands.allow = ["revision_restore"]
+
+[[permission]]
+identifier = "deny-revision-restore"
+description = "Denies the revision_restore command without any pre-configured scope."
+commands.deny = ["revision_restore"]

@@ -110,6 +110,17 @@ const MIGRATIONS: &[&str] = &[
      ALTER TABLE connections ADD COLUMN schema_names TEXT NOT NULL DEFAULT '[]';
      ALTER TABLE connections ADD COLUMN schema_pattern TEXT NOT NULL DEFAULT '';
      ALTER TABLE connections ADD COLUMN url_only INTEGER NOT NULL DEFAULT 0;",
+    // 6: local history of console files (M5.2). Keyed by console name; renames move them.
+    "CREATE TABLE console_revisions (
+         id         INTEGER PRIMARY KEY,
+         console    TEXT NOT NULL,
+         created_at INTEGER NOT NULL,
+         reason     TEXT NOT NULL,
+         text       TEXT NOT NULL,
+         size       INTEGER NOT NULL
+     ) STRICT;
+     CREATE INDEX console_revisions_by_console ON console_revisions (console, id);
+     CREATE INDEX console_revisions_by_time ON console_revisions (created_at);",
 ];
 
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;

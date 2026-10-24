@@ -4,6 +4,7 @@
 pub mod connections;
 pub mod history;
 mod migrations;
+pub mod revisions;
 pub mod ssh;
 
 use std::collections::BTreeMap;
@@ -18,6 +19,7 @@ pub use connections::{
 };
 pub use history::{HistoryEntry, HistoryQuery, HistoryRecord, HistoryStatus, Retention};
 pub use migrations::LATEST_VERSION;
+pub use revisions::{RevisionInfo, RevisionReason, RevisionRetention};
 pub use ssh::{SshAuthMethod, SshProfile, SshProfileDraft, TrustedHostKey};
 
 #[derive(Debug, thiserror::Error)]
@@ -106,6 +108,12 @@ pub struct Settings {
     pub history_limit: u32,
     /// Query history older than this many days is removed; 0 = keep regardless of age.
     pub history_max_age_days: u32,
+    /// Local history: revisions kept per console; the oldest go first.
+    pub revision_limit: u32,
+    /// Local history older than this many days is removed; 0 = keep regardless of age.
+    pub revision_max_age_days: u32,
+    /// Minutes between automatic revisions while a console is being edited.
+    pub revision_interval_mins: u32,
     /// Shortcut overrides by action id; each replaces all of that action's default bindings
     /// (an empty list unbinds it). Ids the UI no longer knows are ignored there.
     pub keymap: BTreeMap<String, Vec<String>>,
@@ -118,6 +126,8 @@ impl Settings {
     pub const HISTORY_LIMIT_RANGE: std::ops::RangeInclusive<u32> = 100..=1_000_000;
     /// Ten years.
     pub const MAX_HISTORY_DAYS: u32 = 3_650;
+    pub const REVISION_LIMIT_RANGE: std::ops::RangeInclusive<u32> = 1..=1_000;
+    pub const REVISION_INTERVAL_RANGE: std::ops::RangeInclusive<u32> = 1..=240;
     pub const MAX_KEYMAP_ENTRIES: usize = 500;
     pub const MAX_BINDINGS: usize = 4;
     pub const MAX_CHORD_LEN: usize = 64;
@@ -143,6 +153,20 @@ impl Settings {
                 "history size must be between {} and {} entries",
                 Self::HISTORY_LIMIT_RANGE.start(),
                 Self::HISTORY_LIMIT_RANGE.end()
+            )));
+        }
+        if !Self::REVISION_LIMIT_RANGE.contains(&self.revision_limit)
+            || self.revision_max_age_days > Self::MAX_HISTORY_DAYS
+            || !Self::REVISION_INTERVAL_RANGE.contains(&self.revision_interval_mins)
+        {
+            return Err(StoreError::Invalid(format!(
+                "local history keeps {} to {} revisions per console, at most {} days, \
+                 one every {} to {} minutes",
+                Self::REVISION_LIMIT_RANGE.start(),
+                Self::REVISION_LIMIT_RANGE.end(),
+                Self::MAX_HISTORY_DAYS,
+                Self::REVISION_INTERVAL_RANGE.start(),
+                Self::REVISION_INTERVAL_RANGE.end()
             )));
         }
         if self.history_max_age_days > Self::MAX_HISTORY_DAYS {
@@ -187,6 +211,15 @@ impl Settings {
         Ok(())
     }
 
+    /// The local history retention these settings ask for.
+    pub fn revision_retention(&self) -> RevisionRetention {
+        RevisionRetention {
+            max_per_console: self.revision_limit,
+            max_age_days: self.revision_max_age_days,
+            interval_ms: i64::from(self.revision_interval_mins) * 60_000,
+        }
+    }
+
     /// The history retention these settings ask for.
     pub fn history_retention(&self) -> Retention {
         Retention {
@@ -208,6 +241,9 @@ impl Default for Settings {
             run_selection: SelectionRun::All,
             history_limit: 10_000,
             history_max_age_days: 0,
+            revision_limit: 100,
+            revision_max_age_days: 30,
+            revision_interval_mins: 5,
             keymap: BTreeMap::new(),
         }
     }
@@ -504,6 +540,9 @@ mod tests {
                 "runSelection": "all",
                 "historyLimit": 10000,
                 "historyMaxAgeDays": 0,
+                "revisionLimit": 100,
+                "revisionMaxAgeDays": 30,
+                "revisionIntervalMins": 5,
                 "keymap": {}
             })
         );

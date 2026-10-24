@@ -3,11 +3,11 @@
 | Field        | Value       |
 | ------------ | ----------- |
 | Milestone    | M5.2        |
-| Status       | Not started |
+| Status       | Done        |
 | Depends on   | -           |
 | Requirements | REQ-HIST-03 |
-| Started      | -           |
-| Finished     | -           |
+| Started      | 2026-10-24  |
+| Finished     | 2026-10-24  |
 
 ## Goal
 
@@ -33,38 +33,39 @@ deleted query is never lost.
 - **When**: autosave runs every 400 ms; do not create a revision per autosave. Create one when the
   text changed and at least N minutes passed since the last revision, before each run, before a
   format, and before restore.
-- **Diff**: Monaco's diff editor, already bundled with the editor features (check the generated
-  Monaco entry includes it; add it if not).
+- **Diff**: decided against Monaco's diff editor: a small line diff (`lib/diff.ts`, LCS with
+  the common start and end trimmed) renders an accessible table, works in the jsdom tests and
+  adds nothing to the Monaco bundle.
 
 ## Tasks
 
 ### Backend
 
-- [ ] Store migration for revisions; insert and prune.
-- [ ] Revision triggers in `quarry-workspace` save path (time-based, before run, before format).
-- [ ] Commands `revisions_list(console)`, `revision_read(id)`, `revision_restore(id)`.
+- [x] Store migration for revisions; insert and prune.
+- [x] Revision triggers in `quarry-workspace` save path (time-based, before run, before format).
+- [x] Commands `revisions_list(console)`, `revision_read(id)`, `revision_restore(id)`.
 
 ### Frontend
 
-- [ ] "Local history" action on a console tab.
-- [ ] Revision list with time and reason; diff view; Restore (creates a revision of the current
+- [x] "Local history" action on a console tab.
+- [x] Revision list with time and reason; diff view; Restore (creates a revision of the current
       text first).
-- [ ] Settings: retention by count and age.
+- [x] Settings: retention by count and age.
 
 ### Tests
 
-- [ ] Unit: autosave bursts create one revision, not hundreds.
-- [ ] Unit: restore is undoable (a revision of the replaced text exists).
-- [ ] Store: migration on empty and upgraded databases.
+- [x] Unit: autosave bursts create one revision, not hundreds.
+- [x] Unit: restore is undoable (a revision of the replaced text exists).
+- [x] Store: migration on empty and upgraded databases.
 
 ### Docs
 
-- [ ] Mark M5.2 done in `mvp-and-milestones.md`.
+- [x] Mark M5.2 done in `mvp-and-milestones.md`.
 
 ## Acceptance criteria
 
-- [ ] After deleting all text and saving, the previous text can be restored.
-- [ ] Revisions are pruned within the configured limits.
+- [x] After deleting all text and saving, the previous text can be restored.
+- [x] Revisions are pruned within the configured limits.
 
 ## Risks and open questions
 
@@ -73,5 +74,8 @@ deleted query is never lost.
 
 ## Progress log
 
-| Date | Note |
-| ---- | ---- |
+| Date       | Note                                                                                                                                                                                                                  |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-10-24 | A save keeps the text it replaces when: the last revision is older than the interval (5 min default), the save removes more than half of the text, or the file changed outside Quarry since it last read or wrote it. |
+| 2026-10-24 | Explicit revisions before a run, a format, a restore and a console delete. Repeats of the latest revision and blank text are never stored. Revisions follow a console rename.                                         |
+| 2026-10-24 | Retention: 100 per console and 30 days by default (Settings), pruned on every insert.                                                                                                                                 |

@@ -27,6 +27,18 @@ historyLimit: number,
  */
 historyMaxAgeDays: number, 
 /**
+ * Local history: revisions kept per console; the oldest go first.
+ */
+revisionLimit: number, 
+/**
+ * Local history older than this many days is removed; 0 = keep regardless of age.
+ */
+revisionMaxAgeDays: number, 
+/**
+ * Minutes between automatic revisions while a console is being edited.
+ */
+revisionIntervalMins: number, 
+/**
  * Shortcut overrides by action id; each replaces all of that action's default bindings
  * (an empty list unbinds it). Ids the UI no longer knows are ignored there.
  */
@@ -475,6 +487,22 @@ export type HistoryQuery = {
 connectionId?: string, text: string, limit: number, offset: number, };
 
 export type HistoryExportFormat = "csv" | "json";
+
+export type RevisionReason = "auto" | "beforeDeletion" | "external" | "beforeRun" | "beforeFormat" | "beforeRestore" | "beforeDelete";
+
+export type RevisionInfo = { id: number, 
+/**
+ * Unix time in milliseconds.
+ */
+createdAt: number, reason: RevisionReason, 
+/**
+ * Bytes of text.
+ */
+size: number, 
+/**
+ * The first non-blank line, for recognizing a revision in the list.
+ */
+firstLine: string, };
 
 export type SortKey = { column: number, descending: boolean, };
 

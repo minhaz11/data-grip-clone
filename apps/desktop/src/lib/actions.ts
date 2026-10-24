@@ -110,6 +110,12 @@ export const ACTIONS = [
     defaults: ['Ctrl+Shift+T'],
   },
   {
+    id: 'console.localHistory',
+    title: 'Local history of the console',
+    context: 'global',
+    defaults: ['Alt+Shift+H'],
+  },
+  {
     id: 'view.hideAllPanels',
     title: 'Hide or show all panels',
     context: 'global',

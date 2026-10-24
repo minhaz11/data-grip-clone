@@ -37,6 +37,7 @@ typed (everywhere and in the SQL editor), a shortcut without Ctrl or Alt must be
 | Back | Everywhere | `Ctrl+Alt+Left` | `⌘[` |
 | Forward | Everywhere | `Ctrl+Alt+Right` | `⌘]` |
 | Reopen closed tab | Everywhere | `Ctrl+Shift+T` | `⇧⌘T` |
+| Local history of the console | Everywhere | `Alt+Shift+H` | `⌥⇧H` |
 | Hide or show all panels | Everywhere | `Ctrl+Shift+F12` | `⇧⌘F12` |
 | Format SQL | SQL editor | `Ctrl+Alt+L` | `⌥⌘L` |
 | Next error | SQL editor | `F8` | `F8` |

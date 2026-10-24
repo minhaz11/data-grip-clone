@@ -33,6 +33,7 @@ quarry-logging.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+tempfile.workspace = true
 # Enables the TypeScript derives for the bindings test (src/bindings.rs).
 ts-rs.workspace = true
 quarry-db-core = { workspace = true, features = ["ts"] }

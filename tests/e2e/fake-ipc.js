@@ -21,6 +21,9 @@
       runSelection: 'all',
       historyLimit: 10000,
       historyMaxAgeDays: 0,
+      revisionLimit: 100,
+      revisionMaxAgeDays: 30,
+      revisionIntervalMins: 5,
       keymap: {},
     },
     workspace: null,
@@ -304,6 +307,8 @@
       return null;
     },
     consoles_dir: () => '/fake/consoles',
+    console_checkpoint: () => null,
+    revisions_list: () => [],
     import_pick: () => ({
       id: 'file-1',
       name: 'people.csv',

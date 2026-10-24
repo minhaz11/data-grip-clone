@@ -37,6 +37,8 @@ import type {
   ObjectRef,
   PasswordChange,
   QuitResolution,
+  RevisionInfo,
+  RevisionReason,
   ServerInfo,
   SessionKey,
   SessionState,
@@ -144,6 +146,13 @@ export interface Backend {
   consoleDelete(name: string): Promise<null>;
   /** The directory console files live in (for tooltips). */
   consolesDir(): Promise<string>;
+  /** Keeps a console's current file text in its local history (before a run or a format). */
+  consoleCheckpoint(name: string, reason: RevisionReason): Promise<null>;
+  /** A console's local history, newest first. */
+  revisionsList(name: string): Promise<RevisionInfo[]>;
+  revisionRead(id: number): Promise<string>;
+  /** Puts a revision back into its console (the replaced text becomes a revision); its text. */
+  revisionRestore(id: number): Promise<string>;
   /**
    * Cancels a slow explorer load on the shared session; `false` when a statement runs there (then
    * nothing is cancelled on the server).
@@ -296,6 +305,10 @@ const tauriBackend: Backend = {
   consoleDuplicate: (name) => invoke<string>('console_duplicate', { name }),
   consoleDelete: (name) => invoke<null>('console_delete', { name }),
   consolesDir: () => invoke<string>('consoles_dir'),
+  consoleCheckpoint: (name, reason) => invoke<null>('console_checkpoint', { name, reason }),
+  revisionsList: (name) => invoke<RevisionInfo[]>('revisions_list', { name }),
+  revisionRead: (id) => invoke<string>('revision_read', { id }),
+  revisionRestore: (id) => invoke<string>('revision_restore', { id }),
   metadataCancel: (id) => invoke<boolean>('metadata_cancel', { id }),
   queryExecute: (request, onEvent) => {
     const channel = new Channel<ExecEvent>();

@@ -37,7 +37,10 @@ export function SettingsDialog({ onClose }: { onClose(): void }) {
   const timesValid = validSeconds(draft.statementTimeoutSecs) && validSeconds(draft.longQuerySecs);
   const historyValid =
     inRange(draft.historyLimit, HISTORY_LIMIT_RANGE.min, HISTORY_LIMIT_RANGE.max) &&
-    inRange(draft.historyMaxAgeDays, 0, MAX_HISTORY_DAYS);
+    inRange(draft.historyMaxAgeDays, 0, MAX_HISTORY_DAYS) &&
+    inRange(draft.revisionLimit, 1, 1000) &&
+    inRange(draft.revisionMaxAgeDays, 0, MAX_HISTORY_DAYS) &&
+    inRange(draft.revisionIntervalMins, 1, 240);
   const keymapValid = !hasBlockingConflicts(draft.keymap);
 
   async function apply() {
@@ -206,6 +209,33 @@ export function SettingsDialog({ onClose }: { onClose(): void }) {
           max={MAX_HISTORY_DAYS}
           value={draft.historyMaxAgeDays}
           onChange={(historyMaxAgeDays) => setDraft({ ...draft, historyMaxAgeDays })}
+        />
+        <NumberField
+          id="settings-revision-limit"
+          label="Local history per console"
+          hint="versions, 1-1,000"
+          min={1}
+          max={1000}
+          value={draft.revisionLimit}
+          onChange={(revisionLimit) => setDraft({ ...draft, revisionLimit })}
+        />
+        <NumberField
+          id="settings-revision-age"
+          label="Remove versions older than"
+          hint="days, 0 = keep regardless of age"
+          min={0}
+          max={MAX_HISTORY_DAYS}
+          value={draft.revisionMaxAgeDays}
+          onChange={(revisionMaxAgeDays) => setDraft({ ...draft, revisionMaxAgeDays })}
+        />
+        <NumberField
+          id="settings-revision-interval"
+          label="Keep a version while editing every"
+          hint="minutes, 1-240"
+          min={1}
+          max={240}
+          value={draft.revisionIntervalMins}
+          onChange={(revisionIntervalMins) => setDraft({ ...draft, revisionIntervalMins })}
         />
       </div>
       {error && (

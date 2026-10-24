@@ -16,6 +16,9 @@ export const DEFAULT_SETTINGS: Settings = {
   runSelection: 'all',
   historyLimit: 10_000,
   historyMaxAgeDays: 0,
+  revisionLimit: 100,
+  revisionMaxAgeDays: 30,
+  revisionIntervalMins: 5,
   keymap: {},
 };
 

@@ -382,6 +382,16 @@ test.describe('accessibility', () => {
     await expectNoA11yViolations(app, '[role="dialog"]');
   });
 
+  test('local history dialog has no WCAG A/AA violations', async ({ app }) => {
+    await app.keyboard.press('ControlOrMeta+Shift+Q');
+    const tab = app.getByRole('tab', { name: /console\.sql/ });
+    await tab.click({ button: 'right' });
+    await app.getByRole('menuitem', { name: 'Local history…' }).click();
+    const dialog = app.getByRole('dialog', { name: 'Local History: console.sql' });
+    await expect(dialog).toContainText('No earlier versions yet');
+    await expectNoA11yViolations(app, '[role="dialog"]');
+  });
+
   test('settings dialog has no WCAG A/AA violations', async ({ app }) => {
     await app.getByRole('button', { name: /^Settings/ }).click();
     await expect(app.getByRole('dialog')).toBeVisible();

@@ -5,6 +5,8 @@ import { ContextMenu, type MenuItem } from '../../components/ui/ContextMenu';
 import { backend } from '../../ipc/client';
 import { revealInTree } from '../navigation/objects';
 import { deleteConsole, duplicateConsole, renameConsole } from './ConsoleDialogs';
+import { formatWithHistory } from './localHistory';
+import { LocalHistoryDialog } from './LocalHistoryDialog';
 import { useSettings } from '../../app/settingsStore';
 import { isConsole, useWorkspace, type ConsoleTab, type EditorTab } from '../../app/workspaceStore';
 import { DataTab } from '../data/DataTab';
@@ -14,7 +16,6 @@ import { useKeymap } from '../../app/keymapStore';
 import { shortcutLabel } from '../../lib/keymap';
 import { useConnections } from '../connections/connectionsStore';
 import { effectiveColor } from '../connections/model';
-import { activeEditor } from './editorHandle';
 import { SqlEditor } from './SqlEditor';
 import { isRunning, useExec } from '../exec/execStore';
 import { runFromEditor } from '../exec/runQuery';
@@ -59,6 +60,7 @@ export function EditorArea({ theme }: { theme: 'light' | 'dark' }) {
   const dir = useConsolesDir();
   const [menu, setMenu] = useState<{ x: number; y: number; tabId: string | null } | null>(null);
   const tablistRef = useRef<HTMLDivElement>(null);
+  const [historyFor, setHistoryFor] = useState<string | null>(null);
 
   const pathOf = (tab: ConsoleTab) =>
     dir ? `${dir}${dir.includes('\\') ? '\\' : '/'}${tab.console}.sql` : `${tab.console}.sql`;
@@ -101,6 +103,7 @@ export function EditorArea({ theme }: { theme: 'light' | 'dark' }) {
     }
     if (isConsole(tab)) {
       items.push(
+        { label: 'Local history…', onSelect: () => setHistoryFor(tab.id) },
         { label: 'Rename console…', onSelect: () => void renameConsole(tab.id) },
         { label: 'Duplicate console', onSelect: () => void duplicateConsole(tab.id) },
         { label: 'Copy path', onSelect: () => void navigator.clipboard?.writeText(pathOf(tab)) },
@@ -280,6 +283,7 @@ export function EditorArea({ theme }: { theme: 'light' | 'dark' }) {
           onClose={() => setMenu(null)}
         />
       )}
+      {historyFor && <LocalHistoryDialog tabId={historyFor} onClose={() => setHistoryFor(null)} />}
       {isConsole(active) && <ConsolePane key={active.id} tab={active} theme={theme} />}
       {active?.kind === 'object' && (
         <ObjectViewer
@@ -423,7 +427,7 @@ function ConsolePane({ tab, theme }: { tab: ConsoleTab; theme: 'light' | 'dark' 
         <span className="mx-1 h-4 w-px bg-border" aria-hidden />
         <button
           type="button"
-          onClick={() => activeEditor()?.format()}
+          onClick={() => void formatWithHistory()}
           title={`Format (${shortcutLabel('editor.format', keymap)})`}
           className="flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-hover"
         >

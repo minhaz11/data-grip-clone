@@ -44,6 +44,7 @@ pub fn run() {
             app.manage(Arc::new(quarry_workspace::Consoles::new(
                 dir.join("consoles"),
             )));
+            app.manage(Arc::new(consoles::LastWritten::default()));
             app.manage(store);
             app.manage(Arc::new(exec::Jobs::default()));
             app.manage(Arc::new(results::Exports::default()));
@@ -102,6 +103,10 @@ pub fn run() {
             consoles::console_duplicate,
             consoles::console_delete,
             consoles::consoles_dir,
+            consoles::console_checkpoint,
+            consoles::revisions_list,
+            consoles::revision_read,
+            consoles::revision_restore,
             exec::query_execute,
             exec::query_cancel,
             history::history_search,
