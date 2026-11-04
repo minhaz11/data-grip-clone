@@ -107,7 +107,8 @@ jobs:
       - run: mkdir apps/desktop/dist -Force
         shell: pwsh
       - run: cargo build --workspace
-      - run: cargo test --workspace
+      # Run every test binary so one run lists all Windows-only failures.
+      - run: cargo test --workspace --no-fail-fast
 
   secrets:
     runs-on: ubuntu-24.04
