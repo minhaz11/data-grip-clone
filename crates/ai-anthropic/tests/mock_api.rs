@@ -7,7 +7,9 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use common::{KEY, Reply, START, delta, end, provider, request, server, sse};
+use common::{
+    KEY, Reply, START, delta, end, provider, provider_with_idle_timeout, request, server, sse,
+};
 use futures_util::StreamExt;
 use quarry_ai_core::{AiError, AiEvent, AiProvider, KillSwitch, StopReason, Switched};
 use tokio::net::TcpListener;
@@ -290,7 +292,9 @@ async fn unreachable_api_is_a_network_error() {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let url = format!("http://{}", listener.local_addr().expect("addr"));
     drop(listener);
-    let err = provider(&url)
+    // Windows retries the SYN before reporting a refused connection (about 2 s), and the read
+    // timeout already runs while connecting, so the short test idle timeout would win the race.
+    let err = provider_with_idle_timeout(&url, Duration::from_secs(30))
         .complete(request())
         .await
         .err()

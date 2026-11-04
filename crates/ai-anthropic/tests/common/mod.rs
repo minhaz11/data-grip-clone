@@ -166,12 +166,17 @@ pub async fn server() -> Server {
     }
 }
 
+/// A provider with a short idle timeout, so the timeout tests finish quickly.
 pub fn provider(url: &str) -> AnthropicProvider {
+    provider_with_idle_timeout(url, Duration::from_millis(400))
+}
+
+pub fn provider_with_idle_timeout(url: &str, idle_timeout: Duration) -> AnthropicProvider {
     AnthropicProvider::with_options(
         SecretString::new(KEY.into()),
         Options {
             base_url: url.into(),
-            idle_timeout: Duration::from_millis(400),
+            idle_timeout,
             ..Options::default()
         },
     )

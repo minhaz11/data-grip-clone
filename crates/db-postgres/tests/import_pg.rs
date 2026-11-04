@@ -74,13 +74,13 @@ fn mapping(columns: &[(&str, &str)]) -> Vec<ColumnMapping> {
         .collect()
 }
 
-fn plan(table: &str, columns: &[(&str, &str)], policy: ErrorPolicy) -> ImportPlan {
+fn plan(schema: &str, table: &str, columns: &[(&str, &str)], policy: ErrorPolicy) -> ImportPlan {
     ImportPlan {
         format: ImportFormat::default(),
         source_columns: columns.iter().map(|(n, _)| (*n).to_owned()).collect(),
         mapping: mapping(columns),
         table: TableName {
-            schema: "it_import".into(),
+            schema: schema.into(),
             name: table.into(),
         },
         setup: Vec::new(),
@@ -92,11 +92,14 @@ const PEOPLE: &[(&str, &str)] = &[("id", "integer"), ("name", "text"), ("born", 
 const PEOPLE_CSV: &str =
     "id,name,born\n1,Ann,1990-01-02\nx,Bad id,1990-01-02\n3,Cy,1990-02-30\n4,\"Dee, Jr.\",\n";
 
-async fn fresh(s: &Arc<dyn Session>) {
+/// Each test owns its schema: the tests run in parallel against one server.
+async fn fresh(s: &Arc<dyn Session>, schema: &str) {
     exec(
         s,
-        "DROP SCHEMA IF EXISTS it_import CASCADE; CREATE SCHEMA it_import;
-         CREATE TABLE it_import.people (id integer, name text, born date)",
+        &format!(
+            "DROP SCHEMA IF EXISTS {schema} CASCADE; CREATE SCHEMA {schema};
+             CREATE TABLE {schema}.people (id integer, name text, born date)"
+        ),
     )
     .await;
 }
@@ -105,7 +108,7 @@ async fn fresh(s: &Arc<dyn Session>) {
 #[ignore = "needs scripts/test-pg.sh up"]
 async fn error_policies_abort_skip_or_null() {
     let s = session().await;
-    fresh(&s).await;
+    fresh(&s, "it_import_policy").await;
     let f = file(PEOPLE_CSV);
     let never = AtomicBool::new(false);
 
@@ -113,7 +116,7 @@ async fn error_policies_abort_skip_or_null() {
     let err = import_file(
         s.as_ref(),
         f.path(),
-        &plan("people", PEOPLE, ErrorPolicy::Abort),
+        &plan("it_import_policy", "people", PEOPLE, ErrorPolicy::Abort),
         &never,
         &|_| {},
     )
@@ -121,7 +124,7 @@ async fn error_policies_abort_skip_or_null() {
     .expect_err("abort");
     assert!(err.to_string().contains("Line 3, column id"), "{err}");
     assert_eq!(
-        count(&s, "select count(*) from it_import.people")
+        count(&s, "select count(*) from it_import_policy.people")
             .await
             .as_deref(),
         Some("0")
@@ -131,7 +134,7 @@ async fn error_policies_abort_skip_or_null() {
     let summary = import_file(
         s.as_ref(),
         f.path(),
-        &plan("people", PEOPLE, ErrorPolicy::Skip),
+        &plan("it_import_policy", "people", PEOPLE, ErrorPolicy::Skip),
         &never,
         &|_| {},
     )
@@ -147,7 +150,7 @@ async fn error_policies_abort_skip_or_null() {
     assert_eq!(
         count(
             &s,
-            "select string_agg(name, '|' order by id) from it_import.people"
+            "select string_agg(name, '|' order by id) from it_import_policy.people"
         )
         .await
         .as_deref(),
@@ -155,11 +158,11 @@ async fn error_policies_abort_skip_or_null() {
     );
 
     // NULL: every row loads; values that do not fit become NULL.
-    exec(&s, "truncate it_import.people").await;
+    exec(&s, "truncate it_import_policy.people").await;
     let summary = import_file(
         s.as_ref(),
         f.path(),
-        &plan("people", PEOPLE, ErrorPolicy::Null),
+        &plan("it_import_policy", "people", PEOPLE, ErrorPolicy::Null),
         &never,
         &|_| {},
     )
@@ -169,13 +172,13 @@ async fn error_policies_abort_skip_or_null() {
     assert_eq!(
         count(
             &s,
-            "select count(*) from it_import.people where id is null or born is null"
+            "select count(*) from it_import_policy.people where id is null or born is null"
         )
         .await
         .as_deref(),
         Some("3")
     );
-    exec(&s, "DROP SCHEMA it_import CASCADE").await;
+    exec(&s, "DROP SCHEMA it_import_policy CASCADE").await;
 }
 
 #[tokio::test]
@@ -184,12 +187,13 @@ async fn a_new_table_and_its_rows_are_created_together() {
     let s = session().await;
     exec(
         &s,
-        "DROP SCHEMA IF EXISTS it_import CASCADE; CREATE SCHEMA it_import",
+        "DROP SCHEMA IF EXISTS it_import_create CASCADE; CREATE SCHEMA it_import_create",
     )
     .await;
     let f = file(PEOPLE_CSV);
-    let mut p = plan("created", PEOPLE, ErrorPolicy::Abort);
-    p.setup = vec!["CREATE TABLE it_import.created (id integer, name text, born date)".into()];
+    let mut p = plan("it_import_create", "created", PEOPLE, ErrorPolicy::Abort);
+    p.setup =
+        vec!["CREATE TABLE it_import_create.created (id integer, name text, born date)".into()];
     import_file(s.as_ref(), f.path(), &p, &AtomicBool::new(false), &|_| {})
         .await
         .expect_err("bad row");
@@ -197,7 +201,7 @@ async fn a_new_table_and_its_rows_are_created_together() {
     assert_eq!(
         count(
             &s,
-            "select count(*) from pg_tables where schemaname = 'it_import'"
+            "select count(*) from pg_tables where schemaname = 'it_import_create'"
         )
         .await
         .as_deref(),
@@ -209,19 +213,19 @@ async fn a_new_table_and_its_rows_are_created_together() {
         .expect("create and load");
     assert_eq!(summary.rows, 2);
     assert_eq!(
-        count(&s, "select count(*) from it_import.created")
+        count(&s, "select count(*) from it_import_create.created")
             .await
             .as_deref(),
         Some("2")
     );
-    exec(&s, "DROP SCHEMA it_import CASCADE").await;
+    exec(&s, "DROP SCHEMA it_import_create CASCADE").await;
 }
 
 #[tokio::test]
 #[ignore = "needs scripts/test-pg.sh up"]
 async fn json_arrays_and_lines_import_by_key() {
     let s = session().await;
-    fresh(&s).await;
+    fresh(&s, "it_import_json").await;
     for (kind, text) in [
         (
             FileKind::JsonArray,
@@ -252,7 +256,7 @@ async fn json_arrays_and_lines_import_by_key() {
             source_columns: columns,
             mapping,
             table: TableName {
-                schema: "it_import".into(),
+                schema: "it_import_json".into(),
                 name: "people".into(),
             },
             setup: Vec::new(),
@@ -266,13 +270,13 @@ async fn json_arrays_and_lines_import_by_key() {
     assert_eq!(
         count(
             &s,
-            "select string_agg(coalesce(name, '-'), '|' order by id) from it_import.people"
+            "select string_agg(coalesce(name, '-'), '|' order by id) from it_import_json.people"
         )
         .await
         .as_deref(),
         Some("Ann|Bo|Cy|-")
     );
-    exec(&s, "DROP SCHEMA it_import CASCADE").await;
+    exec(&s, "DROP SCHEMA it_import_json CASCADE").await;
 }
 
 #[tokio::test]
@@ -292,7 +296,12 @@ async fn read_only_sources_cannot_import() {
     let err = import_file(
         s.as_ref(),
         f.path(),
-        &plan("people", &[("id", "integer")], ErrorPolicy::Abort),
+        &plan(
+            "it_import_ro",
+            "people",
+            &[("id", "integer")],
+            ErrorPolicy::Abort,
+        ),
         &AtomicBool::new(false),
         &|_| {},
     )
@@ -309,8 +318,8 @@ async fn a_million_rows_import_in_bounded_memory_and_cancel_leaves_none() {
     let s = session().await;
     exec(
         &s,
-        "DROP SCHEMA IF EXISTS it_import CASCADE; CREATE SCHEMA it_import;
-         CREATE TABLE it_import.big (id bigint, label text, amount numeric(12,2), at timestamp)",
+        "DROP SCHEMA IF EXISTS it_import_big CASCADE; CREATE SCHEMA it_import_big;
+         CREATE TABLE it_import_big.big (id bigint, label text, amount numeric(12,2), at timestamp)",
     )
     .await;
     let mut f = tempfile::NamedTempFile::new().expect("temp");
@@ -334,7 +343,7 @@ async fn a_million_rows_import_in_bounded_memory_and_cancel_leaves_none() {
         ("amount", "numeric(12,2)"),
         ("at", "timestamp"),
     ];
-    let mut p = plan("big", &columns, ErrorPolicy::Abort);
+    let mut p = plan("it_import_big", "big", &columns, ErrorPolicy::Abort);
     p.source_columns = columns.iter().map(|(n, _)| (*n).to_owned()).collect();
 
     let baseline = memory_stats::memory_stats().map_or(0, |m| m.physical_mem);
@@ -371,7 +380,7 @@ async fn a_million_rows_import_in_bounded_memory_and_cancel_leaves_none() {
     sampler.join().expect("sampler");
     assert_eq!(summary.rows, 1_000_000);
     assert_eq!(
-        count(&s, "select count(*) from it_import.big")
+        count(&s, "select count(*) from it_import_big.big")
             .await
             .as_deref(),
         Some("1000000")
@@ -393,7 +402,7 @@ async fn a_million_rows_import_in_bounded_memory_and_cancel_leaves_none() {
     );
 
     // Cancel after the first progress report: nothing new stays.
-    exec(&s, "truncate it_import.big").await;
+    exec(&s, "truncate it_import_big.big").await;
     let cancel = Arc::new(AtomicBool::new(false));
     let summary = {
         let cancel = Arc::clone(&cancel);
@@ -407,10 +416,10 @@ async fn a_million_rows_import_in_bounded_memory_and_cancel_leaves_none() {
     };
     assert!(summary.cancelled);
     assert_eq!(
-        count(&s, "select count(*) from it_import.big")
+        count(&s, "select count(*) from it_import_big.big")
             .await
             .as_deref(),
         Some("0")
     );
-    exec(&s, "DROP SCHEMA it_import CASCADE").await;
+    exec(&s, "DROP SCHEMA it_import_big CASCADE").await;
 }

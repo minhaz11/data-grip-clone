@@ -338,6 +338,9 @@ mod tests {
             assert!(matches!(c.delete("link"), Err(ConsoleError::NotFound(_))));
             assert_eq!(fs::read_to_string(&outside).expect("kept"), "keep me");
         }
+        // Creating symlinks needs extra privileges on Windows, so the link case is Unix only.
+        #[cfg(not(unix))]
+        let _ = &dir;
     }
 
     #[test]
