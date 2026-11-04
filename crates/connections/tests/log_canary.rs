@@ -96,13 +96,18 @@ fn secrets_never_reach_the_log_file() {
     m.delete(&copy.id).expect("delete");
 
     // SSH secrets: password, then key passphrase, each in every save mode.
+    // Any absolute path works here (the file is never read); Windows paths need a drive letter.
+    let key_file = std::env::temp_dir()
+        .join("id_ed25519")
+        .to_string_lossy()
+        .into_owned();
     let ssh = |auth, save_mode| SshProfileDraft {
         name: "Bastion".into(),
         host: "bastion.example.test".into(),
         port: 22,
         username: "deploy".into(),
         auth,
-        key_file: Some("/home/me/.ssh/id_ed25519".into()),
+        key_file: Some(key_file.clone()),
         save_mode,
     };
     let tunnel = m

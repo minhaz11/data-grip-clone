@@ -974,9 +974,9 @@ pub(crate) mod tests {
     fn options_round_trip_and_validate() {
         let store = Store::open_in_memory().expect("open");
         let full = ConnectionDraft {
-            tls_ca_file: Some("/etc/ssl/ca.pem".into()),
-            tls_cert_file: Some("/etc/ssl/me.pem".into()),
-            tls_key_file: Some("/etc/ssl/me.key".into()),
+            tls_ca_file: Some(crate::abs_path("/etc/ssl/ca.pem")),
+            tls_cert_file: Some(crate::abs_path("/etc/ssl/me.pem")),
+            tls_key_file: Some(crate::abs_path("/etc/ssl/me.key")),
             keepalive_secs: 30,
             auto_disconnect_mins: 15,
             startup_sql: "SET search_path = app".into(),

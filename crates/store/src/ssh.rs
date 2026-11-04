@@ -318,7 +318,7 @@ mod tests {
             port: 22,
             username: "deploy".into(),
             auth: SshAuthMethod::Agent,
-            key_file: Some("/tmp/ignored".into()),
+            key_file: Some(crate::abs_path("/tmp/ignored")),
             save_mode: SaveMode::Forever,
         }
     }
@@ -333,13 +333,13 @@ mod tests {
         assert_eq!(p.draft.key_file, None, "agent auth keeps no key file");
         let next = SshProfileDraft {
             auth: SshAuthMethod::Key,
-            key_file: Some("/home/me/.ssh/id_ed25519".into()),
+            key_file: Some(crate::abs_path("/home/me/.ssh/id_ed25519")),
             ..draft("Bastion")
         };
         let updated = store.update_ssh_profile("s1", next).expect("update");
         assert_eq!(
-            updated.draft.key_file.as_deref(),
-            Some("/home/me/.ssh/id_ed25519")
+            updated.draft.key_file,
+            Some(crate::abs_path("/home/me/.ssh/id_ed25519"))
         );
         assert_eq!(store.list_ssh_profiles().expect("list").len(), 1);
         let err = store

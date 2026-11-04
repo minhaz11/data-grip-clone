@@ -359,6 +359,16 @@ impl Store {
     }
 }
 
+/// A Unix-style absolute path as an absolute path on this platform: Windows needs a drive letter.
+#[cfg(test)]
+pub(crate) fn abs_path(unix: &str) -> String {
+    if cfg!(windows) {
+        format!("C:{}", unix.replace('/', "\\"))
+    } else {
+        unix.to_owned()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

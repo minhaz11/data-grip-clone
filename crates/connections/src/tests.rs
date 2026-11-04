@@ -5,6 +5,15 @@ use quarry_store::{Engine, Environment, SslMode};
 
 use super::*;
 
+/// A Unix-style absolute path as an absolute path on this platform: Windows needs a drive letter.
+fn abs_path(unix: &str) -> String {
+    if cfg!(windows) {
+        format!("C:{}", unix.replace('/', "\\"))
+    } else {
+        unix.to_owned()
+    }
+}
+
 /// Credential store double that records calls and can be told to fail.
 #[derive(Default)]
 struct FakeKeyring {
@@ -324,7 +333,7 @@ fn ssh_draft(auth: SshAuthMethod, mode: SaveMode) -> SshProfileDraft {
         port: 22,
         username: "deploy".into(),
         auth,
-        key_file: Some("/home/me/.ssh/id_ed25519".into()),
+        key_file: Some(abs_path("/home/me/.ssh/id_ed25519")),
         save_mode: mode,
     }
 }
@@ -423,7 +432,7 @@ fn ssh_profiles_in_use_are_kept() {
 #[test]
 fn connect_params_carry_the_options() {
     let d = ConnectionDraft {
-        tls_ca_file: Some("/etc/ca.pem".into()),
+        tls_ca_file: Some(abs_path("/etc/ca.pem")),
         keepalive_secs: 30,
         startup_sql: "SET search_path = app".into(),
         schema_names: vec!["shop".into()],
@@ -433,7 +442,7 @@ fn connect_params_carry_the_options() {
     let p = connect_params(d, None).expect("params");
     assert_eq!(
         p.options.tls_files.ca.as_deref(),
-        Some(std::path::Path::new("/etc/ca.pem"))
+        Some(std::path::Path::new(&abs_path("/etc/ca.pem")))
     );
     assert_eq!(p.options.keepalive, Some(Duration::from_secs(30)));
     assert_eq!(p.options.startup_sql, "SET search_path = app");
