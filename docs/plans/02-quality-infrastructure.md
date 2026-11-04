@@ -3,11 +3,11 @@
 | Field        | Value                                                                          |
 | ------------ | ------------------------------------------------------------------------------ |
 | Milestone    | M0.2                                                                           |
-| Status       | In progress                                                                    |
+| Status       | Done                                                                           |
 | Depends on   | -                                                                              |
 | Requirements | ADR-0003 (redaction, secret scanning); REQ-ERR-12; overview "Testing strategy" |
 | Started      | 2026-10-22                                                                     |
-| Finished     | -                                                                              |
+| Finished     | 2026-11-05                                                                     |
 
 ## Goal
 
@@ -78,11 +78,11 @@ scanning in CI, a redacting logger, and builds checked on macOS and Windows as w
 - [x] A test asserts no secret from a connection create/test/connect cycle appears in the log file.
 - [x] gitleaks fails on a planted test secret (verified locally with the pinned release, then
       removed) and finds nothing in the current history.
-- [ ] gitleaks runs on every PR (needs the first CI run on GitHub).
-- [ ] CI is green on Linux and macOS; Windows build job is green (needs the first CI run).
+- [x] gitleaks runs on every PR (needs the first CI run on GitHub).
+- [x] CI is green on Linux and macOS; Windows build job is green (needs the first CI run).
 - [x] E2E suite has zero axe violations on the scanned screens (local: WebKit and Chromium, light
       and dark theme, 3 consecutive green runs).
-- [ ] E2E suite runs green in CI (needs the first CI run).
+- [x] E2E suite runs green in CI (needs the first CI run).
 
 ## Risks and open questions
 
@@ -94,10 +94,11 @@ scanning in CI, a redacting logger, and builds checked on macOS and Windows as w
 
 ## Progress log
 
-| Date       | Note                                                                                                                                                                                                                                                                                                                                                                               |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2026-10-22 | Logger: new `quarry-logging` crate. Each event is buffered and redacted as a whole before writing (URL credentials, secret-named fields, JSON fields, `sk-ant-` keys), size-capped at 5 MB with 3 rotations, in the OS log dir. Verified by launching the app: `~/Library/Logs/dev.quarry.desktop/quarry.log`. SQL text is never logged (the optional debug-SQL idea was dropped). |
-| 2026-10-22 | The log canary runs in its own test binary: a thread-local subscriber lost events because parallel tests share tracing's per-callsite interest cache.                                                                                                                                                                                                                              |
-| 2026-10-22 | E2E mocks at the IPC boundary (a fake `__TAURI_INTERNALS__`, like `@tauri-apps/api/mocks`), so the real client code path runs and production code has no test hooks.                                                                                                                                                                                                               |
-| 2026-10-22 | axe found real violations, all fixed: close buttons inside the editor tablist; muted, accent, danger and success text below 4.5:1 on some backgrounds in both themes; white text on the PROD badge. Text tokens are now checked against every background; badge text picks black or white by contrast.                                                                             |
-| 2026-10-22 | gitleaks: CI downloads the pinned release and verifies its checksum instead of using the action (no license or token needed). Local scan of all 11 commits: no leaks.                                                                                                                                                                                                              |
+| Date       | Note                                                                                                                                                                                                                                                                                                                                                                                           |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-10-22 | Logger: new `quarry-logging` crate. Each event is buffered and redacted as a whole before writing (URL credentials, secret-named fields, JSON fields, `sk-ant-` keys), size-capped at 5 MB with 3 rotations, in the OS log dir. Verified by launching the app: `~/Library/Logs/dev.quarry.desktop/quarry.log`. SQL text is never logged (the optional debug-SQL idea was dropped).             |
+| 2026-10-22 | The log canary runs in its own test binary: a thread-local subscriber lost events because parallel tests share tracing's per-callsite interest cache.                                                                                                                                                                                                                                          |
+| 2026-10-22 | E2E mocks at the IPC boundary (a fake `__TAURI_INTERNALS__`, like `@tauri-apps/api/mocks`), so the real client code path runs and production code has no test hooks.                                                                                                                                                                                                                           |
+| 2026-10-22 | axe found real violations, all fixed: close buttons inside the editor tablist; muted, accent, danger and success text below 4.5:1 on some backgrounds in both themes; white text on the PROD badge. Text tokens are now checked against every background; badge text picks black or white by contrast.                                                                                         |
+| 2026-10-22 | gitleaks: CI downloads the pinned release and verifies its checksum instead of using the action (no license or token needed). Local scan of all 11 commits: no leaks.                                                                                                                                                                                                                          |
+| 2026-11-05 | First fully green CI run on GitHub (run 41900635291, commit d5e2064): frontend, e2e, rust (with Postgres integration tests), macos, windows and gitleaks. Getting there fixed parallel import tests sharing one schema, Windows-only test assumptions (slow refused connections, Unix absolute paths, CRLF checkout of bindings.ts), and the Windows job now runs `cargo test --no-fail-fast`. |
