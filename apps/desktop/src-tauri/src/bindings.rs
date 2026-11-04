@@ -182,7 +182,10 @@ mod tests {
             std::fs::write(&path, &expected).expect("write bindings.ts");
             return;
         }
-        let actual = std::fs::read_to_string(&path).unwrap_or_default();
+        // Git may check the file out with CRLF line endings (core.autocrlf on Windows).
+        let actual = std::fs::read_to_string(&path)
+            .unwrap_or_default()
+            .replace("\r\n", "\n");
         assert!(
             actual == expected,
             "{} is stale: run `npm run bindings` and commit the result",
