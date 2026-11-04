@@ -1,4 +1,4 @@
-# Quarry (working name)
+# Quarry
 
 A desktop database IDE: Tauri 2 (Rust backend) + React/TypeScript. Design docs live in [`docs/`](docs/README.md).
 

@@ -2,7 +2,7 @@
 
 Quarry is a desktop database IDE for PostgreSQL: connect, browse the schema, write and run SQL,
 view and edit results, change tables, import and export data, and (if you turn it on) ask an AI
-assistant about your SQL. "Quarry" is a working name.
+assistant about your SQL.
 
 ## Install
 

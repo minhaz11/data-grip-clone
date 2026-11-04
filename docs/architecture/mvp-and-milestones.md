@@ -606,7 +606,7 @@ listed tests run green in CI.
 - Fault injection (network drop mid-query, permission denied, server restart).
 - Large-result soak tests.
 - Credential and execution-safety audit.
-- Installers (AppImage/deb, MSI, dmg) with signing.
+- Installers (AppImage/deb, MSI, dmg); code signing is out of scope for now (2026-11-05).
 - Docs: setup, supported databases, limitations, release procedure.
 
 ## Global acceptance rules

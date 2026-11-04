@@ -25,7 +25,8 @@ macOS installers in GitHub Actions and publishes a GitHub release with them atta
 
 ## Out of scope
 
-- Obtaining signing certificates (step 19).
+- Code signing certificates and Windows signing: not needed for now (decided 2026-11-05, see step
+  19). macOS signing still switches on by itself if the `APPLE_*` secrets are ever added.
 - Auto-update (`tauri-plugin-updater`): needs an update signing key and a manifest; decide later.
 - Pre-releases and release channels.
 
@@ -85,7 +86,6 @@ merge the PR ──► release.yml
 - [x] `.github/workflows/release-pr.yml`: push to main and manual dispatch with a bump choice.
 - [x] `.github/workflows/release.yml`: draft release, three-OS matrix with `tauri-action`, publish.
 - [x] Optional macOS signing and notarization from secrets.
-- [ ] Windows code signing (after step 19 obtains a certificate).
 - [ ] Linux: decide whether to also ship `.rpm` (bundle targets are `all` today, so rpm is built).
 
 ### Repository setup
@@ -115,8 +115,8 @@ merge the PR ──► release.yml
 ## Risks and open questions
 
 - `tauri-action` is pinned to the `v0` tag; pin to a full version or SHA once the first run works.
-- Unsigned builds: macOS Gatekeeper and Windows SmartScreen will warn users until step 19 adds
-  signing.
+- Unsigned builds: macOS Gatekeeper and Windows SmartScreen will warn users until signing is added
+  (out of scope for now).
 - `ubuntu-22.04` runners will be retired eventually; move to the oldest supported Ubuntu then.
 
 ## Progress log
@@ -124,3 +124,4 @@ merge the PR ──► release.yml
 | Date       | Note                                                                                                             |
 | ---------- | ---------------------------------------------------------------------------------------------------------------- |
 | 2026-10-22 | Scripts, tests and workflows written; verified locally (unit tests, dry run, actionlint). Not yet run on GitHub. |
+| 2026-11-05 | Code signing is out of scope for now: the Windows signing task moved to Out of scope.                            |
