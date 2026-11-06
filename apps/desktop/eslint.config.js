@@ -4,7 +4,15 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist', 'src-tauri', 'coverage', 'src/features/editor/monaco/entry.ts'] },
+  {
+    ignores: [
+      'dist',
+      'src-tauri',
+      'coverage',
+      'src/features/editor/monaco/entry.ts',
+      'src/ipc/bindings.ts',
+    ],
+  },
   {
     files: ['**/*.{ts,tsx}'],
     extends: [js.configs.recommended, ...tseslint.configs.strict],

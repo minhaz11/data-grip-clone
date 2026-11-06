@@ -13,7 +13,47 @@ use futures_util::{TryStreamExt, pin_mut};
 use quarry_db_core::{Cell, ColumnInfo, Editability, ExecOptions, StatementOutcome};
 
 use crate::editability::{self, Origin};
+use tokio_postgres::types::{Format, IsNull, ToSql, Type, to_sql_checked};
 use tokio_postgres::{Client, SimpleQueryMessage};
+
+/// A statement parameter sent in text format: the server parses it for whatever type it
+/// inferred for `$n`, exactly as it would parse a literal, so any type works.
+#[derive(Debug)]
+pub struct TextParam<'a>(pub Option<&'a str>);
+
+impl ToSql for TextParam<'_> {
+    fn to_sql(
+        &self,
+        _ty: &Type,
+        out: &mut bytes::BytesMut,
+    ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>> {
+        match self.0 {
+            Some(v) => {
+                out.extend_from_slice(v.as_bytes());
+                Ok(IsNull::No)
+            }
+            None => Ok(IsNull::Yes),
+        }
+    }
+
+    fn accepts(_ty: &Type) -> bool {
+        true
+    }
+
+    fn encode_format(&self, _ty: &Type) -> Format {
+        Format::Text
+    }
+
+    to_sql_checked!();
+}
+
+fn text_params(params: &[Cell]) -> Vec<TextParam<'_>> {
+    params.iter().map(|p| TextParam(p.as_deref())).collect()
+}
+
+fn binds<'a>(params: &'a [TextParam<'a>]) -> Vec<&'a (dyn ToSql + Sync)> {
+    params.iter().map(|p| p as &(dyn ToSql + Sync)).collect()
+}
 
 /// Open result cursors per session; the oldest is closed beyond this.
 pub const MAX_OPEN_CURSORS: usize = 16;
@@ -90,10 +130,13 @@ fn analysis_error(e: &tokio_postgres::Error) -> bool {
     })
 }
 
+/// Runs one statement; with `params`, `$1…$n` are bound (extended protocol) instead of the
+/// simple protocol.
 pub async fn run(
     client: &Client,
     cursors: &Cursors,
     sql: &str,
+    params: &[Cell],
     options: &ExecOptions,
 ) -> Result<StatementOutcome, tokio_postgres::Error> {
     // Describe-only prepare for column types. It executes nothing; statements that cannot be
@@ -115,10 +158,14 @@ pub async fn run(
     if cursor_eligible(sql) {
         let name = cursors.allocate();
         // `name` is generated here, never taken from callers; `sql` is the user's own statement.
-        match client
-            .batch_execute(&format!("DECLARE {name} SCROLL CURSOR WITH HOLD FOR {sql}"))
-            .await
-        {
+        let declare = format!("DECLARE {name} SCROLL CURSOR WITH HOLD FOR {sql}");
+        let declared = if params.is_empty() {
+            client.batch_execute(&declare).await
+        } else {
+            let values = text_params(params);
+            client.execute(&declare, &binds(&values)).await.map(|_| ())
+        };
+        match declared {
             Ok(()) => {
                 if let Some(evicted) = cursors.register(name.clone()) {
                     let _ = client.batch_execute(&format!("CLOSE {evicted}")).await;
@@ -140,7 +187,15 @@ pub async fn run(
             Err(e) => return Err(e),
         }
     }
-    run_direct(client, sql, types, options).await
+    if params.is_empty() {
+        run_direct(client, sql, types, options).await
+    } else {
+        // Bound statements outside a cursor (INSERT … RETURNING, CALL) report their row count;
+        // returned rows would arrive in binary form, which is not rendered as text here.
+        let values = text_params(params);
+        let rows_affected = client.execute(sql, &binds(&values)).await?;
+        Ok(StatementOutcome::Command { rows_affected })
+    }
 }
 
 /// Declares a cursor for `sql` with bound `params` (refined queries) and returns its first page,

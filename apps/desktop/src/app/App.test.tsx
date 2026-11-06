@@ -18,7 +18,7 @@ describe('App workbench', () => {
 
     await user.keyboard('{Control>}{Shift>}q{/Shift}{/Control}');
     await user.keyboard('{Control>}{Shift>}q{/Shift}{/Control}');
-    const tabs = within(screen.getByRole('tablist', { name: 'Open consoles' })).getAllByRole('tab');
+    const tabs = within(screen.getByRole('tablist', { name: 'Open editors' })).getAllByRole('tab');
     expect(tabs.map((t) => t.textContent)).toEqual(['console.sql', 'console_1.sql']);
     expect(tabs[1]).toHaveAttribute('aria-selected', 'true');
 
@@ -42,7 +42,7 @@ describe('App workbench', () => {
 
     await user.keyboard('{Control>}w{/Control}');
     expect(
-      within(screen.getByRole('tablist', { name: 'Open consoles' })).getAllByRole('tab'),
+      within(screen.getByRole('tablist', { name: 'Open editors' })).getAllByRole('tab'),
     ).toHaveLength(1);
   });
 

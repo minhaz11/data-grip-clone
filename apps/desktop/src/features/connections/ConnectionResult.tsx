@@ -14,7 +14,7 @@ export function ConnectionResult({ result }: { result: { ok: ServerInfo } | { er
         role="status"
         className="flex items-start gap-2 rounded border border-border bg-panel-2 px-3 py-2"
       >
-        <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-[#3f9d5a]" aria-hidden />
+        <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-success" aria-hidden />
         <div>
           <p className="font-medium">Connected — PostgreSQL {i.serverVersion}</p>
           <p className="text-muted">

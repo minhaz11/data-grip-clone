@@ -10,6 +10,8 @@ export function toAppError(e: unknown): AppError {
       hint: o.hint,
       sqlstate: o.sqlstate,
       connectKind: o.connectKind,
+      hostKey: o.hostKey,
+      tunnel: o.tunnel,
     };
   }
   return { kind: 'error', message: String(e) };
@@ -24,11 +26,20 @@ export const CONNECT_ERROR_TITLES: Record<ConnectErrorKind, string> = {
   database_missing: 'Database not found',
   tls: 'TLS/SSL error',
   server_unavailable: 'Server unavailable',
+  ssh_host_unknown: 'Unknown SSH host key',
+  ssh_host_changed: 'SSH host key changed',
+  ssh_secret_required: 'SSH password or passphrase required',
+  ssh: 'SSH tunnel failed',
   other: 'Connection failed',
 };
 
 export function errorTitle(e: AppError): string {
-  return e.connectKind ? CONNECT_ERROR_TITLES[e.connectKind] : 'Error';
+  if (!e.connectKind) {
+    return 'Error';
+  }
+  const title = CONNECT_ERROR_TITLES[e.connectKind];
+  // Generic kinds raised while opening the tunnel say so.
+  return e.tunnel && !e.connectKind.startsWith('ssh') ? `SSH: ${title}` : title;
 }
 
 /** Plain-text report for "Copy details" (never contains secrets: the backend omits them). */

@@ -1,22 +1,41 @@
 import { useEffect, useState } from 'react';
 import { backend } from '../ipc/client';
-import { chordOf, commandForChord, type CommandId } from '../lib/keymap';
+import type { ActionId } from '../lib/actions';
+import { chordOf, contextOf, isModifierOnly, resolveAction } from '../lib/keymap';
+import { currentKeymap, isCapturingShortcut } from './keymapStore';
 import { resolveTheme, useSettings } from './settingsStore';
 import { snapshot, useWorkspace } from './workspaceStore';
 import { useConnections } from '../features/connections/connectionsStore';
+import { useSnippets } from '../features/snippets/snippetsStore';
+import { useAi } from '../features/ai/aiStore';
 import { useSessions } from '../features/connections/sessionsStore';
 import { resetCatalog } from '../features/editor/catalog';
+import { askQuit } from '../features/exec/txGuards';
+import { useTx } from '../features/exec/txStore';
 
-/** Global keyboard shortcuts, dispatched through the keymap so bindings stay configurable. */
-export function useKeybindings(handlers: Partial<Record<CommandId, () => void>>) {
+/**
+ * App-level shortcuts, dispatched through the action registry and the user's keymap. The focused
+ * panel's context decides: its own actions win, and grid and explorer actions are left to those
+ * panels' handlers. Runs in the capture phase, so Monaco never sees a chord bound to an action.
+ */
+/** An action handler; returning `false` declines the key, which then goes to the focused control. */
+export type ActionHandler = () => unknown;
+
+export function useKeybindings(handlers: Partial<Record<ActionId, ActionHandler>>) {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      const command = commandForChord(chordOf(e));
-      const handler = command ? handlers[command] : undefined;
-      if (handler) {
+      if (isModifierOnly(e) || isCapturingShortcut(e.target)) {
+        return;
+      }
+      // A modal dialog owns the keyboard: app shortcuts wait until it is closed.
+      if (e.target instanceof Element && e.target.closest('[aria-modal="true"]')) {
+        return;
+      }
+      const id = resolveAction(chordOf(e), contextOf(e.target), currentKeymap());
+      const handler = id ? handlers[id] : undefined;
+      if (handler && handler() !== false) {
         e.preventDefault();
         e.stopPropagation();
-        handler();
       }
     }
     window.addEventListener('keydown', onKeyDown, { capture: true });
@@ -63,7 +82,11 @@ export function useWorkspacePersistence(): { ready: boolean; error: string | nul
       try {
         await useSettings.getState().load();
         await useConnections.getState().load();
+        await useSnippets.getState().load();
+        await useAi.getState().load();
         unlistenStatus = await useSessions.getState().init();
+        const unlistenTx = await useTx.getState().init();
+        const unlistenQuit = await backend.onQuitRequested((open) => void askQuit(open));
         // Completion catalogs are only valid for the session they were read from.
         const unsubscribeCatalog = useSessions.subscribe((s, prev) => {
           for (const id of Object.keys(prev.byId)) {
@@ -74,6 +97,8 @@ export function useWorkspacePersistence(): { ready: boolean; error: string | nul
         const unlisten = unlistenStatus;
         unlistenStatus = () => {
           unlisten();
+          unlistenTx();
+          unlistenQuit();
           unsubscribeCatalog();
         };
         await useWorkspace.getState().hydrate(await backend.workspaceGet());

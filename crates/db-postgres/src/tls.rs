@@ -1,12 +1,14 @@
 //! rustls configuration per [`TlsMode`], following libpq semantics.
 
+use std::path::Path;
 use std::sync::Arc;
 
-use quarry_db_core::TlsMode;
+use quarry_db_core::{TlsFiles, TlsMode};
 use rustls::client::WebPkiServerVerifier;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::{CryptoProvider, verify_tls12_signature, verify_tls13_signature};
-use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use rustls::pki_types::pem::PemObject;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 use rustls::{
     CertificateError, ClientConfig, DigitallySignedStruct, RootCertStore, SignatureScheme,
 };
@@ -15,36 +17,125 @@ pub fn provider() -> Arc<CryptoProvider> {
     Arc::new(rustls::crypto::ring::default_provider())
 }
 
-/// Builds the TLS client config for a mode. `Disable` never reaches TLS, but gets a valid config
-/// because tokio-postgres always wants a connector.
-pub fn client_config(mode: TlsMode) -> Result<ClientConfig, String> {
+/// Why a TLS configuration could not be built; `file` names the PEM file at fault.
+#[derive(Debug)]
+pub struct SetupError {
+    pub message: String,
+    pub file: Option<String>,
+}
+
+impl SetupError {
+    fn plain(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            file: None,
+        }
+    }
+
+    fn file(path: &Path, message: impl std::fmt::Display) -> Self {
+        Self {
+            message: format!("{}: {message}", path.display()),
+            file: Some(path.display().to_string()),
+        }
+    }
+}
+
+/// Builds the TLS client config for a mode and optional PEM files. `Disable` never reaches TLS,
+/// but gets a valid config because tokio-postgres always wants a connector. As in libpq, a CA file
+/// makes `Require` verify the chain (like `VerifyCa`).
+pub fn client_config(mode: TlsMode, files: &TlsFiles) -> Result<ClientConfig, SetupError> {
     let provider = provider();
     let builder = ClientConfig::builder_with_provider(Arc::clone(&provider))
         .with_safe_default_protocol_versions()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| SetupError::plain(e.to_string()))?;
+    let roots = || match &files.ca {
+        Some(path) => ca_roots(path),
+        None => native_roots(),
+    };
     let verifier: Arc<dyn ServerCertVerifier> = match mode {
+        TlsMode::Require if files.ca.is_some() => {
+            Arc::new(IgnoreHostName(webpki(roots()?, provider)?))
+        }
         TlsMode::Disable | TlsMode::Prefer | TlsMode::Require => {
             Arc::new(AcceptAnyCertificate(provider))
         }
-        TlsMode::VerifyCa => Arc::new(IgnoreHostName(webpki(provider)?)),
-        TlsMode::VerifyFull => webpki(provider)?,
+        TlsMode::VerifyCa => Arc::new(IgnoreHostName(webpki(roots()?, provider)?)),
+        TlsMode::VerifyFull => webpki(roots()?, provider)?,
     };
-    Ok(builder
+    let builder = builder
         .dangerous()
-        .with_custom_certificate_verifier(verifier)
-        .with_no_client_auth())
+        .with_custom_certificate_verifier(verifier);
+    match (&files.cert, &files.key) {
+        (None, None) => Ok(builder.with_no_client_auth()),
+        (Some(cert), Some(key)) => {
+            let chain = read_certs(cert)?;
+            let key_der = read_key(key)?;
+            builder
+                .with_client_auth_cert(chain, key_der)
+                .map_err(|e| SetupError::file(key, format!("does not match the certificate ({e})")))
+        }
+        (Some(_), None) => Err(SetupError::plain(
+            "a client certificate needs its private key file too",
+        )),
+        (None, Some(_)) => Err(SetupError::plain(
+            "a client key needs its certificate file too",
+        )),
+    }
 }
 
-fn webpki(provider: Arc<CryptoProvider>) -> Result<Arc<WebPkiServerVerifier>, String> {
+fn read(path: &Path) -> Result<Vec<u8>, SetupError> {
+    std::fs::read(path).map_err(|e| SetupError::file(path, format!("cannot be read ({e})")))
+}
+
+fn read_certs(path: &Path) -> Result<Vec<CertificateDer<'static>>, SetupError> {
+    let pem = read(path)?;
+    let certs = CertificateDer::pem_slice_iter(&pem)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| SetupError::file(path, format!("is not a PEM certificate file ({e})")))?;
+    if certs.is_empty() {
+        return Err(SetupError::file(path, "contains no PEM certificate"));
+    }
+    Ok(certs)
+}
+
+fn read_key(path: &Path) -> Result<PrivateKeyDer<'static>, SetupError> {
+    let pem = read(path)?;
+    PrivateKeyDer::from_pem_slice(&pem).map_err(|e| {
+        SetupError::file(
+            path,
+            format!("is not an unencrypted PEM private key (PKCS#8, PKCS#1 or SEC1) ({e})"),
+        )
+    })
+}
+
+fn ca_roots(path: &Path) -> Result<RootCertStore, SetupError> {
+    let mut roots = RootCertStore::empty();
+    let (added, _) = roots.add_parsable_certificates(read_certs(path)?);
+    if added == 0 {
+        return Err(SetupError::file(path, "contains no usable CA certificate"));
+    }
+    Ok(roots)
+}
+
+fn native_roots() -> Result<RootCertStore, SetupError> {
     let native = rustls_native_certs::load_native_certs();
     let mut roots = RootCertStore::empty();
     roots.add_parsable_certificates(native.certs);
     if roots.is_empty() {
-        return Err("no trusted root certificates were found on this system".into());
+        return Err(SetupError::plain(
+            "no trusted root certificates were found on this system",
+        ));
     }
+    Ok(roots)
+}
+
+fn webpki(
+    roots: RootCertStore,
+    provider: Arc<CryptoProvider>,
+) -> Result<Arc<WebPkiServerVerifier>, SetupError> {
     WebPkiServerVerifier::builder_with_provider(Arc::new(roots), provider)
         .build()
-        .map_err(|e| e.to_string())
+        .map_err(|e| SetupError::plain(e.to_string()))
 }
 
 /// `require`/`prefer`: encrypt, but do not authenticate the server (libpq behaviour).

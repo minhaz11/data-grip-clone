@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tx-rollback"
+description = "Enables the tx_rollback command without any pre-configured scope."
+commands.allow = ["tx_rollback"]
+
+[[permission]]
+identifier = "deny-tx-rollback"
+description = "Denies the tx_rollback command without any pre-configured scope."
+commands.deny = ["tx_rollback"]

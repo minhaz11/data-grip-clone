@@ -4,6 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum ObjectType {
     Table,
@@ -13,14 +14,17 @@ pub enum ObjectType {
 
 /// How to load one level of the tree.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(
     tag = "level",
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
 pub enum MetadataRequest {
-    /// Top level of a data source: its schemas.
+    /// Top level of a data source: its schemas within the schema scope.
     Schemas,
+    /// Every schema the user can see, ignoring the schema scope (for the scope selector).
+    AllSchemas,
     /// Object groups inside a schema ("Tables", "Views", ...), with counts.
     SchemaGroups {
         schema: String,
@@ -44,12 +48,46 @@ pub enum MetadataRequest {
         schema: String,
         table: String,
     },
-    /// Every table and view the user can see, flat, for completion. Nodes carry the schema in
-    /// `detail` and `key = "schema.name"`.
+    /// Primary key, unique and exclusion constraints of a table.
+    Keys {
+        schema: String,
+        table: String,
+    },
+    /// Foreign keys a table declares (references to other tables).
+    ForeignKeys {
+        schema: String,
+        table: String,
+    },
+    Checks {
+        schema: String,
+        table: String,
+    },
+    Triggers {
+        schema: String,
+        table: String,
+    },
+    /// Functions and procedures in a schema (overloads are separate nodes).
+    Routines {
+        schema: String,
+    },
+    Sequences {
+        schema: String,
+    },
+    /// Every table and view the user can see in the schema scope, flat, for completion. Nodes
+    /// carry the schema in `detail` and `key = "schema.name"`.
     Relations,
+    /// Functions callable from SQL, flat, for completion: user schemas in scope and the useful
+    /// `pg_catalog` ones (not type I/O, operator or internal-argument functions). Nodes carry
+    /// the signature in `detail` and `key = "schema\u{1f}name(arguments)"`.
+    Functions,
+    /// Every table, view, materialized view, foreign table, sequence and user routine in the
+    /// schema scope, flat, for the search palette. Nodes carry the schema in `detail`; routine
+    /// keys are `r:name(identity arguments)`, others `o:name`.
+    Catalog,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum MetaKind {
     Schema,
@@ -59,9 +97,16 @@ pub enum MetaKind {
     MaterializedView,
     Column,
     Index,
+    Key,
+    ForeignKey,
+    Check,
+    Trigger,
+    Routine,
+    Sequence,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct MetaNode {
     /// Unique among siblings and stable across refreshes (used for expansion state).
@@ -70,15 +115,19 @@ pub struct MetaNode {
     pub name: String,
     /// Secondary text: column type, index definition, object comment.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub detail: Option<String>,
     /// For groups: number of children, when cheap to know up front.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub count: Option<u64>,
     /// Short flags such as "pk", "not null", "unique", "primary".
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[cfg_attr(feature = "ts", ts(optional = nullable))]
     pub flags: Vec<String>,
     /// `None` for leaves.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub children: Option<MetadataRequest>,
 }
 

@@ -72,6 +72,25 @@ pub fn unknown_cursor() -> DbError {
     }
 }
 
+/// A read-only source's transaction was switched to read-write (and has been rolled back).
+pub fn read_only_violation() -> DbError {
+    DbError {
+        message: "This data source is read-only, but the statement made the transaction \
+                  read-write, so the transaction was rolled back."
+            .into(),
+        detail: None,
+        hint: Some(
+            "For a guarantee the server enforces, connect with a role that has no write \
+             privileges."
+                .into(),
+        ),
+        sqlstate: Some("25006".into()),
+        position: None,
+        connection_lost: false,
+        cancelled: false,
+    }
+}
+
 pub fn session_closed() -> DbError {
     DbError {
         message: "The connection is closed.".into(),
@@ -105,11 +124,17 @@ pub fn timeout(params: &ConnectParams, after: Duration) -> ConnectError {
     )
 }
 
-pub fn tls_setup(detail: String) -> ConnectError {
+pub fn tls_setup(e: crate::tls::SetupError) -> ConnectError {
     err(
         Kind::Tls,
-        format!("Could not set up TLS: {detail}."),
-        "Choose another SSL mode or fix the system certificate store.",
+        format!("Could not set up TLS: {}.", e.message),
+        match e.file {
+            Some(_) => "Choose the right PEM file on the TLS tab.",
+            None => {
+                "Check the files on the TLS tab, choose another SSL mode, or fix the system \
+                     certificate store."
+            }
+        },
     )
 }
 
@@ -278,6 +303,7 @@ mod tests {
             connect_timeout: Duration::from_secs(3),
             read_only: false,
             application_name: "quarry".into(),
+            options: Default::default(),
         }
     }
 

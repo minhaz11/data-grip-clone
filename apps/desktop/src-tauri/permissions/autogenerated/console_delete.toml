@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-console-delete"
+description = "Enables the console_delete command without any pre-configured scope."
+commands.allow = ["console_delete"]
+
+[[permission]]
+identifier = "deny-console-delete"
+description = "Denies the console_delete command without any pre-configured scope."
+commands.deny = ["console_delete"]

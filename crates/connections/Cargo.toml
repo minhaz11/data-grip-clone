@@ -12,10 +12,18 @@ quarry-secrets.workspace = true
 quarry-db-core.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
 uuid = { version = "1.28.0", features = ["v4"] }
+ts-rs = { workspace = true, optional = true }
+
+[features]
+# TypeScript binding derives, used by the desktop crate's bindings test.
+ts = ["dep:ts-rs"]
 
 [dev-dependencies]
+quarry-logging.workspace = true
 serde_json.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true

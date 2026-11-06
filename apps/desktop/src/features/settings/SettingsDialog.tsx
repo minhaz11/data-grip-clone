@@ -1,20 +1,49 @@
 import { useState } from 'react';
+import { AiPanel } from './AiPanel';
+import { hasBlockingConflicts, KeymapPanel } from './KeymapPanel';
+import { SnippetsPanel } from './SnippetsPanel';
 import { Modal } from '../../components/ui/Modal';
 import { useSettings } from '../../app/settingsStore';
-import type { Settings, ThemePreference } from '../../ipc/types';
+import type {
+  OutsideStatement,
+  ResultTabs,
+  SelectionRun,
+  Settings,
+  ThemePreference,
+} from '../../ipc/types';
 
 export const FONT_SIZE_RANGE = { min: 9, max: 32 } as const;
+/** Time limits in seconds (matches the backend's `Settings::MAX_SECONDS`). */
+export const MAX_SECONDS = 86_400;
+
+/** Query history retention (matches `Settings::HISTORY_LIMIT_RANGE` and `MAX_HISTORY_DAYS`). */
+export const HISTORY_LIMIT_RANGE = { min: 100, max: 1_000_000 } as const;
+export const MAX_HISTORY_DAYS = 3_650;
+
+const validSeconds = (n: number) => Number.isInteger(n) && n >= 0 && n <= MAX_SECONDS;
+const inRange = (n: number, min: number, max: number) =>
+  Number.isInteger(n) && n >= min && n <= max;
 
 export function SettingsDialog({ onClose }: { onClose(): void }) {
   const current = useSettings((s) => s.settings);
   const update = useSettings((s) => s.update);
   const error = useSettings((s) => s.error);
   const [draft, setDraft] = useState<Settings>(current);
+  const [page, setPage] = useState<'general' | 'keymap' | 'snippets' | 'ai'>('general');
 
   const fontSizeValid =
     Number.isInteger(draft.editorFontSize) &&
     draft.editorFontSize >= FONT_SIZE_RANGE.min &&
     draft.editorFontSize <= FONT_SIZE_RANGE.max;
+
+  const timesValid = validSeconds(draft.statementTimeoutSecs) && validSeconds(draft.longQuerySecs);
+  const historyValid =
+    inRange(draft.historyLimit, HISTORY_LIMIT_RANGE.min, HISTORY_LIMIT_RANGE.max) &&
+    inRange(draft.historyMaxAgeDays, 0, MAX_HISTORY_DAYS) &&
+    inRange(draft.revisionLimit, 1, 1000) &&
+    inRange(draft.revisionMaxAgeDays, 0, MAX_HISTORY_DAYS) &&
+    inRange(draft.revisionIntervalMins, 1, 240);
+  const keymapValid = !hasBlockingConflicts(draft.keymap);
 
   async function apply() {
     await update(draft);
@@ -25,6 +54,7 @@ export function SettingsDialog({ onClose }: { onClose(): void }) {
     <Modal
       title="Settings"
       onClose={onClose}
+      width={page === 'general' ? 560 : 760}
       footer={
         <>
           <button
@@ -37,7 +67,7 @@ export function SettingsDialog({ onClose }: { onClose(): void }) {
           <button
             type="button"
             onClick={apply}
-            disabled={!fontSizeValid}
+            disabled={!fontSizeValid || !timesValid || !historyValid || !keymapValid}
             className="rounded bg-accent px-3 py-1 text-accent-fg disabled:opacity-50"
           >
             Save
@@ -45,7 +75,59 @@ export function SettingsDialog({ onClose }: { onClose(): void }) {
         </>
       }
     >
-      <div className="grid grid-cols-[120px_1fr] items-center gap-x-3 gap-y-3">
+      <div role="tablist" aria-label="Settings pages" className="mb-3 flex gap-1">
+        {(
+          [
+            ['general', 'General'],
+            ['keymap', 'Keymap'],
+            ['snippets', 'Snippets'],
+            ['ai', 'AI'],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            id={`settings-tab-${id}`}
+            aria-selected={page === id}
+            aria-controls={`settings-page-${id}`}
+            onClick={() => setPage(id)}
+            className={`rounded px-3 py-1 ${page === id ? 'bg-selected' : 'hover:bg-hover'}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {page === 'ai' && (
+        <div role="tabpanel" id="settings-page-ai" aria-labelledby="settings-tab-ai">
+          <AiPanel />
+        </div>
+      )}
+      {page === 'snippets' && (
+        <div role="tabpanel" id="settings-page-snippets" aria-labelledby="settings-tab-snippets">
+          <SnippetsPanel />
+        </div>
+      )}
+      {page === 'keymap' && (
+        <div role="tabpanel" id="settings-page-keymap" aria-labelledby="settings-tab-keymap">
+          <KeymapPanel
+            overrides={draft.keymap}
+            onChange={(keymap) => setDraft({ ...draft, keymap: keymap as Settings['keymap'] })}
+          />
+          {!keymapValid && (
+            <p role="alert" className="mt-2 text-danger">
+              Two actions in the same place share a shortcut. Change one before saving.
+            </p>
+          )}
+        </div>
+      )}
+      <div
+        role="tabpanel"
+        id="settings-page-general"
+        aria-labelledby="settings-tab-general"
+        hidden={page !== 'general'}
+        className={`${page === 'general' ? 'grid' : 'hidden'} grid-cols-[190px_1fr] items-center gap-x-3 gap-y-3`}
+      >
         <label htmlFor="settings-theme">Theme</label>
         <select
           id="settings-theme"
@@ -78,6 +160,97 @@ export function SettingsDialog({ onClose }: { onClose(): void }) {
             {FONT_SIZE_RANGE.min}–{FONT_SIZE_RANGE.max} px
           </span>
         </div>
+        <label htmlFor="settings-result-tabs">Results of a new run</label>
+        <select
+          id="settings-result-tabs"
+          value={draft.resultTabs}
+          onChange={(e) => setDraft({ ...draft, resultTabs: e.target.value as ResultTabs })}
+          className="rounded border border-border bg-bg px-2 py-1"
+        >
+          <option value="reuse">Replace the previous results (pinned ones stay)</option>
+          <option value="new">Keep the previous results as tabs</option>
+        </select>
+        <label htmlFor="settings-outside">Caret between statements</label>
+        <select
+          id="settings-outside"
+          value={draft.runOutsideStatement}
+          onChange={(e) =>
+            setDraft({ ...draft, runOutsideStatement: e.target.value as OutsideStatement })
+          }
+          className="rounded border border-border bg-bg px-2 py-1"
+        >
+          <option value="nearest">Run the statement before the caret</option>
+          <option value="ask">Ask which statement to run</option>
+        </select>
+        <label htmlFor="settings-selection">Selection of several statements</label>
+        <select
+          id="settings-selection"
+          value={draft.runSelection}
+          onChange={(e) => setDraft({ ...draft, runSelection: e.target.value as SelectionRun })}
+          className="rounded border border-border bg-bg px-2 py-1"
+        >
+          <option value="all">Run them all</option>
+          <option value="ask">Ask: one of them or all</option>
+        </select>
+        <SecondsField
+          id="settings-timeout"
+          label="Statement timeout"
+          hint="seconds, 0 = no limit"
+          value={draft.statementTimeoutSecs}
+          onChange={(statementTimeoutSecs) => setDraft({ ...draft, statementTimeoutSecs })}
+        />
+        <SecondsField
+          id="settings-long-query"
+          label="Long-query notice after"
+          hint="seconds, 0 = never"
+          value={draft.longQuerySecs}
+          onChange={(longQuerySecs) => setDraft({ ...draft, longQuerySecs })}
+        />
+        <NumberField
+          id="settings-history-limit"
+          label="Query history per data source"
+          hint={`entries, ${HISTORY_LIMIT_RANGE.min.toLocaleString()}-${HISTORY_LIMIT_RANGE.max.toLocaleString()}`}
+          min={HISTORY_LIMIT_RANGE.min}
+          max={HISTORY_LIMIT_RANGE.max}
+          value={draft.historyLimit}
+          onChange={(historyLimit) => setDraft({ ...draft, historyLimit })}
+        />
+        <NumberField
+          id="settings-history-age"
+          label="Remove history older than"
+          hint="days, 0 = keep regardless of age"
+          min={0}
+          max={MAX_HISTORY_DAYS}
+          value={draft.historyMaxAgeDays}
+          onChange={(historyMaxAgeDays) => setDraft({ ...draft, historyMaxAgeDays })}
+        />
+        <NumberField
+          id="settings-revision-limit"
+          label="Local history per console"
+          hint="versions, 1-1,000"
+          min={1}
+          max={1000}
+          value={draft.revisionLimit}
+          onChange={(revisionLimit) => setDraft({ ...draft, revisionLimit })}
+        />
+        <NumberField
+          id="settings-revision-age"
+          label="Remove versions older than"
+          hint="days, 0 = keep regardless of age"
+          min={0}
+          max={MAX_HISTORY_DAYS}
+          value={draft.revisionMaxAgeDays}
+          onChange={(revisionMaxAgeDays) => setDraft({ ...draft, revisionMaxAgeDays })}
+        />
+        <NumberField
+          id="settings-revision-interval"
+          label="Keep a version while editing every"
+          hint="minutes, 1-240"
+          min={1}
+          max={240}
+          value={draft.revisionIntervalMins}
+          onChange={(revisionIntervalMins) => setDraft({ ...draft, revisionIntervalMins })}
+        />
       </div>
       {error && (
         <p role="alert" className="mt-3 text-danger">
@@ -85,5 +258,56 @@ export function SettingsDialog({ onClose }: { onClose(): void }) {
         </p>
       )}
     </Modal>
+  );
+}
+
+function SecondsField(props: {
+  id: string;
+  label: string;
+  hint: string;
+  value: number;
+  onChange(value: number): void;
+}) {
+  return <NumberField {...props} min={0} max={MAX_SECONDS} />;
+}
+
+function NumberField({
+  id,
+  label,
+  hint,
+  min,
+  max,
+  value,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  hint: string;
+  min: number;
+  max: number;
+  value: number;
+  onChange(value: number): void;
+}) {
+  const valid = inRange(value, min, max);
+  return (
+    <>
+      <label htmlFor={id}>{label}</label>
+      <div>
+        <input
+          id={id}
+          type="number"
+          min={min}
+          max={max}
+          value={Number.isNaN(value) ? '' : value}
+          aria-invalid={!valid}
+          aria-describedby={`${id}-hint`}
+          onChange={(e) => onChange(e.target.valueAsNumber)}
+          className="w-24 rounded border border-border bg-bg px-2 py-1"
+        />
+        <span id={`${id}-hint`} className={valid ? 'ml-2 text-muted' : 'ml-2 text-danger'}>
+          {hint}
+        </span>
+      </div>
+    </>
   );
 }

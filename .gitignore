@@ -8,3 +8,5 @@ coverage/
 .env.*
 !.env.example
 /apps/desktop/src-tauri/gen/schemas/
+test-results/
+playwright-report/

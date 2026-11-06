@@ -1,14 +1,19 @@
-import { Eye, Lock, Plus, RotateCcw, Save } from 'lucide-react';
+import { CopyPlus, Eye, Lock, Plus, RotateCcw, Save, Undo2 } from 'lucide-react';
 import { useState } from 'react';
 import { askConfirm } from '../../app/dialogs';
+import { useKeymap } from '../../app/keymapStore';
+import { chordLabel, shortcutLabel } from '../../lib/keymap';
 import { Modal } from '../../components/ui/Modal';
 import { backend } from '../../ipc/client';
-import type { ConnectionProfile, EditStatement, EditTarget } from '../../ipc/types';
+import type { ConnectionProfile, EditStatement, EditTarget, SessionKey } from '../../ipc/types';
 import { toAppError } from '../../lib/errors';
 import { addInsert, pendingCount, toChanges, type PendingEdits } from './editsModel';
+import type { SelectionActions } from './ResultGrid';
 
 interface Props {
   source: ConnectionProfile | undefined;
+  /** Session the result came from (previews are built there). */
+  session: SessionKey;
   target: EditTarget | null;
   /** Why the result cannot be edited, when `target` is null. */
   reason?: string;
@@ -19,6 +24,10 @@ interface Props {
   onChange(f: (e: PendingEdits) => PendingEdits): void;
   onRevert(): void;
   onSubmit(): Promise<void>;
+  /** Actions over the grid's selected rows and cells. */
+  actions?: SelectionActions;
+  /** Shown first (result pinning). */
+  leading?: React.ReactNode;
 }
 
 /** Shows a value the way it will be bound: quoted text, or NULL. */
@@ -28,6 +37,7 @@ export function formatParam(v: string | null): string {
 
 export function EditBar({
   source,
+  session,
   target,
   reason,
   edits,
@@ -37,7 +47,10 @@ export function EditBar({
   onChange,
   onRevert,
   onSubmit,
+  actions,
+  leading,
 }: Props) {
+  const keymap = useKeymap();
   const [preview, setPreview] = useState<EditStatement[] | 'loading' | { error: string } | null>(
     null,
   );
@@ -46,6 +59,7 @@ export function EditBar({
   if (!target) {
     return (
       <div className="flex h-7 shrink-0 items-center gap-1.5 border-b border-border bg-panel px-2 text-[12px] text-muted">
+        {leading}
         <Lock size={12} aria-hidden /> <span className="truncate">Read-only: {reason}</span>
       </div>
     );
@@ -53,7 +67,7 @@ export function EditBar({
 
   async function loadStatements(): Promise<EditStatement[]> {
     if (!source || !target) return [];
-    return backend.resultPreviewEdits(source.id, target, toChanges(edits));
+    return backend.resultPreviewEdits(session, target, toChanges(edits));
   }
 
   async function openPreview() {
@@ -103,6 +117,7 @@ export function EditBar({
       aria-label="Edit rows"
       className="flex h-7 shrink-0 items-center gap-1 border-b border-border bg-panel px-2 text-[12px]"
     >
+      {leading}
       <span
         className="truncate font-mono text-muted"
         title="Rows are edited in this table, identified by its primary key"
@@ -113,11 +128,42 @@ export function EditBar({
         type="button"
         disabled={submitting}
         onClick={() => onChange((e) => addInsert(e, `new-${Date.now()}-${e.inserts.length}`))}
-        title="Add a row (Insert). Edit a cell with double-click, F2 or Enter; Delete marks a row for deletion."
+        title={`Add a row (${shortcutLabel('grid.addRow', keymap)}). Edit a cell with double-click or ${keymap['grid.editCell'].map((c) => chordLabel(c)).join(' or ')}; ${shortcutLabel('grid.deleteRows', keymap)} marks a row for deletion.`}
         className="flex items-center gap-0.5 rounded px-1.5 py-0.5 hover:bg-hover disabled:opacity-40"
       >
         <Plus size={12} aria-hidden /> Row
       </button>
+      {actions && (
+        <>
+          <button
+            type="button"
+            disabled={submitting || actions.rows === 0}
+            onClick={actions.clone}
+            title="Add new rows copying the selected ones (primary key left to its default)"
+            className="flex items-center gap-0.5 rounded px-1.5 py-0.5 hover:bg-hover disabled:opacity-40"
+          >
+            <CopyPlus size={12} aria-hidden /> Clone
+          </button>
+          <button
+            type="button"
+            disabled={submitting || actions.rows === 0}
+            onClick={actions.setDefault}
+            title="Set the selected cells to their column default"
+            className="rounded px-1.5 py-0.5 hover:bg-hover disabled:opacity-40"
+          >
+            Set DEFAULT
+          </button>
+          <button
+            type="button"
+            disabled={submitting || actions.rows === 0 || count === 0}
+            onClick={actions.revert}
+            title="Drop pending changes of the selected rows"
+            className="flex items-center gap-0.5 rounded px-1.5 py-0.5 hover:bg-hover disabled:opacity-40"
+          >
+            <Undo2 size={12} aria-hidden /> Revert selected
+          </button>
+        </>
+      )}
       <span className="ml-auto text-muted" aria-live="polite">
         {submitError ? (
           <span role="alert" className="text-danger">

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-console-duplicate"
+description = "Enables the console_duplicate command without any pre-configured scope."
+commands.allow = ["console_duplicate"]
+
+[[permission]]
+identifier = "deny-console-duplicate"
+description = "Denies the console_duplicate command without any pre-configured scope."
+commands.deny = ["console_duplicate"]

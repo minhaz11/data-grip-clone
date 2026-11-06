@@ -8,7 +8,11 @@ export interface TableRef {
 
 export type CompletionContext =
   | { kind: 'members'; qualifier: string; word: string }
-  | { kind: 'relations'; word: string }
+  | {
+      kind: 'relations';
+      word: string;
+      /** Right after JOIN: foreign-key joins are offered. */ join?: boolean;
+    }
   | { kind: 'general'; word: string };
 
 const RELATION_KEYWORDS = new Set(['FROM', 'JOIN', 'UPDATE', 'INTO', 'TABLE']);
@@ -73,6 +77,9 @@ export function completionContextAt(
 
   const previous = /([A-Za-z_]+)\s*$/.exec(head)?.[1]?.toUpperCase();
   if (previous && RELATION_KEYWORDS.has(previous))
-    return { context: { kind: 'relations', word }, statement };
+    return {
+      context: { kind: 'relations', word, ...(previous === 'JOIN' ? { join: true } : {}) },
+      statement,
+    };
   return { context: { kind: 'general', word }, statement };
 }

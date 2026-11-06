@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classify, modifies } from './classify';
+import { blockedOnReadOnly, classify, modifies } from './classify';
 
 describe('classify', () => {
   it.each([
@@ -61,4 +61,29 @@ describe('classify', () => {
       ),
     ).toEqual([false, false, true, true, true]);
   });
+
+  it.each([
+    ['begin read write', 'starts a read-write transaction'],
+    [
+      'START TRANSACTION ISOLATION LEVEL SERIALIZABLE, READ WRITE',
+      'starts a read-write transaction',
+    ],
+    ['set transaction read write', 'makes the transaction read-write'],
+    ['set session characteristics as transaction read write', 'makes the transaction read-write'],
+    ['set default_transaction_read_only = off', 'changes the read-only setting'],
+    ["SET LOCAL transaction_read_only TO 'off'", 'changes the read-only setting'],
+  ])('flags %s as unlocking writes on read-only sources', (sql, reason) => {
+    const c = classify(sql);
+    expect(c.kind).toBe('session');
+    expect(c.unlocksWrites).toBe(reason);
+    expect(modifies(c)).toBe(false);
+    expect(blockedOnReadOnly(c)).toBe(true);
+  });
+
+  it.each(['begin', 'begin read only', 'set search_path = shop', 'reset all', 'commit'])(
+    'leaves %s runnable on read-only sources',
+    (sql) => {
+      expect(blockedOnReadOnly(classify(sql))).toBe(false);
+    },
+  );
 });

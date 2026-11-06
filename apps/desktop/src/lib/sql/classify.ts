@@ -7,6 +7,8 @@ export interface Classification {
   kind: StatementKind;
   /** Why it is destructive (irreversible or touching every row), if it is. */
   destructive?: string;
+  /** Why it could let later statements write on a read-only source, if it could. */
+  unlocksWrites?: string;
 }
 
 const READ = new Set(['SELECT', 'VALUES', 'TABLE', 'SHOW', 'FETCH']);
@@ -119,8 +121,28 @@ export function classify(sql: string): Classification {
       return { kind: 'ddl', destructive: 'ALTER … DROP' };
     return { kind: 'ddl' };
   }
-  if (SESSION.has(first)) return { kind: 'session' };
+  if (SESSION.has(first)) {
+    const unlocksWrites = readWriteSwitch(first, top);
+    return unlocksWrites ? { kind: 'session', unlocksWrites } : { kind: 'session' };
+  }
   return { kind: 'unknown' };
+}
+
+/** Statements that turn a read-only session or transaction read-write (the server re-checks). */
+function readWriteSwitch(first: string, top: string[]): string | undefined {
+  const readWrite = top.some((w, i) => w === 'READ' && top[i + 1] === 'WRITE');
+  if ((first === 'BEGIN' || first === 'START') && readWrite) {
+    return 'starts a read-write transaction';
+  }
+  if (first === 'SET') {
+    if (top.includes('TRANSACTION') && readWrite) {
+      return 'makes the transaction read-write';
+    }
+    if (top.includes('DEFAULT_TRANSACTION_READ_ONLY') || top.includes('TRANSACTION_READ_ONLY')) {
+      return 'changes the read-only setting';
+    }
+  }
+  return undefined;
 }
 
 function destructiveDml(verb: string, top: string[]): string | undefined {
@@ -133,4 +155,9 @@ function destructiveDml(verb: string, top: string[]): string | undefined {
 /** Writes, DDL and unclassifiable statements: blocked on read-only sources, confirmed on production. */
 export function modifies(c: Classification): boolean {
   return c.kind === 'write' || c.kind === 'ddl' || c.kind === 'unknown';
+}
+
+/** Everything a read-only source refuses: modifying statements and read-write switches. */
+export function blockedOnReadOnly(c: Classification): boolean {
+  return modifies(c) || c.unlocksWrites !== undefined;
 }

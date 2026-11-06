@@ -1,4 +1,11 @@
-import type { AppError, ConnectionProfile, MetaNode, MetadataRequest } from '../../ipc/types';
+import type {
+  AppError,
+  ConnectionProfile,
+  Folder,
+  MetaKind,
+  MetaNode,
+  MetadataRequest,
+} from '../../ipc/types';
 
 /** Separates path segments in tree keys; cannot appear in identifiers typed by users. */
 export const SEP = '\u001f';
@@ -13,12 +20,31 @@ export type Loaded =
 interface Base {
   key: string;
   level: number;
+}
+
+interface InSource extends Base {
   profile: ConnectionProfile;
 }
 
 export type Row =
-  | (Base & { type: 'source'; expanded: boolean; posinset: number; setsize: number })
   | (Base & {
+      type: 'folder';
+      folder: Folder;
+      /** Data sources in the folder (all of them, also when a filter hides some). */
+      count: number;
+      expanded: boolean;
+      posinset: number;
+      setsize: number;
+    })
+  | (InSource & {
+      type: 'source';
+      /** The folder row's key, or `null` at the top level. */
+      parentKey: string | null;
+      expanded: boolean;
+      posinset: number;
+      setsize: number;
+    })
+  | (InSource & {
       type: 'node';
       node: MetaNode;
       parentKey: string;
@@ -26,7 +52,7 @@ export type Row =
       posinset: number;
       setsize: number;
     })
-  | (Base & {
+  | (InSource & {
       type: 'status';
       parentKey: string;
       status: 'loading' | 'error' | 'empty';
@@ -37,18 +63,40 @@ export type Row =
 
 export const childKey = (parentKey: string, node: MetaNode) => `${parentKey}${SEP}${node.key}`;
 
+/** The object kind each schema group holds, for the explorer's type filter. */
+export const GROUP_KIND: Record<string, MetaKind> = {
+  'g:tables': 'table',
+  'g:views': 'view',
+  'g:matviews': 'materialized_view',
+  'g:routines': 'routine',
+  'g:sequences': 'sequence',
+};
+
+/** Whether the type filter hides `node` (an object of a hidden kind, or its group). */
+export function hiddenBy(kinds: ReadonlySet<MetaKind>, node: MetaNode): boolean {
+  const grouped = node.kind === 'group' ? GROUP_KIND[node.key] : undefined;
+  return kinds.has(node.kind) || (grouped !== undefined && kinds.has(grouped));
+}
+
+/** Key of a folder row; cannot collide with data source ids (UUIDs). */
+export const folderKey = (folderId: string) => `#folder${SEP}${folderId}`;
+
 /** True for `key` itself and every key below it. */
 export const isWithin = (key: string, root: string) => key === root || key.startsWith(root + SEP);
 
 /**
- * Visible rows, depth first. Without a filter, expanded nodes show their children (or a status
- * row). With a filter, only loaded nodes are searched; ancestors of matches are shown expanded.
+ * Visible rows, depth first: folders (open unless collapsed) with their data sources, then the
+ * data sources outside any folder. Without a filter, expanded nodes show their children (or a
+ * status row). With a filter, only loaded nodes are searched; ancestors of matches are shown
+ * expanded, and folders without a match are hidden.
  */
 export function flattenTree(
   profiles: ConnectionProfile[],
   children: Record<string, Loaded | undefined>,
   expanded: Record<string, boolean | undefined>,
   filter: string,
+  folders: Folder[] = [],
+  hiddenKinds: ReadonlySet<MetaKind> = new Set(),
 ): Row[] {
   const rows: Row[] = [];
   const needle = filter.trim().toLowerCase();
@@ -113,9 +161,10 @@ export function flattenTree(
     }
     if (loaded?.status !== 'loaded') return;
 
+    const shown = loaded.nodes.filter((n) => !hiddenBy(hiddenKinds, n));
     const visible = needle
-      ? loaded.nodes.filter((n) => matches(n.name) || subtreeMatches(childKey(parentKey, n)))
-      : loaded.nodes;
+      ? shown.filter((n) => matches(n.name) || subtreeMatches(childKey(parentKey, n)))
+      : shown;
     visible.forEach((node, i) => {
       const key = childKey(parentKey, node);
       const open = node.children !== undefined && (needle ? subtreeMatches(key) : !!expanded[key]);
@@ -134,21 +183,61 @@ export function flattenTree(
     });
   }
 
-  const sources = needle
-    ? profiles.filter((p) => matches(p.name) || subtreeMatches(p.id))
-    : profiles;
-  sources.forEach((profile, i) => {
-    const open = needle ? subtreeMatches(profile.id) : !!expanded[profile.id];
+  function emitSources(list: ConnectionProfile[], level: number, parentKey: string | null) {
+    list.forEach((profile, i) => {
+      const open = needle ? subtreeMatches(profile.id) : !!expanded[profile.id];
+      rows.push({
+        type: 'source',
+        key: profile.id,
+        level,
+        profile,
+        parentKey,
+        expanded: open,
+        posinset: i + 1,
+        setsize: list.length,
+      });
+      if (open) {
+        emitChildren(profile.id, level + 1, profile, ROOT_REQUEST);
+      }
+    });
+  }
+
+  const known = new Set(folders.map((f) => f.id));
+  const visible = (p: ConnectionProfile) => !needle || matches(p.name) || subtreeMatches(p.id);
+  const grouped = folders
+    .map((folder) => {
+      const members = profiles.filter((p) => p.folderId === folder.id);
+      return { folder, members, shown: members.filter(visible) };
+    })
+    .filter((g) => !needle || g.shown.length > 0);
+  // A data source whose folder is gone shows at the top level.
+  const loose = profiles.filter((p) => !p.folderId || !known.has(p.folderId)).filter(visible);
+  const setsize = grouped.length + loose.length;
+  grouped.forEach(({ folder, members, shown }, i) => {
+    const key = folderKey(folder.id);
+    const open = needle ? true : expanded[key] !== false;
     rows.push({
-      type: 'source',
-      key: profile.id,
+      type: 'folder',
+      key,
       level: 1,
-      profile,
+      folder,
+      count: members.length,
       expanded: open,
       posinset: i + 1,
-      setsize: sources.length,
+      setsize,
     });
-    if (open) emitChildren(profile.id, 2, profile, ROOT_REQUEST);
+    if (open) {
+      emitSources(shown, 2, key);
+    }
   });
+  const offset = grouped.length;
+  emitSources(loose, 1, null);
+  // Top-level data sources follow the folders in one sibling set.
+  for (const r of rows) {
+    if (r.type === 'source' && r.parentKey === null) {
+      r.posinset += offset;
+      r.setsize = setsize;
+    }
+  }
   return rows;
 }

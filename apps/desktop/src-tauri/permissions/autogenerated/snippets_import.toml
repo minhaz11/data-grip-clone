@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-snippets-import"
+description = "Enables the snippets_import command without any pre-configured scope."
+commands.allow = ["snippets_import"]
+
+[[permission]]
+identifier = "deny-snippets-import"
+description = "Denies the snippets_import command without any pre-configured scope."
+commands.deny = ["snippets_import"]

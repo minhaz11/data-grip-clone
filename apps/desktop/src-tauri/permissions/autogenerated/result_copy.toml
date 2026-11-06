@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-result-copy"
+description = "Enables the result_copy command without any pre-configured scope."
+commands.allow = ["result_copy"]
+
+[[permission]]
+identifier = "deny-result-copy"
+description = "Denies the result_copy command without any pre-configured scope."
+commands.deny = ["result_copy"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ssh-profiles-list"
+description = "Enables the ssh_profiles_list command without any pre-configured scope."
+commands.allow = ["ssh_profiles_list"]
+
+[[permission]]
+identifier = "deny-ssh-profiles-list"
+description = "Denies the ssh_profiles_list command without any pre-configured scope."
+commands.deny = ["ssh_profiles_list"]

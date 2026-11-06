@@ -4,11 +4,25 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Streaming export of result sets (CSV, JSON)."
+description = "Streaming export of result sets and import of files (CSV, TSV, JSON)."
 
 [dependencies]
+chardetng = "1.0.0"
+encoding_rs = "0.8.42"
+encoding_rs_io = "0.1.8"
 quarry-db-core.workspace = true
+serde.workspace = true
 serde_json = { version = "1.0.154", features = ["raw_value"] }
+thiserror.workspace = true
+tokio = { version = "1.53.3", features = ["sync", "rt", "time", "macros"] }
+ts-rs = { workspace = true, optional = true }
+
+[features]
+# TypeScript binding derives, used by the desktop crate's bindings test.
+ts = ["dep:ts-rs", "quarry-db-core/ts"]
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

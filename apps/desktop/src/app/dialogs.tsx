@@ -1,8 +1,7 @@
 import type { ReactNode } from 'react';
 import { create } from 'zustand';
+import { ChoiceDialog, type Choice } from '../components/ui/ChoiceDialog';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
-import type { ConnectionProfile } from '../ipc/types';
-import { PasswordPrompt } from '../features/connections/PasswordPrompt';
 
 interface ConfirmRequest {
   title: string;
@@ -12,26 +11,60 @@ interface ConfirmRequest {
   resolve(ok: boolean): void;
 }
 
-interface DialogState {
-  confirm: ConfirmRequest | null;
-  password: { profile: ConnectionProfile; resolve(connected: boolean): void } | null;
+interface ChoiceRequest {
+  title: string;
+  body: ReactNode;
+  choices: Choice[];
+  resolve(chosen: boolean): void;
 }
 
-const useDialogs = create<DialogState>(() => ({ confirm: null, password: null }));
+interface CustomRequest {
+  render(done: (value: unknown) => void): ReactNode;
+  resolve(value: unknown): void;
+}
+
+interface DialogState {
+  confirm: ConfirmRequest | null;
+  choice: ChoiceRequest | null;
+  custom: CustomRequest | null;
+}
+
+const useDialogs = create<DialogState>(() => ({
+  confirm: null,
+  choice: null,
+  custom: null,
+}));
 
 /** Resolves true when the user confirms, false when they cancel or close the dialog. */
 export function askConfirm(request: Omit<ConfirmRequest, 'resolve'>): Promise<boolean> {
   return new Promise((resolve) => useDialogs.setState({ confirm: { ...request, resolve } }));
 }
 
-/** Prompts for a password and connects; resolves true once connected. */
-export function askPasswordAndConnect(profile: ConnectionProfile): Promise<boolean> {
-  return new Promise((resolve) => useDialogs.setState({ password: { profile, resolve } }));
+/** Resolves true once one of `choices` has run successfully, false on Cancel. */
+export function askChoice(request: Omit<ChoiceRequest, 'resolve'>): Promise<boolean> {
+  return new Promise((resolve) => useDialogs.setState({ choice: { ...request, resolve } }));
+}
+
+/**
+ * Shows a dialog rendered by `render`; resolves with what it passes to `done` (`null` when it
+ * was cancelled).
+ */
+export function askCustom<T>(
+  render: (done: (value: T | null) => void) => ReactNode,
+): Promise<T | null> {
+  return new Promise((resolve) =>
+    useDialogs.setState({
+      custom: {
+        render: (done) => render((value) => done(value)),
+        resolve: (value) => resolve(value as T | null),
+      },
+    }),
+  );
 }
 
 /** Renders whichever app-level dialog is pending. Mounted once in App. */
 export function DialogHost() {
-  const { confirm, password } = useDialogs();
+  const { confirm, choice, custom } = useDialogs();
   return (
     <>
       {confirm && (
@@ -50,16 +83,26 @@ export function DialogHost() {
           {confirm.body}
         </ConfirmDialog>
       )}
-      {password && (
-        <PasswordPrompt
-          profile={password.profile}
-          onConnected={() => password.resolve(true)}
-          onClose={() => {
-            password.resolve(false);
-            useDialogs.setState({ password: null });
+      {choice && (
+        <ChoiceDialog
+          title={choice.title}
+          choices={choice.choices}
+          onDone={() => {
+            choice.resolve(true);
+            useDialogs.setState({ choice: null });
           }}
-        />
+          onCancel={() => {
+            choice.resolve(false);
+            useDialogs.setState({ choice: null });
+          }}
+        >
+          {choice.body}
+        </ChoiceDialog>
       )}
+      {custom?.render((value) => {
+        custom.resolve(value);
+        useDialogs.setState({ custom: null });
+      })}
     </>
   );
 }

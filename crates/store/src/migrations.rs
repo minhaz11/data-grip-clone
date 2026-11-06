@@ -38,11 +38,137 @@ const MIGRATIONS: &[&str] = &[
          updated_at           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
      ) STRICT;
      CREATE UNIQUE INDEX connections_name_unique ON connections (name COLLATE NOCASE);",
+    // 3: default transaction mode and isolation per data source (M4.6).
+    "ALTER TABLE connections ADD COLUMN tx_mode TEXT NOT NULL DEFAULT 'auto';
+     ALTER TABLE connections ADD COLUMN isolation TEXT NOT NULL DEFAULT 'read_committed';",
+    // 4: query history with full-text search on the statement text (M5.1, ADR-0004).
+    "ALTER TABLE connections ADD COLUMN history_enabled INTEGER NOT NULL DEFAULT 1;
+     CREATE TABLE query_history (
+         id            INTEGER PRIMARY KEY,
+         connection_id TEXT NOT NULL REFERENCES connections (id) ON DELETE CASCADE,
+         console       TEXT,
+         sql           TEXT NOT NULL,
+         started_at    INTEGER NOT NULL,
+         duration_ms   INTEGER NOT NULL,
+         status        TEXT NOT NULL,
+         row_count     INTEGER,
+         error         TEXT,
+         tx_mode       TEXT NOT NULL
+     ) STRICT;
+     CREATE INDEX query_history_by_connection ON query_history (connection_id, id);
+     CREATE INDEX query_history_by_time ON query_history (started_at);
+     CREATE VIRTUAL TABLE query_history_fts USING fts5 (
+         sql, content = 'query_history', content_rowid = 'id', tokenize = 'unicode61'
+     );
+     CREATE TRIGGER query_history_ai AFTER INSERT ON query_history BEGIN
+         INSERT INTO query_history_fts (rowid, sql) VALUES (new.id, new.sql);
+     END;
+     CREATE TRIGGER query_history_ad AFTER DELETE ON query_history BEGIN
+         INSERT INTO query_history_fts (query_history_fts, rowid, sql)
+         VALUES ('delete', old.id, old.sql);
+     END;",
+    // 5: folders and ordering, SSH profiles and trusted host keys, TLS files, connection options
+    // and schema scope (M4.9). Secrets stay in the keyring (ADR-0003); only flags live here.
+    "CREATE TABLE folders (
+         id         TEXT PRIMARY KEY NOT NULL,
+         name       TEXT NOT NULL,
+         color      TEXT,
+         sort_order INTEGER NOT NULL DEFAULT 0
+     ) STRICT;
+     CREATE UNIQUE INDEX folders_name_unique ON folders (name COLLATE NOCASE);
+     CREATE TABLE ssh_profiles (
+         id           TEXT PRIMARY KEY NOT NULL,
+         name         TEXT NOT NULL,
+         host         TEXT NOT NULL,
+         port         INTEGER NOT NULL,
+         username     TEXT NOT NULL,
+         auth         TEXT NOT NULL,
+         key_file     TEXT,
+         save_mode    TEXT NOT NULL,
+         secret_saved INTEGER NOT NULL DEFAULT 0,
+         created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+         updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+     ) STRICT;
+     CREATE UNIQUE INDEX ssh_profiles_name_unique ON ssh_profiles (name COLLATE NOCASE);
+     CREATE TABLE ssh_known_hosts (
+         host        TEXT NOT NULL,
+         port        INTEGER NOT NULL,
+         algorithm   TEXT NOT NULL,
+         fingerprint TEXT NOT NULL,
+         trusted_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+         PRIMARY KEY (host, port)
+     ) STRICT;
+     ALTER TABLE connections ADD COLUMN folder_id TEXT REFERENCES folders (id) ON DELETE SET NULL;
+     ALTER TABLE connections ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
+     ALTER TABLE connections ADD COLUMN ssh_profile_id TEXT REFERENCES ssh_profiles (id);
+     ALTER TABLE connections ADD COLUMN tls_ca_file TEXT;
+     ALTER TABLE connections ADD COLUMN tls_cert_file TEXT;
+     ALTER TABLE connections ADD COLUMN tls_key_file TEXT;
+     ALTER TABLE connections ADD COLUMN keepalive_secs INTEGER NOT NULL DEFAULT 0;
+     ALTER TABLE connections ADD COLUMN auto_disconnect_mins INTEGER NOT NULL DEFAULT 0;
+     ALTER TABLE connections ADD COLUMN startup_sql TEXT NOT NULL DEFAULT '';
+     ALTER TABLE connections ADD COLUMN schema_names TEXT NOT NULL DEFAULT '[]';
+     ALTER TABLE connections ADD COLUMN schema_pattern TEXT NOT NULL DEFAULT '';
+     ALTER TABLE connections ADD COLUMN url_only INTEGER NOT NULL DEFAULT 0;",
+    // 6: local history of console files (M5.2). Keyed by console name; renames move them.
+    "CREATE TABLE console_revisions (
+         id         INTEGER PRIMARY KEY,
+         console    TEXT NOT NULL,
+         created_at INTEGER NOT NULL,
+         reason     TEXT NOT NULL,
+         text       TEXT NOT NULL,
+         size       INTEGER NOT NULL
+     ) STRICT;
+     CREATE INDEX console_revisions_by_console ON console_revisions (console, id);
+     CREATE INDEX console_revisions_by_time ON console_revisions (created_at);",
+    // 7: user snippets (M5.5, ADR-0004). Built-in snippets ship with the UI.
+    "CREATE TABLE snippets (
+         id           TEXT PRIMARY KEY NOT NULL,
+         abbreviation TEXT NOT NULL,
+         description  TEXT NOT NULL,
+         body         TEXT NOT NULL,
+         dialect      TEXT NOT NULL,
+         created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+         updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+     ) STRICT;
+     CREATE UNIQUE INDEX snippets_abbreviation_unique
+         ON snippets (abbreviation COLLATE NOCASE, dialect);",
+    // 8: AI consent per data source and the local AI request log (M6.2, ADR-0005). The log keeps
+    // request bodies exactly as sent; the API key is a header and never part of them.
+    "CREATE TABLE ai_consents (
+         connection_id TEXT PRIMARY KEY NOT NULL REFERENCES connections(id) ON DELETE CASCADE,
+         level         TEXT NOT NULL,
+         rows_always   INTEGER NOT NULL DEFAULT 0,
+         granted_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+     ) STRICT;
+     CREATE TABLE ai_request_log (
+         id              INTEGER PRIMARY KEY,
+         created_at      INTEGER NOT NULL,
+         connection_id   TEXT,
+         connection_name TEXT NOT NULL,
+         action          TEXT NOT NULL,
+         model           TEXT NOT NULL,
+         level           TEXT NOT NULL,
+         rows_sent       INTEGER NOT NULL,
+         payload         TEXT NOT NULL,
+         status          TEXT NOT NULL,
+         response        TEXT,
+         error           TEXT,
+         input_tokens    INTEGER,
+         output_tokens   INTEGER,
+         finished_at     INTEGER
+     ) STRICT;
+     CREATE INDEX ai_request_log_created ON ai_request_log (created_at);",
 ];
 
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
 pub fn migrate(conn: &mut Connection) -> Result<i64, StoreError> {
+    migrate_to(conn, LATEST_VERSION)
+}
+
+/// Applies migrations up to `target` (tests build databases of older versions with this).
+pub(crate) fn migrate_to(conn: &mut Connection, target: i64) -> Result<i64, StoreError> {
     let current: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if current > LATEST_VERSION {
         return Err(StoreError::NewerSchema {
@@ -50,7 +176,12 @@ pub fn migrate(conn: &mut Connection) -> Result<i64, StoreError> {
             supported: LATEST_VERSION,
         });
     }
-    for (index, sql) in MIGRATIONS.iter().enumerate().skip(current as usize) {
+    for (index, sql) in MIGRATIONS
+        .iter()
+        .enumerate()
+        .take(target as usize)
+        .skip(current as usize)
+    {
         let version = index as i64 + 1;
         let tx = conn.transaction()?;
         tx.execute_batch(sql)
@@ -58,5 +189,5 @@ pub fn migrate(conn: &mut Connection) -> Result<i64, StoreError> {
         tx.pragma_update(None, "user_version", version)?;
         tx.commit()?;
     }
-    Ok(LATEST_VERSION)
+    Ok(target.max(current))
 }
